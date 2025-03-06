@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import PIL.Image
 import torch
-from diffusers import ControlNetModel, LCMScheduler, StableDiffusionPipeline, StableDiffusionXLPipeline, DiffusionPipeline
+from diffusers import ControlNetModel, LCMScheduler, StableDiffusionXLPipeline, DiffusionPipeline
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
     retrieve_latents,
@@ -226,6 +226,9 @@ class StreamDiffusion:
         self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
 
+        #self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device).detach()
+        #self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device).detach()
+
         alpha_prod_t_sqrt_list = []
         beta_prod_t_sqrt_list = []
         for timestep in self.sub_timesteps:
@@ -241,6 +244,9 @@ class StreamDiffusion:
         beta_prod_t_sqrt = (
             torch.stack(beta_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         )
+
+        #alpha_prod_t_sqrt = torch.stack(alpha_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        #beta_prod_t_sqrt = torch.stack(beta_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
 
         self.alpha_prod_t_sqrt = torch.repeat_interleave(
             alpha_prod_t_sqrt,
@@ -316,7 +322,9 @@ class StreamDiffusion:
             self.init_noise = noise.to(device=self.device, dtype=self.dtype)
         # Noise stock for R-CFG
         # TODO: Re-implement R-CFG. The stock noise would be removed in the future
-        self.stock_noise = torch.zeros_like(self.init_noise)
+        #with torch.no_grad():
+        #    self.stock_noise = torch.zeros_like(self.init_noise)
+        self.stock_noise = @torch.no_grad().zeros_like(self.init_noise)
 
     @torch.no_grad()
     def update_cfg_setting(
@@ -327,6 +335,7 @@ class StreamDiffusion:
         self.guidance_scale = guidance_scale
         self.delta = delta
 
+    @torch.no_grad()
     def init_stream_buffer(self, x_t_latent_buffer: Union[None, torch.Tensor] = None) -> None:
         # initialize x_t_latent (it can be any random tensor)
         if self.denoising_steps_num > 1:
@@ -345,7 +354,7 @@ class StreamDiffusion:
                 self.x_t_latent_buffer = x_t_latent_buffer
         else:
             self.x_t_latent_buffer = None
-
+    
     def init_control_stream_buffer(self, controlnet_images_buffer: Union[None, torch.Tensor] = None) -> None:
         # initialize controlnet_images (it can be any random tensor)
         if self.denoising_steps_num > 1:
