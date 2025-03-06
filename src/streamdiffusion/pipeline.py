@@ -324,7 +324,7 @@ class StreamDiffusion:
         # TODO: Re-implement R-CFG. The stock noise would be removed in the future
         #with torch.no_grad():
         #    self.stock_noise = torch.zeros_like(self.init_noise)
-        self.stock_noise = @torch.no_grad().zeros_like(self.init_noise)
+        self.stock_noise = torch.zeros_like(self.init_noise)
 
     @torch.no_grad()
     def update_cfg_setting(
@@ -335,7 +335,6 @@ class StreamDiffusion:
         self.guidance_scale = guidance_scale
         self.delta = delta
 
-    @torch.no_grad()
     def init_stream_buffer(self, x_t_latent_buffer: Union[None, torch.Tensor] = None) -> None:
         # initialize x_t_latent (it can be any random tensor)
         if self.denoising_steps_num > 1:
