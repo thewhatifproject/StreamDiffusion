@@ -185,6 +185,7 @@ class StreamDiffusion:
 
     @torch.no_grad()
     def update_scheduler(self, t_index_list: Union[None, List[int]] = None, num_inference_steps: int = 50) -> None:
+        print("In Update Scheduler")
         self.scheduler.set_timesteps(num_inference_steps, self.device)
         self.timesteps = self.scheduler.timesteps.to(self.device)
 
@@ -265,6 +266,7 @@ class StreamDiffusion:
         prompt: Union[str, List[str]],
         negative_prompt: Union[None, str, List[str]] = None,
     ) -> None:
+        print("In Update Prompt")
         # Set the prompt embeds cache
         # Shape: (Bp, S, D), (Bp: batch size of input prompt, S: sequence length, D: hidden size)
         if negative_prompt is None:
@@ -309,6 +311,7 @@ class StreamDiffusion:
 
     @torch.no_grad()
     def update_noise(self, noise: Union[None, torch.Tensor] = None) -> None:
+        print("In Update Noise")
         if noise is None:
             self.init_noise = torch.randn(
                 (self.batch_size, 4, self.latent_height, self.latent_width),
@@ -385,6 +388,7 @@ class StreamDiffusion:
         seed: Union[None, int] = None,
         t_index_list: Union[None, List[int]] = None,
     ) -> None:
+        print("In Prepare")
         # initialize the generator for random number generation
         if generator is not None:
             self.generator = generator
@@ -443,6 +447,7 @@ class StreamDiffusion:
         idx: Optional[int] = None, 
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        print("In Unet")
         # TODO: Re-implement R-CFG according to the equation in the paper
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
@@ -518,6 +523,7 @@ class StreamDiffusion:
 
     @torch.inference_mode()
     def encode_image(self, image_tensors: torch.Tensor) -> torch.Tensor:
+        print("In Encode Image")
         image_tensors = image_tensors.to(
             device=self.device,
             dtype=self.vae.dtype,
@@ -529,6 +535,7 @@ class StreamDiffusion:
 
     @torch.inference_mode()
     def decode_image(self, x_0_pred_out: torch.Tensor) -> torch.Tensor:
+        print("In Decode Image")
         output_latent = self.vae.decode(x_0_pred_out / self.vae.config.scaling_factor, return_dict=False)[0]
         return output_latent
 
@@ -634,6 +641,7 @@ class StreamDiffusion:
         x_t_latent: Optional[torch.Tensor] = None,
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        print("In Call")
         if self.device.type == "mps":
             start = self.timer_event.Event(enable_timing=True)
             end = self.timer_event.Event(enable_timing=True)
