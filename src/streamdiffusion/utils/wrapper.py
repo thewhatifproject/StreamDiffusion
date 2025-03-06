@@ -558,7 +558,7 @@ class StreamDiffusionWrapper:
                     stream.pipe.enable_xformers_memory_efficient_attention()
                 if acceleration == "tensorrt":
                     from polygraphy import cuda
-
+                    print ("STEP 1")
                     from streamdiffusion.acceleration.tensorrt import (
                         TorchVAEEncoder,
                         compile_control_unet,
@@ -566,11 +566,13 @@ class StreamDiffusionWrapper:
                         compile_vae_decoder,
                         compile_vae_encoder,
                     )
+                    print ("STEP 2")
                     from streamdiffusion.acceleration.tensorrt.engine import (
                         AutoencoderKLEngine,
                         UNet2DConditionControlNetModelEngine,
                         UNet2DConditionModelEngine,
                     )
+                    print ("STEP 3")
                     from streamdiffusion.acceleration.tensorrt.models import (
                         VAE,
                         UNet,
@@ -588,7 +590,7 @@ class StreamDiffusionWrapper:
                             return f"{maybe_path.stem}--CM_lora_type-{CM_lora_type}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}--controlnet-{'enabled' if self.is_controlnet_enabled else 'disabled'}"
                         else:
                             return f"{model_id_or_path}--CM_lora_type-{CM_lora_type}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}--controlnet-{'enabled' if self.is_controlnet_enabled else 'disabled'}"
-
+                    print ("STEP 4")
                     engine_dir = Path(engine_dir)
                     unet_path = os.path.join(
                         engine_dir,
@@ -599,6 +601,7 @@ class StreamDiffusionWrapper:
                         ),
                         "unet.engine",
                     )
+                    print ("STEP 5")
                     vae_encoder_path = os.path.join(
                         engine_dir,
                         create_prefix(
@@ -608,6 +611,7 @@ class StreamDiffusionWrapper:
                         ),
                         "vae_encoder.engine",
                     )
+                    print ("STEP 6")
                     vae_decoder_path = os.path.join(
                         engine_dir,
                         create_prefix(
@@ -621,6 +625,7 @@ class StreamDiffusionWrapper:
                     if not os.path.exists(unet_path):
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
+                            print ("STEP 7")
                             unet_model = UNetWithControlNet(
                                 fp16=True,
                                 device=stream.device,
@@ -630,6 +635,7 @@ class StreamDiffusionWrapper:
                                 embedding_dim=stream.text_encoder.config.hidden_size,
                                 unet_dim=stream.unet.unet.config.in_channels,
                             )
+                            print ("STEP 8")
                             compile_control_unet(
                                 stream.unet,
                                 unet_model,
@@ -659,11 +665,13 @@ class StreamDiffusionWrapper:
                     if not os.path.exists(vae_decoder_path):
                         os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
                         stream.vae.forward = stream.vae.decode
+                        print ("STEP 9")
                         vae_decoder_model = VAE(
                             device=stream.device,
                             max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                             min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                         )
+                        print ("STEP 10")
                         compile_vae_decoder(
                             stream.vae,
                             vae_decoder_model,
@@ -676,12 +684,14 @@ class StreamDiffusionWrapper:
 
                     if not os.path.exists(vae_encoder_path):
                         os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
+                        print ("STEP 11")
                         vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
                         vae_encoder_model = VAEEncoder(
                             device=stream.device,
                             max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                             min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                         )
+                        print ("STEP 12")
                         compile_vae_encoder(
                             vae_encoder,
                             vae_encoder_model,
