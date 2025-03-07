@@ -182,7 +182,7 @@ class StreamDiffusionWrapper:
             self.stream.enable_similar_image_filter(
                 similar_image_filter_threshold, similar_image_filter_max_skip_frame
             )
-
+    @torch.no_grad()
     def prepare(
         self,
         prompt: str,
