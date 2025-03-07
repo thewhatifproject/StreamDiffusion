@@ -185,7 +185,6 @@ class StreamDiffusion:
 
     @torch.no_grad()
     def update_scheduler(self, t_index_list: Union[None, List[int]] = None, num_inference_steps: int = 50) -> None:
-        print("In Update Scheduler")
         self.scheduler.set_timesteps(num_inference_steps, self.device)
         self.timesteps = self.scheduler.timesteps.to(self.device)
 
@@ -224,24 +223,41 @@ class StreamDiffusion:
             c_skip_list.append(c_skip)
             c_out_list.append(c_out)
 
-        #self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
-        #self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
 
-        self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device).detach()
-        self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device).detach()
+        #self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device).detach()
+        #self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device).detach()
 
         alpha_prod_t_sqrt_list = []
         beta_prod_t_sqrt_list = []
         for timestep in self.sub_timesteps:
-            # Stacca subito il risultato del calcolo dello sqrt
-            alpha_prod_t_sqrt_list.append(self.scheduler.alphas_cumprod[timestep].sqrt().detach())
-            beta_prod_t_sqrt_list.append((1 - self.scheduler.alphas_cumprod[timestep]).sqrt().detach())
+            alpha_prod_t_sqrt = self.scheduler.alphas_cumprod[timestep].sqrt()
+            beta_prod_t_sqrt = (1 - self.scheduler.alphas_cumprod[timestep]).sqrt()
+            alpha_prod_t_sqrt_list.append(alpha_prod_t_sqrt)
+            beta_prod_t_sqrt_list.append(beta_prod_t_sqrt)
+        alpha_prod_t_sqrt = (
+            torch.stack(alpha_prod_t_sqrt_list)
+            .view(len(self.t_list), 1, 1, 1)
+            .to(dtype=self.dtype, device=self.device)
+        )
+        beta_prod_t_sqrt = (
+            torch.stack(beta_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        )
 
-        alpha_prod_t_sqrt = torch.stack(alpha_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
-        beta_prod_t_sqrt = torch.stack(beta_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        #alpha_prod_t_sqrt = torch.stack(alpha_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        #beta_prod_t_sqrt = torch.stack(beta_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
 
-        self.alpha_prod_t_sqrt = torch.repeat_interleave(alpha_prod_t_sqrt, repeats=self.frame_bff_size if self.use_denoising_batch else 1, dim=0).detach()
-        self.beta_prod_t_sqrt = torch.repeat_interleave(beta_prod_t_sqrt, repeats=self.frame_bff_size if self.use_denoising_batch else 1, dim=0).detach()
+        self.alpha_prod_t_sqrt = torch.repeat_interleave(
+            alpha_prod_t_sqrt,
+            repeats=self.frame_bff_size if self.use_denoising_batch else 1,
+            dim=0,
+        )
+        self.beta_prod_t_sqrt = torch.repeat_interleave(
+            beta_prod_t_sqrt,
+            repeats=self.frame_bff_size if self.use_denoising_batch else 1,
+            dim=0,
+        )
 
     @torch.no_grad()
     def update_prompt(
@@ -249,7 +265,6 @@ class StreamDiffusion:
         prompt: Union[str, List[str]],
         negative_prompt: Union[None, str, List[str]] = None,
     ) -> None:
-        print("In Update Prompt")
         # Set the prompt embeds cache
         # Shape: (Bp, S, D), (Bp: batch size of input prompt, S: sequence length, D: hidden size)
         if negative_prompt is None:
@@ -294,7 +309,6 @@ class StreamDiffusion:
 
     @torch.no_grad()
     def update_noise(self, noise: Union[None, torch.Tensor] = None) -> None:
-        print("In Update Noise")
         if noise is None:
             self.init_noise = torch.randn(
                 (self.batch_size, 4, self.latent_height, self.latent_width),
@@ -371,7 +385,6 @@ class StreamDiffusion:
         seed: Union[None, int] = None,
         t_index_list: Union[None, List[int]] = None,
     ) -> None:
-        print("In Prepare")
         # initialize the generator for random number generation
         if generator is not None:
             self.generator = generator
@@ -430,7 +443,6 @@ class StreamDiffusion:
         idx: Optional[int] = None, 
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        print("In Unet")
         # TODO: Re-implement R-CFG according to the equation in the paper
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
@@ -506,7 +518,6 @@ class StreamDiffusion:
 
     @torch.inference_mode()
     def encode_image(self, image_tensors: torch.Tensor) -> torch.Tensor:
-        print("In Encode Image")
         image_tensors = image_tensors.to(
             device=self.device,
             dtype=self.vae.dtype,
@@ -518,7 +529,6 @@ class StreamDiffusion:
 
     @torch.inference_mode()
     def decode_image(self, x_0_pred_out: torch.Tensor) -> torch.Tensor:
-        print("In Decode Image")
         output_latent = self.vae.decode(x_0_pred_out / self.vae.config.scaling_factor, return_dict=False)[0]
         return output_latent
 
@@ -624,7 +634,6 @@ class StreamDiffusion:
         x_t_latent: Optional[torch.Tensor] = None,
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        print("In Call")
         if self.device.type == "mps":
             start = self.timer_event.Event(enable_timing=True)
             end = self.timer_event.Event(enable_timing=True)
