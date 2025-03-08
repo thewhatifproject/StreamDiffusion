@@ -34,6 +34,9 @@ class StreamDiffusion:
         self.device = pipe.device
         self.dtype = torch_dtype
         self.generator = generator
+        
+        if self.device.type == "mps":
+            self.timer_event = getattr(torch, str(self.device).split(':', 1)[0])
 
         self.height = height
         self.width = width
@@ -569,8 +572,12 @@ class StreamDiffusion:
         x_t_latent: Optional[torch.Tensor] = None,
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
+        if self.device.type == "mps":
+            start = self.timer_event.Event(enable_timing=True)
+            end = self.timer_event.Event(enable_timing=True)
+        else:
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
         start.record()
 
         # Set x_t_latent. Shape: (1, 4, H, W)
@@ -597,7 +604,10 @@ class StreamDiffusion:
 
         self.prev_image_result = x_output
         end.record()
-        torch.cuda.synchronize()
+        if self.device.type == "mps":
+            self.timer_event.synchronize()
+        else:
+            torch.cuda.synchronize()
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
         return x_output

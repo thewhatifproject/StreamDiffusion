@@ -6,18 +6,21 @@ from setuptools import find_packages, setup
 _deps = [
     "torch",
     "xformers",
-    "diffusers==0.24.0",
+    "diffusers==0.29.0",
     "transformers",
     "accelerate",
     "fire",
     "omegaconf",
     "cuda-python",
-    "onnx==1.15.0",
-    "onnxruntime==1.16.3",
+    "onnx==1.17.0",
+    "onnxruntime==1.20.1",
     "protobuf==3.20.2",
     "colored",
     "pywin32;sys_platform == 'win32'",
     "controlnet-aux==0.0.9",
+    "huggingface_hub==0.25.0",
+    "numpy==1.26.4",
+    "peft==0.6.0"
 ]
 
 deps = {b: a for a, b in (re.findall(r"^(([^!=<>~]+)(?:[!=<>~].*)?$)", x)[0] for x in _deps)}
@@ -40,6 +43,9 @@ install_requires = [
     deps["diffusers"],
     deps["transformers"],
     deps["accelerate"],
+    deps["controlnet-aux"],
+    deps["huggingface_hub"],
+    deps["numpy"]
 ]
 
 setup(

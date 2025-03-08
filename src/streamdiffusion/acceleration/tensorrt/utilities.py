@@ -237,7 +237,10 @@ class Engine:
     def load(self):
         print(f"Loading TensorRT engine: {self.engine_path}")
         self.engine = engine_from_bytes(bytes_from_path(self.engine_path))
-
+        # Patch: add num_bindings if it's missing
+        if not hasattr(self.engine, "num_bindings"):
+            self.engine.num_bindings = self.engine.get_nb_bindings()
+             
     def activate(self, reuse_device_memory=None):
         if reuse_device_memory:
             self.context = self.engine.create_execution_context_without_device_memory()
