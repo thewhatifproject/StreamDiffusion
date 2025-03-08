@@ -2,22 +2,22 @@ import re
 
 from setuptools import find_packages, setup
 
-
 _deps = [
-    "torch",
-    "xformers",
-    "diffusers>=0.24.0,<=0.29.0",
+    "diffusers==0.29.0",
     "transformers",
     "accelerate",
     "fire",
     "omegaconf",
     "cuda-python",
-    "onnx==1.15.0",
-    "onnxruntime==1.16.3",
+    "onnx==1.17.0",
+    "onnxruntime==1.20.1",
     "protobuf==3.20.2",
     "colored",
     "pywin32;sys_platform == 'win32'",
     "controlnet-aux==0.0.9",
+    "huggingface_hub==0.25.0",
+    "numpy==1.26.4",
+    "peft==0.6.0"
 ]
 
 deps = {b: a for a, b in (re.findall(r"^(([^!=<>~]+)(?:[!=<>~].*)?$)", x)[0] for x in _deps)}
@@ -26,13 +26,8 @@ deps = {b: a for a, b in (re.findall(r"^(([^!=<>~]+)(?:[!=<>~].*)?$)", x)[0] for
 def deps_list(*pkgs):
     return [deps[pkg] for pkg in pkgs]
 
-
 extras = {}
-extras["xformers"] = deps_list("xformers")
-extras["torch"] = deps_list("torch", "accelerate")
-extras["tensorrt"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "colored")
-
-extras["dev"] = extras["xformers"] + extras["torch"] + extras["tensorrt"]
+extras["cuda"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "colored")
 
 install_requires = [
     deps["fire"],
@@ -40,11 +35,15 @@ install_requires = [
     deps["diffusers"],
     deps["transformers"],
     deps["accelerate"],
+    deps["controlnet-aux"],
+    deps["huggingface_hub"],
+    deps["numpy"],
+    deps["peft"]
 ]
 
 setup(
     name="streamdiffusion",
-    version="0.1.1",
+    version="0.1.0",
     description="real-time interactive image generation pipeline",
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
