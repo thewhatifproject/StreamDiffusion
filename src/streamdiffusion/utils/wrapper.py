@@ -320,6 +320,7 @@ class StreamDiffusionWrapper:
             self.stream.update_prompt(prompt)
 
         if isinstance(image, str) or isinstance(image, Image.Image):
+            print("Start Preprocess Image")
             image = self.preprocess_image(image)
 
         if isinstance(controlnet_images, str) or isinstance(controlnet_images, Image.Image):
