@@ -17,8 +17,8 @@
 # limitations under the License.
 #
 
-import onnx_graphsurgeon as gs
 import torch
+import onnx_graphsurgeon as gs
 from onnx import shape_inference
 from polygraphy.backend.onnx.loader import fold_constants
 
@@ -53,11 +53,12 @@ class Optimizer:
 
     def infer_shapes(self, return_onnx=False):
         onnx_graph = gs.export_onnx(self.graph)
-        if onnx_graph.ByteSize() > 2147483648:
-            raise TypeError("ERROR: model size exceeds supported 2GB limit")
-        else:
-            onnx_graph = shape_inference.infer_shapes(onnx_graph)
+        # if onnx_graph.ByteSize() > 2147483648:
+        #     raise TypeError("ERROR: model size exceeds supported 2GB limit")
+        # else:
+        #     onnx_graph = shape_inference.infer_shapes(onnx_graph)
 
+        onnx_graph = shape_inference.infer_shapes(onnx_graph)
         self.graph = gs.import_onnx(onnx_graph)
         if return_onnx:
             return onnx_graph
@@ -71,8 +72,8 @@ class BaseModel:
         verbose=True,
         max_batch_size=16,
         min_batch_size=1,
-        embedding_dim=768,
-        text_maxlen=77,
+        embedding_dim=None,
+        text_maxlen=None,
     ):
         self.name = "SD Model"
         self.fp16 = fp16
@@ -81,8 +82,8 @@ class BaseModel:
 
         self.min_batch = min_batch_size
         self.max_batch = max_batch_size
-        self.min_image_shape = 256  # min image resolution: 256x256
-        self.max_image_shape = 1024  # max image resolution: 1024x1024
+        self.min_image_shape = 256      # min image resolution: 256x256
+        self.max_image_shape = 1024     # max image resolution: 1024x1024
         self.min_latent_shape = self.min_image_shape // 8
         self.max_latent_shape = self.max_image_shape // 8
 
@@ -124,13 +125,13 @@ class BaseModel:
         return onnx_opt_graph
 
     def check_dims(self, batch_size, image_height, image_width):
-        assert batch_size >= self.min_batch and batch_size <= self.max_batch
-        assert image_height % 8 == 0 or image_width % 8 == 0
+        assert self.min_batch <= batch_size <= self.max_batch, f"Invalid batch_size: {self.min_batch=} <= {batch_size=} <= {self.max_batch=}"
+        assert image_height % 8 == 0 or image_width % 8 == 0, f"Invalid image_height: {image_height} % 8 != 0 or image_width: {image_width} % 8 != 0"
         latent_height = image_height // 8
         latent_width = image_width // 8
-        assert latent_height >= self.min_latent_shape and latent_height <= self.max_latent_shape
-        assert latent_width >= self.min_latent_shape and latent_width <= self.max_latent_shape
-        return (latent_height, latent_width)
+        assert self.min_latent_shape <= latent_height <= self.max_latent_shape, f"Invalid image_height: {self.min_latent_shape=} <= {latent_height=} <= {self.max_latent_shape=}"
+        assert self.min_latent_shape <= latent_width <= self.max_latent_shape, f"Invalid image_width: {self.min_latent_shape=} <= {latent_width=} <= {self.max_latent_shape=}"
+        return latent_height, latent_width
 
     def get_minmax_dims(self, batch_size, image_height, image_width, static_batch, static_shape):
         min_batch = batch_size if static_batch else self.min_batch
@@ -224,7 +225,7 @@ class UNet(BaseModel):
         self,
         fp16=False,
         device="cuda",
-        max_batch_size=16,
+        max_batch_size=1,
         min_batch_size=1,
         embedding_dim=768,
         text_maxlen=77,
@@ -249,10 +250,10 @@ class UNet(BaseModel):
 
     def get_dynamic_axes(self):
         return {
-            "sample": {0: "2B", 2: "H", 3: "W"},
-            "timestep": {0: "2B"},
-            "encoder_hidden_states": {0: "2B"},
-            "latent": {0: "2B", 2: "H", 3: "W"},
+            "sample": {0: "B", 2: "H", 3: "W"},
+            "timestep": {0: "T"},
+            "encoder_hidden_states": {0: "B"},
+            "latent": {0: "B", 2: "H", 3: "W"},
         }
 
     def get_input_profile(self, batch_size, image_height, image_width, static_batch, static_shape):
@@ -271,38 +272,49 @@ class UNet(BaseModel):
         ) = self.get_minmax_dims(batch_size, image_height, image_width, static_batch, static_shape)
         return {
             "sample": [
-                (min_batch, self.unet_dim, min_latent_height, min_latent_width),
+                (batch_size, self.unet_dim, min_latent_height, min_latent_width),
                 (batch_size, self.unet_dim, latent_height, latent_width),
-                (max_batch, self.unet_dim, max_latent_height, max_latent_width),
+                (batch_size, self.unet_dim, max_latent_height, max_latent_width),
             ],
-            "timestep": [(min_batch,), (batch_size,), (max_batch,)],
+            "timestep": [
+                (min_batch,),
+                (batch_size,),
+                (max_batch,)
+            ],
             "encoder_hidden_states": [
-                (min_batch, self.text_maxlen, self.embedding_dim),
                 (batch_size, self.text_maxlen, self.embedding_dim),
-                (max_batch, self.text_maxlen, self.embedding_dim),
+                (batch_size, self.text_maxlen, self.embedding_dim),
+                (batch_size, self.text_maxlen, self.embedding_dim),
             ],
         }
 
     def get_shape_dict(self, batch_size, image_height, image_width):
         latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
         return {
-            "sample": (2 * batch_size, self.unet_dim, latent_height, latent_width),
-            "timestep": (2 * batch_size,),
-            "encoder_hidden_states": (2 * batch_size, self.text_maxlen, self.embedding_dim),
-            "latent": (2 * batch_size, 4, latent_height, latent_width),
+            "sample": (batch_size, self.unet_dim, latent_height, latent_width),
+            "timestep": (1, 3),
+            "encoder_hidden_states": (batch_size, self.text_maxlen, self.embedding_dim),
+            "latent": (batch_size, self.unet_dim, latent_height, latent_width),
         }
 
     def get_sample_input(self, batch_size, image_height, image_width):
         latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
         dtype = torch.float16 if self.fp16 else torch.float32
-        return (
-            torch.randn(
-                2 * batch_size, self.unet_dim, latent_height, latent_width, dtype=torch.float32, device=self.device
-            ),
-            torch.ones((2 * batch_size,), dtype=torch.float32, device=self.device),
-            torch.randn(2 * batch_size, self.text_maxlen, self.embedding_dim, dtype=dtype, device=self.device),
+
+        # input latent
+        sample_input = torch.randn(
+            batch_size, self.unet_dim, latent_height, latent_width, dtype=dtype, device=self.device
         )
 
+        # timestep (allowing for 1 to 3 timesteps)
+        timestep_input = torch.randint(1, 4, (1,), dtype=torch.float32, device=self.device)
+
+        # Generate the encoder hidden states input
+        encoder_hidden_states_input = torch.randn(
+            batch_size, self.text_maxlen, self.embedding_dim, dtype=dtype, device=self.device
+        )
+
+        return sample_input, timestep_input, encoder_hidden_states_input
 
 class UNetWithControlNet(BaseModel):
     def __init__(
@@ -400,6 +412,321 @@ class UNetWithControlNet(BaseModel):
             ),
         )
 
+class UNetXL(BaseModel):
+    def __init__(
+        self,
+        fp16=False,
+        device="cuda",
+        max_batch_size=1,
+        min_batch_size=1,
+        encoder_hidden_states_dim=2048,  # Dimensione per encoder_hidden_states
+        text_embeds_dim=1280,              # Dimensione per text_embeds (necessaria per Hyper SD)
+        text_maxlen=128,                   # Lunghezza token tipica per SDXL Standard
+        unet_dim=4,
+    ):
+        super(UNetXL, self).__init__(
+            fp16=fp16,
+            device=device,
+            max_batch_size=max_batch_size,
+            min_batch_size=min_batch_size,
+            embedding_dim=encoder_hidden_states_dim,
+            text_maxlen=text_maxlen,
+        )
+        self.unet_dim = unet_dim
+        self.encoder_hidden_states_dim = encoder_hidden_states_dim
+        self.text_embeds_dim = text_embeds_dim
+        self.name = "UNetXL"
+
+    def get_input_names(self):
+        return ["sample", "timestep", "encoder_hidden_states", "text_embeds"]
+
+    def get_output_names(self):
+        return ["latent"]
+
+    def get_dynamic_axes(self):
+        return {
+            "sample": {0: "B", 2: "H", 3: "W"},
+            "timestep": {0: "T"},
+            "encoder_hidden_states": {0: "B"},
+            "text_embeds": {0: "B"},
+            "latent": {0: "B", 2: "H", 3: "W"},
+        }
+
+    def get_input_profile(self, batch_size, image_height, image_width, static_batch, static_shape):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        (min_batch,
+         max_batch,
+         _,
+         _,
+         _,
+         _,
+         min_latent_height,
+         max_latent_height,
+         min_latent_width,
+         max_latent_width) = self.get_minmax_dims(batch_size, image_height, image_width, static_batch, static_shape)
+        return {
+            "sample": [
+                (min_batch, self.unet_dim, min_latent_height, min_latent_width),
+                (batch_size, self.unet_dim, latent_height, latent_width),
+                (max_batch, self.unet_dim, max_latent_height, max_latent_width),
+            ],
+            "timestep": [
+                (min_batch,),
+                (batch_size,),
+                (max_batch,),
+            ],
+            "encoder_hidden_states": [
+                (min_batch, self.text_maxlen, self.encoder_hidden_states_dim),
+                (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+                (max_batch, self.text_maxlen, self.encoder_hidden_states_dim),
+            ],
+            "text_embeds": [
+                (min_batch, self.text_embeds_dim),
+                (batch_size, self.text_embeds_dim),
+                (max_batch, self.text_embeds_dim),
+            ],
+        }
+
+    def get_shape_dict(self, batch_size, image_height, image_width):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        return {
+            "sample": (batch_size, self.unet_dim, latent_height, latent_width),
+            "timestep": (batch_size,),
+            "encoder_hidden_states": (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+            "text_embeds": (batch_size, self.text_embeds_dim),
+            "latent": (batch_size, self.unet_dim, latent_height, latent_width),
+        }
+
+    def get_sample_input(self, batch_size, image_height, image_width):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        dtype = torch.float16 if self.fp16 else torch.float32
+
+        sample_input = torch.randn(batch_size, self.unet_dim, latent_height, latent_width, dtype=dtype, device=self.device)
+        timestep_input = torch.randint(1, 4, (1,), dtype=torch.float32, device=self.device)
+        encoder_hidden_states_input = torch.randn(batch_size, self.text_maxlen, self.encoder_hidden_states_dim, dtype=dtype, device=self.device)
+        text_embeds_input = torch.randn(batch_size, self.text_embeds_dim, dtype=dtype, device=self.device)
+        return sample_input, timestep_input, encoder_hidden_states_input, text_embeds_input
+
+class UNetXLWithControlNet(BaseModel):
+    def __init__(
+        self,
+        fp16=False,
+        device="cuda",
+        max_batch_size=1,
+        min_batch_size=1,
+        encoder_hidden_states_dim=2048,  # Dimensione per encoder_hidden_states
+        text_embeds_dim=1280,              # Dimensione per text_embeds (Hyper SD)
+        text_maxlen=128,                   # Lunghezza token tipica per SDXL Standard
+        unet_dim=4,
+        num_controlnets=1,                 # Numero di controlnet da integrare
+    ):
+        super(UNetXLWithControlNet, self).__init__(
+            fp16=fp16,
+            device=device,
+            max_batch_size=max_batch_size,
+            min_batch_size=min_batch_size,
+            embedding_dim=encoder_hidden_states_dim,  # usiamo questo per encoder_hidden_states
+            text_maxlen=text_maxlen,
+        )
+        self.unet_dim = unet_dim
+        self.encoder_hidden_states_dim = encoder_hidden_states_dim
+        self.text_embeds_dim = text_embeds_dim
+        self.num_controlnets = num_controlnets
+        self.name = "UNetXLWithControlNet"
+
+    def get_input_names(self):
+        # Gli input includono: sample, timestep, encoder_hidden_states, text_embeds e controlnet_images
+        return ["sample", "timestep", "encoder_hidden_states", "text_embeds", "controlnet_images"]
+
+    def get_output_names(self):
+        return ["latent"]
+
+    def get_dynamic_axes(self):
+        return {
+            "sample": {0: "B", 2: "H", 3: "W"},
+            "timestep": {0: "T"},
+            "encoder_hidden_states": {0: "B"},
+            "text_embeds": {0: "B"},
+            "controlnet_images": {1: "B", 3: "H", 4: "W"},
+            "latent": {0: "B", 2: "H", 3: "W"},
+        }
+
+    def get_input_profile(self, batch_size, image_height, image_width, static_batch, static_shape):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        (min_batch, max_batch,
+         min_img_h, max_img_h,
+         min_img_w, max_img_w,
+         min_latent_h, max_latent_h,
+         min_latent_w, max_latent_w) = self.get_minmax_dims(batch_size, image_height, image_width, static_batch, static_shape)
+        return {
+            "sample": [
+                (min_batch, self.unet_dim, min_latent_h, min_latent_w),
+                (batch_size, self.unet_dim, latent_height, latent_width),
+                (max_batch, self.unet_dim, max_latent_h, max_latent_w),
+            ],
+            "timestep": [
+                (min_batch,),
+                (batch_size,),
+                (max_batch,),
+            ],
+            "encoder_hidden_states": [
+                (min_batch, self.text_maxlen, self.encoder_hidden_states_dim),
+                (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+                (max_batch, self.text_maxlen, self.encoder_hidden_states_dim),
+            ],
+            "text_embeds": [
+                (min_batch, self.text_embeds_dim),
+                (batch_size, self.text_embeds_dim),
+                (max_batch, self.text_embeds_dim),
+            ],
+            "controlnet_images": [
+                (self.num_controlnets, min_batch, 3, min_img_h, min_img_w),
+                (self.num_controlnets, batch_size, 3, image_height, image_width),
+                (self.num_controlnets, max_batch, 3, max_img_h, max_img_w),
+            ],
+        }
+
+    def get_shape_dict(self, batch_size, image_height, image_width):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        return {
+            "sample": (batch_size, self.unet_dim, latent_height, latent_width),
+            "timestep": (batch_size,),
+            "encoder_hidden_states": (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+            "text_embeds": (batch_size, self.text_embeds_dim),
+            "controlnet_images": (self.num_controlnets, batch_size, 3, image_height, image_width),
+            "latent": (batch_size, self.unet_dim, latent_height, latent_width),
+        }
+
+    def get_sample_input(self, batch_size, image_height, image_width):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        dtype = torch.float16 if self.fp16 else torch.float32
+        sample_input = torch.randn(batch_size, self.unet_dim, latent_height, latent_width, dtype=dtype, device=self.device)
+        timestep_input = torch.randint(1, 4, (1,), dtype=torch.float32, device=self.device)
+        encoder_hidden_states_input = torch.randn(batch_size, self.text_maxlen, self.encoder_hidden_states_dim, dtype=dtype, device=self.device)
+        text_embeds_input = torch.randn(batch_size, self.text_embeds_dim, dtype=dtype, device=self.device)
+        controlnet_images_input = torch.randn(self.num_controlnets, batch_size, 3, image_height, image_width, dtype=dtype, device=self.device)
+        return sample_input, timestep_input, encoder_hidden_states_input, text_embeds_input, controlnet_images_input
+
+class UNetXLTurbo(BaseModel):
+    def __init__(
+        self,
+        fp16=True,
+        device="mps",
+        max_batch_size=1,
+        min_batch_size=1,
+        encoder_hidden_states_dim=2048,   # Updated for SDXL-Turbo
+        text_maxlen=77,                   # Updated for SDXL-Turbo
+        text_embeds_dim=1280,             # SDXL-Turbo-specific
+        time_ids_maxlen=6,                # SDXL-Turbo-specific
+        embedding_dim=768,
+        unet_dim=4
+    ):
+        super(UNetXLTurbo, self).__init__(
+            fp16=fp16,
+            device=device,
+            max_batch_size=max_batch_size,
+            min_batch_size=min_batch_size,
+            embedding_dim=embedding_dim,
+            text_maxlen=text_maxlen,
+        )
+        self.unet_dim = unet_dim
+        self.encoder_hidden_states_dim = encoder_hidden_states_dim
+        self.text_embeds_dim = text_embeds_dim
+        self.time_ids_maxlen = time_ids_maxlen
+        self.name = "UnetXLTurbo"
+
+    def get_input_names(self):
+        return ["sample", "timestep", "encoder_hidden_states", "text_embeds", "time_ids"]
+
+    def get_output_names(self):
+        return ["latent"]
+
+    def get_dynamic_axes(self):
+        return {
+            "sample": {0: "B", 2: "H", 3: "W"},
+            "timestep": {0: "T"},
+            "encoder_hidden_states": {0: "B"},
+            "latent": {0: "B", 2: "H", 3: "W"},
+        }
+
+    def get_input_profile(self, batch_size, image_height, image_width, static_batch, static_shape):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        (
+            min_batch,
+            max_batch,
+            _,
+            _,
+            _,
+            _,
+            min_latent_height,
+            max_latent_height,
+            min_latent_width,
+            max_latent_width,
+        ) = self.get_minmax_dims(batch_size, image_height, image_width, static_batch, static_shape)
+        return {
+            "sample": [
+                (batch_size, self.unet_dim, min_latent_height, min_latent_width),
+                (batch_size, self.unet_dim, latent_height, latent_width),
+                (batch_size, self.unet_dim, max_latent_height, max_latent_width),
+            ],
+            "timestep": [
+                (min_batch,),
+                (batch_size,),
+                (max_batch,)
+            ],
+            "encoder_hidden_states": [
+                (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+                (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+                (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+            ],
+            "text_embeds": [
+                (batch_size, self.text_embeds_dim),
+                (batch_size, self.text_embeds_dim),
+                (batch_size, self.text_embeds_dim),
+            ],
+            "time_ids": [
+                (batch_size, self.time_ids_maxlen),
+                (batch_size, self.time_ids_maxlen),
+                (batch_size, self.time_ids_maxlen),
+            ],
+        }
+
+    def get_shape_dict(self, batch_size, image_height, image_width):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        return {
+            "sample": (batch_size, self.unet_dim, latent_height, latent_width),
+            "timestep": (1, 3),
+            "encoder_hidden_states": (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
+            "text_embeds": (batch_size, self.text_embeds_dim),
+            "time_ids": (batch_size, self.time_ids_maxlen),
+            "latent": (batch_size, self.unet_dim, latent_height, latent_width),
+        }
+
+    def get_sample_input(self, batch_size, image_height, image_width):
+        latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
+        dtype = torch.float16 if self.fp16 else torch.float32
+
+        # input latent
+        sample_input = torch.randn(
+            batch_size, self.unet_dim, latent_height, latent_width, dtype=dtype, device=self.device
+        )
+
+        # timestep (allowing for 1 to 3 timesteps)
+        timestep_input = torch.randint(1, 4, (1,), dtype=torch.float32, device=self.device)
+
+        # encoder hidden states input
+        encoder_hidden_states_input = torch.randn(
+            batch_size, self.text_maxlen, self.encoder_hidden_states_dim, dtype=dtype, device=self.device
+        )
+
+        # additional text embeds
+        add_text_embeds = torch.randn(batch_size, self.text_embeds_dim, dtype=dtype, device=self.device),
+
+        # time ids
+        add_time_ids = torch.randint(0, 1000, (batch_size, self.time_ids_maxlen), dtype=torch.int32, device=self.device),
+
+        return sample_input, timestep_input, encoder_hidden_states_input, add_text_embeds, add_time_ids
+
 
 class VAE(BaseModel):
     def __init__(self, device, max_batch_size, min_batch_size=1):
@@ -488,8 +815,6 @@ class VAEEncoder(BaseModel):
 
     def get_input_profile(self, batch_size, image_height, image_width, static_batch, static_shape):
         assert batch_size >= self.min_batch and batch_size <= self.max_batch
-        min_batch = batch_size if static_batch else self.min_batch
-        max_batch = batch_size if static_batch else self.max_batch
         self.check_dims(batch_size, image_height, image_width)
         (
             min_batch,

@@ -57,7 +57,7 @@ numpy_to_torch_dtype_dict = {
     np.float32: torch.float32,
     np.float64: torch.float64,
     np.complex64: torch.complex64,
-    np.complex128: torch.complex128,
+    np.complex128: torch.complex128
 }
 if np.version.full_version >= "1.24.0":
     numpy_to_torch_dtype_dict[np.bool_] = torch.bool
@@ -237,10 +237,6 @@ class Engine:
     def load(self):
         print(f"Loading TensorRT engine: {self.engine_path}")
         self.engine = engine_from_bytes(bytes_from_path(self.engine_path))
-        # Patch: add num_bindings if it's missing
-        if not hasattr(self.engine, "num_bindings"):
-            print("Num. Bindings Patch applied")
-            self.engine.num_bindings = self.engine.get_nb_bindings()
 
     def activate(self, reuse_device_memory=None):
         if reuse_device_memory:
@@ -249,7 +245,7 @@ class Engine:
         else:
             self.context = self.engine.create_execution_context()
 
-    def allocate_buffers(self, shape_dict=None, device="cuda"):
+        """def allocate_buffers(self, shape_dict=None, device="cuda"):
         for idx in range(trt_util.get_bindings_per_profile(self.engine)):
             binding = self.engine[idx]
             if shape_dict and binding in shape_dict:
@@ -260,7 +256,32 @@ class Engine:
             if self.engine.binding_is_input(binding):
                 self.context.set_binding_shape(idx, shape)
             tensor = torch.empty(tuple(shape), dtype=numpy_to_torch_dtype_dict[dtype]).to(device=device)
-            self.tensors[binding] = tensor
+            self.tensors[binding] = tensor """
+
+    def allocate_buffers(self, shape_dict=None, device="cuda"):
+
+        # Get the number of input and output tensors
+        num_io_tensors = self.engine.num_io_tensors
+
+        # iterate
+        for idx in range(num_io_tensors):
+
+            # Get the binding name
+            binding_name = self.engine.get_tensor_name(idx)
+
+            # Get the binding shape and data type
+            shape = self.engine.get_tensor_shape(binding_name)
+            dtype = trt.nptype(self.engine.get_tensor_dtype(binding_name))
+
+            # Create tensor and store it
+            tensor = torch.empty(tuple(shape), dtype=numpy_to_torch_dtype_dict[dtype]).to(device=device)
+
+            # Set the binding shape for input bindings
+            if self.engine.get_tensor_mode(binding_name) == trt.TensorIOMode.INPUT:
+                self.context.set_input_shape(binding_name, tuple(shape))
+
+            # Store the tensor using its binding name
+            self.tensors[binding_name] = tensor
 
     def infer(self, feed_dict, stream, use_cuda_graph=False):
         for name, buf in feed_dict.items():
@@ -423,7 +444,7 @@ def export_onnx(
             onnx_path,
             export_params=True,
             opset_version=onnx_opset,
-            do_constant_folding=True,
+            #do_constant_folding=True,
             input_names=model_data.get_input_names(),
             output_names=model_data.get_output_names(),
             dynamic_axes=model_data.get_dynamic_axes(),

@@ -34,7 +34,7 @@ class EngineBuilder:
         onnx_opt_path: str,
         engine_path: str,
         opt_image_height: int = 512,
-        opt_image_width: int = 512,
+        opt_image_width: int = 904,
         opt_batch_size: int = 1,
         min_image_resolution: int = 256,
         max_image_resolution: int = 1024,
@@ -42,11 +42,13 @@ class EngineBuilder:
         build_static_batch: bool = False,
         build_dynamic_shape: bool = False,
         build_all_tactics: bool = False,
-        onnx_opset: int = 17,
+        onnx_opset: int = 20,
         force_engine_build: bool = False,
         force_onnx_export: bool = False,
         force_onnx_optimize: bool = False,
     ):
+        self.model.min_latent_shape = min_image_resolution // 8
+        self.model.max_latent_shape = max_image_resolution // 8
         if not force_onnx_export and os.path.exists(onnx_path):
             print(f"Found cached model: {onnx_path}")
         else:
@@ -72,8 +74,6 @@ class EngineBuilder:
                 onnx_opt_path=onnx_opt_path,
                 model_data=self.model,
             )
-        self.model.min_latent_shape = min_image_resolution // 8
-        self.model.max_latent_shape = max_image_resolution // 8
         if not force_engine_build and os.path.exists(engine_path):
             print(f"Found cached engine: {engine_path}")
         else:
