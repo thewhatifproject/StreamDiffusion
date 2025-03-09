@@ -10,8 +10,6 @@ from diffusers import AutoencoderTiny, StableDiffusionPipeline, StableDiffusionX
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
-from streamdiffusion.image_utils import postprocess_image
-
 
 torch.set_grad_enabled(False)
 torch.backends.cuda.matmul.allow_tf32 = True
