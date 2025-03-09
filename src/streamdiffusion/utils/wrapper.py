@@ -282,7 +282,7 @@ class StreamDiffusionWrapper:
         else:
             image_tensor = self.stream.txt2img(self.frame_buffer_size, controlnet_images)
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
-
+        
         if self.use_safety_checker:
             safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(self.device)
             _, has_nsfw_concept = self.safety_checker(
@@ -390,9 +390,9 @@ class StreamDiffusionWrapper:
             The postprocessed image.
         """
         if self.frame_buffer_size > 1:
-            return postprocess_image(image_tensor.cpu(), output_type=output_type)
+            return self.stream.image_processor.postprocess(image_tensor.cpu(), output_type=output_type)
         else:
-            return postprocess_image(image_tensor.cpu(), output_type=output_type)[0]
+            return self.stream.image_processor.postprocess(image_tensor.cpu(), output_type=output_type)[0]
 
     def _load_model(
         self,
