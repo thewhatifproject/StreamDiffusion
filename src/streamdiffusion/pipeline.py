@@ -639,10 +639,6 @@ class StreamDiffusion:
             x_t_latent = x_t_latent.to(device=self.device, dtype=self.dtype)
         else:
             if x is not None:
-                print("call preprocess pipe")
-                x = self.image_processor.preprocess(x, self.height, self.width).to(
-                    device=self.device, dtype=self.dtype
-                )
                 if self.similar_image_filter:
                     x = self.similar_filter(x)
                     if x is None:
