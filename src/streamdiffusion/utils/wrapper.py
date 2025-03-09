@@ -319,7 +319,6 @@ class StreamDiffusionWrapper:
         if prompt is not None:
             self.stream.update_prompt(prompt)
 
-        #Image is preprocessed in call method of pipeline
         if isinstance(image, str) or isinstance(image, Image.Image):
             image = self.preprocess_image(image)
 
