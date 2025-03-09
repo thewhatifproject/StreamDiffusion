@@ -7,17 +7,21 @@ _deps = [
     "transformers",
     "accelerate",
     "fire",
-    "omegaconf",
+    #"omegaconf",
     "cuda-python",
     "onnx==1.17.0",
     "onnxruntime==1.20.1",
+    "onnxruntime-gpu",
+    "onnx_graphsurgeon>=0.5.2",
     "protobuf==3.20.2",
     "colored",
     "pywin32;sys_platform == 'win32'",
     "controlnet-aux==0.0.9",
     "huggingface_hub==0.25.0",
     "numpy==1.26.4",
-    "peft==0.6.0"
+    "peft==0.6.0",
+    "polygraphy",
+    "compel"
 ]
 
 deps = {b: a for a, b in (re.findall(r"^(([^!=<>~]+)(?:[!=<>~].*)?$)", x)[0] for x in _deps)}
@@ -28,20 +32,22 @@ def deps_list(*pkgs):
 
 extras = {}
 extras["cuda"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "colored")
+extras["cuda-tensorrt"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "onnxruntime-gpu" "colored", "polygraphy", "onnx_graphsurgeon")
 
 install_requires = [
     deps["fire"],
-    deps["omegaconf"],
+    #deps["omegaconf"],
     deps["diffusers"],
     deps["transformers"],
     deps["accelerate"],
     deps["controlnet-aux"],
     deps["huggingface_hub"],
     deps["numpy"],
-    deps["peft"]
+    deps["peft"],
+    deps["compel"]
 ]
 
-setup(
+setup(  
     name="streamdiffusion",
     version="0.1.0",
     description="real-time interactive image generation pipeline",
