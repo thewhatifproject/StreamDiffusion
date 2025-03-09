@@ -552,7 +552,7 @@ class StreamDiffusionWrapper:
                 )
 
         try:
-            if acceleration is not "none" and self.device.type == "mps":
+            if acceleration != "none" and self.device.type == "mps":
                 print("Currently acceleration is not avaiable on mps device. Using normal mode instead.")
             else:
                 if acceleration == "xformers":
