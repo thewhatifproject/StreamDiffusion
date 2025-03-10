@@ -26,7 +26,7 @@ def install(cu: Optional[Literal["11", "12"]] = get_cuda_version_from_torch()):
         if version("tensorrt") < Version("9.0.0"):
             run_pip("uninstall -y tensorrt")
 
-    cudnn_name = f"nvidia-cudnn-cu{cu}==8.7.0"
+    cudnn_name = f"nvidia-cudnn-cu{cu}==8.7.0.84"
 
     if not is_installed("tensorrt"):
         run_pip(f"install {cudnn_name} --no-cache-dir")
