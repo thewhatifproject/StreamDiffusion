@@ -10,8 +10,6 @@ from .engine import (
     UNet2DConditionXLControlNetModelEngine
 )
 
-from tools.convert_stable_diffusion_controlnet_to_onnx import (UNet2DConditionControlNetModel, UNet2DConditionXLControlNetModel)
-
 def accelerate_with_tensorrt(
     stream: StreamDiffusion,
     engine_dir: str,
