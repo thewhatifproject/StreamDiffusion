@@ -562,6 +562,19 @@ class StreamDiffusionWrapper:
                         "vae_decoder.engine",
                     )
 
+                    unet = stream.unet
+                    vae = stream.vae
+                    del stream.unet, stream.vae, stream.pipe.unet, stream.pipe.vae
+                    vae_config = vae.config
+                    vae_dtype = vae.dtype
+                    unet_config = unet.unet.config if self.is_controlnet_enabled else unet.config
+
+                    unet.to(torch.device("cpu"))
+                    vae.to(torch.device("cpu"))
+
+                    gc.collect()
+                    torch.cuda.empty_cache()
+
                     if not os.path.exists(unet_path) and not self.sdxl:
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
@@ -575,7 +588,7 @@ class StreamDiffusionWrapper:
                                 unet_dim=stream.unet.unet.config.in_channels,
                             )
                             compile_control_unet(
-                                stream.unet,
+                                unet,
                                 unet_model,
                                 unet_path + ".onnx",
                                 unet_path + ".opt.onnx",
@@ -605,14 +618,14 @@ class StreamDiffusionWrapper:
                     
                     if not os.path.exists(vae_decoder_path):
                         os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
-                        stream.vae.forward = stream.vae.decode
+                        vae.forward = vae.decode
                         vae_decoder_model = VAE(
                             device=stream.device,
                             max_batch_size=stream.frame_bff_size,
                             min_batch_size=stream.frame_bff_size,
                         )
                         compile_vae_decoder(
-                            stream.vae,
+                            vae,
                             vae_decoder_model,
                             vae_decoder_path + ".onnx",
                             vae_decoder_path + ".opt.onnx",
@@ -640,14 +653,8 @@ class StreamDiffusionWrapper:
 
                     cuda_stream = cuda.Stream()
 
-                    vae_config = stream.vae.config
-                    vae_dtype = stream.vae.dtype
-
                     if self.is_controlnet_enabled:
                         if self.sdxl:
-                            print("IIN")
-                            unet_config = stream.unet.unet.config
-                            print("unet config", unet_config)
                             stream.unet = UNet2DConditionXLControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
                             setattr(stream.unet, "config", unet_config)
                         else:
