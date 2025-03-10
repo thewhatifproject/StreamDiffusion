@@ -1,7 +1,7 @@
 import torch
 from diffusers import ControlNetModel, UNet2DConditionModel
 
-class UNet2DConditionControlNetModelExtended(torch.nn.Module):
+class UNet2DConditionControlNetModel(torch.nn.Module):
     def __init__(self, unet: UNet2DConditionModel, controlnets: list[ControlNetModel], controlnet_scales: list[float]):
         super().__init__()
         self.unet = unet.to(unet.device, dtype=unet.dtype)
