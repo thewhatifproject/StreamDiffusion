@@ -546,7 +546,7 @@ class UNetXLWithControlNet(BaseModel):
             "sample": {0: "B", 2: "H", 3: "W"},
             "timestep": {0: "T"},
             "encoder_hidden_states": {0: "B"},
-            #"text_embeds": {0: "B"},
+            "text_embeds": {0: "B"},
             "controlnet_images": {1: "B", 3: "H", 4: "W"},
             "latent": {0: "B", 2: "H", 3: "W"},
         }
@@ -574,12 +574,13 @@ class UNetXLWithControlNet(BaseModel):
                 (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
                 (max_batch, self.text_maxlen, self.encoder_hidden_states_dim),
             ],
-            #"text_embeds": [
-            #    (min_batch, self.text_embeds_dim),
-            #    (batch_size, self.text_embeds_dim),
-            #    (max_batch, self.text_embeds_dim),
-            #],
+            "text_embeds": [
+                (min_batch, self.text_embeds_dim),
+                (batch_size, self.text_embeds_dim),
+                (max_batch, self.text_embeds_dim),
+            ],
             "controlnet_images": [
+                # La prima dimensione è il numero di controlnet
                 (self.num_controlnets, min_batch, 3, min_img_h, min_img_w),
                 (self.num_controlnets, batch_size, 3, image_height, image_width),
                 (self.num_controlnets, max_batch, 3, max_img_h, max_img_w),
@@ -592,7 +593,7 @@ class UNetXLWithControlNet(BaseModel):
             "sample": (batch_size, self.unet_dim, latent_height, latent_width),
             "timestep": (batch_size,),
             "encoder_hidden_states": (batch_size, self.text_maxlen, self.encoder_hidden_states_dim),
-            #"text_embeds": (batch_size, self.text_embeds_dim),
+            "text_embeds": (batch_size, self.text_embeds_dim),
             "controlnet_images": (self.num_controlnets, batch_size, 3, image_height, image_width),
             "latent": (batch_size, self.unet_dim, latent_height, latent_width),
         }
@@ -603,10 +604,9 @@ class UNetXLWithControlNet(BaseModel):
         sample_input = torch.randn(batch_size, self.unet_dim, latent_height, latent_width, dtype=dtype, device=self.device)
         timestep_input = torch.randint(1, 4, (1,), dtype=torch.float32, device=self.device)
         encoder_hidden_states_input = torch.randn(batch_size, self.text_maxlen, self.encoder_hidden_states_dim, dtype=dtype, device=self.device)
-        #text_embeds_input = torch.randn(batch_size, self.text_embeds_dim, dtype=dtype, device=self.device)
+        text_embeds_input = torch.randn(batch_size, self.text_embeds_dim, dtype=dtype, device=self.device)
         controlnet_images_input = torch.randn(self.num_controlnets, batch_size, 3, image_height, image_width, dtype=dtype, device=self.device)
-        #return sample_input, timestep_input, encoder_hidden_states_input, text_embeds_input, controlnet_images_input
-        return sample_input, timestep_input, encoder_hidden_states_input, controlnet_images_input
+        return sample_input, timestep_input, encoder_hidden_states_input, text_embeds_input, controlnet_images_input
 
 class UNetXLTurbo(BaseModel):
     def __init__(
