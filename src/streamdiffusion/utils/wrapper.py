@@ -569,8 +569,8 @@ class StreamDiffusionWrapper:
                     vae_dtype = vae.dtype
                     unet_config = unet.unet.config if self.is_controlnet_enabled else unet.config
 
-                    unet.to(torch.device("cpu"))
-                    vae.to(torch.device("cpu"))
+                    #unet.to(torch.device("cpu"))
+                    #vae.to(torch.device("cpu"))
 
                     gc.collect()
                     torch.cuda.empty_cache()
@@ -650,6 +650,8 @@ class StreamDiffusionWrapper:
                             vae_encoder_path,
                             opt_batch_size=stream.frame_bff_size,
                         )
+                        
+                    del vae
 
                     cuda_stream = cuda.Stream()
 
