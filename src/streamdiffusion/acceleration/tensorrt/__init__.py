@@ -164,7 +164,7 @@ def accelerate_with_tensorrt(
         num_controlnets=num_controlnets,
         min_batch_size=unet_batch_size[0],
         max_batch_size=unet_batch_size[1],
-        embedding_dim=text_encoder.config.hidden_size,
+        encoder_hidden_states_dim=text_encoder.config.hidden_size,
         unet_dim=unet.unet.config.in_channels,
     )
     
@@ -175,11 +175,11 @@ def accelerate_with_tensorrt(
         device=stream.device,
         min_batch_size=unet_batch_size[0],
         max_batch_size=unet_batch_size[1],
-        embedding_dim=text_encoder.config.hidden_size,
+        encoder_hidden_states_dim=text_encoder.config.hidden_size,
         unet_dim=unet.config.in_channels,
     )
         
-    elif not stream.sdlx and is_controlnet_enabled:
+    elif not stream.sdxl and is_controlnet_enabled:
         
         unet_model = UNetWithControlNet(
         fp16=True,
@@ -191,7 +191,7 @@ def accelerate_with_tensorrt(
         unet_dim=unet.config.in_channels,
     )
         
-    elif not stream.sdlx and not is_controlnet_enabled:
+    elif not stream.sdxl and not is_controlnet_enabled:
     
         unet_model = UNet(
         fp16=True,
