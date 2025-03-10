@@ -599,29 +599,8 @@ class StreamDiffusion:
         return x_0_pred_out
 
     def _get_add_time_ids(self, original_size, crops_coords_top_left, target_size, dtype, text_encoder_projection_dim=None):
-        config = getattr(self.unet, "config", None)
-        if config is None and hasattr(self.unet, "unet"):
-            config = self.unet.unet.config
-        if config is None:
-            raise AttributeError("Il config non è disponibile da self.unet o self.unet.unet")
-
-        # Recupera add_embedding: se non è presente in self.unet, prova in self.unet.unet
-        add_embed = getattr(self.unet, "add_embedding", None)
-        if add_embed is None and hasattr(self.unet, "unet"):
-            add_embed = self.unet.unet.add_embedding
-        if add_embed is None:
-            raise AttributeError("add_embedding non disponibile in self.unet o self.unet.unet")
-
+        
         add_time_ids = list(original_size + crops_coords_top_left + target_size)
-        passed_add_embed_dim = config.addition_time_embed_dim * len(add_time_ids) + text_encoder_projection_dim
-        expected_add_embed_dim = add_embed.linear_1.in_features
-
-        if expected_add_embed_dim != passed_add_embed_dim:
-            raise ValueError(
-                f"Model expects an added time embedding vector of length {expected_add_embed_dim}, "
-                f"but a vector of {passed_add_embed_dim} was created. Check 'unet.config.time_embedding_type' "
-                f"and 'text_encoder_2.config.projection_dim'."
-            )
 
         add_time_ids = torch.tensor([add_time_ids], dtype=dtype)
         return add_time_ids
