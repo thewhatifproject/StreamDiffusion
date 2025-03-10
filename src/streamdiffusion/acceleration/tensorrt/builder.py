@@ -42,7 +42,7 @@ class EngineBuilder:
         build_static_batch: bool = False,
         build_dynamic_shape: bool = False,
         build_all_tactics: bool = False,
-        onnx_opset: int = 20,
+        onnx_opset: int = 17,
         force_engine_build: bool = False,
         force_onnx_export: bool = False,
         force_onnx_optimize: bool = False,
