@@ -32,7 +32,7 @@ def deps_list(*pkgs):
 
 extras = {}
 extras["cuda"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "colored")
-extras["cuda-tensorrt"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "onnxruntime-gpu" "colored", "polygraphy", "onnx_graphsurgeon")
+extras["cuda-tensorrt"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "onnxruntime-gpu", "colored", "polygraphy", "onnx_graphsurgeon")
 
 install_requires = [
     deps["fire"],
