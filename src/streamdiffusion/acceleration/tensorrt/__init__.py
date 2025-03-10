@@ -165,7 +165,7 @@ def accelerate_with_tensorrt(
         min_batch_size=unet_batch_size[0],
         max_batch_size=unet_batch_size[1],
         embedding_dim=text_encoder.config.hidden_size,
-        unet_dim=unet.config.in_channels,
+        unet_dim=unet.unet.config.in_channels,
     )
     
     elif stream.sdxl and not is_controlnet_enabled:
