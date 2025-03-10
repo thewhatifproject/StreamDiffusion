@@ -79,6 +79,7 @@ def compile_unet(
         engine_build_options = {}
     unet = unet.to(torch.device("cuda"), dtype=torch.float16)
     builder = EngineBuilder(model_data, unet, device=torch.device("cuda"))
+    opt_batch_size = engine_build_options.pop('opt_batch_size', opt_batch_size)
     builder.build(
         onnx_path,
         onnx_opt_path,
@@ -94,7 +95,7 @@ def compile_control_unet(
     onnx_opt_path: str,
     engine_path: str,
     opt_batch_size: int = 1,
-     engine_build_options=None,
+    engine_build_options=None,
 ):
     if engine_build_options is None:
         engine_build_options = {}
@@ -102,6 +103,7 @@ def compile_control_unet(
     unet.unet = unet.unet.to(torch.device("cuda"), dtype=torch.float16)
     unet.controlnets = [controlnet.to(torch.device("cuda"), dtype=torch.float16) for controlnet in unet.controlnets]
     builder = EngineBuilder(model_data, unet, device=torch.device("cuda"))
+    opt_batch_size = engine_build_options.pop('opt_batch_size', opt_batch_size)
     builder.build(
         onnx_path,
         onnx_opt_path,
