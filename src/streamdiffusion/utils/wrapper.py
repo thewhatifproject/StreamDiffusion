@@ -519,6 +519,9 @@ class StreamDiffusionWrapper:
                         VAEEncoder,
                     )
 
+                    print("FRAME BFF SIZE", stream.frame_bff_size)
+                    print("TRN UNET BATCH SIZE", stream.trt_unet_batch_size)
+
                     def create_prefix(
                         model_id_or_path: str,
                         max_batch_size: int,
@@ -568,9 +571,6 @@ class StreamDiffusionWrapper:
                     vae_config = vae.config
                     vae_dtype = vae.dtype
                     unet_config = unet.unet.config if self.is_controlnet_enabled else unet.config
-
-                    #unet.to(torch.device("cpu"))
-                    #vae.to(torch.device("cpu"))
 
                     gc.collect()
                     torch.cuda.empty_cache()
@@ -652,6 +652,9 @@ class StreamDiffusionWrapper:
                         )
                         
                     del vae
+                    
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
                     cuda_stream = cuda.Stream()
 
