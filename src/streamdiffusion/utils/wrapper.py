@@ -152,6 +152,7 @@ class StreamDiffusionWrapper:
         self.use_safety_checker = use_safety_checker
 
         self.is_controlnet_enabled = controlnet_dicts is not None
+        self.num_controlnets = len(controlnet_dicts)
 
         self.stream: StreamDiffusion = self._load_model(
             model_id_or_path=model_id_or_path,
@@ -559,9 +560,7 @@ class StreamDiffusionWrapper:
         
                     from streamdiffusion.acceleration.tensorrt import accelerate_with_tensorrt
                     
-                    engine_dir = Path(engine_dir)
-                    print("Engine Dir", engine_dir)
-                    
+                    engine_dir = Path(engine_dir)                    
                     vae_batch_size = 1
                     vae_batch_size2 = self.batch_size if self.mode == "txt2img" else stream.frame_bff_size
                     print("Vae batch size test", vae_batch_size2)
@@ -571,13 +570,13 @@ class StreamDiffusionWrapper:
                     unet_batch_size2 = stream.trt_unet_batch_size
                     print("unet batch size test", unet_batch_size2)
                     
-                    print("Class heigth, width", self.height, self.width)
-
                     stream = accelerate_with_tensorrt(
                         stream=stream,
                         engine_dir=str(engine_dir),
                         unet_batch_size=(unet_batch_size, unet_batch_size),
                         vae_batch_size=(vae_batch_size, vae_batch_size),
+                        is_controlnet_enabled=self.is_controlnet_enabled,
+                        num_controlnets=self.num_controlnets,
                         unet_engine_build_options={
                             'opt_image_height': self.height,
                             'opt_image_width': self.width,

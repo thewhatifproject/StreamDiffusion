@@ -115,6 +115,8 @@ def accelerate_with_tensorrt(
     engine_dir: str,
     unet_batch_size: tuple = (1, 2),
     vae_batch_size: tuple = (1, 1),
+    is_controlnet_enabled: bool = False,
+    num_controlnets: int = 0,
     unet_engine_build_options=None,
     vae_engine_build_options=None,
     use_cuda_graph: bool = False,
@@ -154,19 +156,19 @@ def accelerate_with_tensorrt(
     vae_encoder_engine_path = f"{engine_dir}/vae_encoder.engine"
     vae_decoder_engine_path = f"{engine_dir}/vae_decoder.engine"
     
-    if stream.sdxl and stream.is_controlnet_enabled:
+    if stream.sdxl and is_controlnet_enabled:
     
         unet_model = UNetXLWithControlNet(
         fp16=True,
         device=stream.device,
-        num_controlnets=stream.num_controlnets,
+        num_controlnets=num_controlnets,
         min_batch_size=unet_batch_size[0],
         max_batch_size=unet_batch_size[1],
         embedding_dim=text_encoder.config.hidden_size,
         unet_dim=unet.config.in_channels,
     )
     
-    elif stream.sdxl and not stream.is_controlnet_enabled:
+    elif stream.sdxl and not is_controlnet_enabled:
         
         unet_model = UNetXL(
         fp16=True,
@@ -177,19 +179,19 @@ def accelerate_with_tensorrt(
         unet_dim=unet.config.in_channels,
     )
         
-    elif not stream.sdlx and stream.is_controlnet_enabled:
+    elif not stream.sdlx and is_controlnet_enabled:
         
         unet_model = UNetWithControlNet(
         fp16=True,
         device=stream.device,
-        num_controlnets=stream.num_controlnets,
+        num_controlnets=num_controlnets,
         min_batch_size=unet_batch_size[0],
         max_batch_size=unet_batch_size[1],
         embedding_dim=text_encoder.config.hidden_size,
         unet_dim=unet.config.in_channels,
     )
         
-    elif not stream.sdlx and not stream.is_controlnet_enabled:
+    elif not stream.sdlx and not is_controlnet_enabled:
     
         unet_model = UNet(
         fp16=True,
@@ -212,7 +214,7 @@ def accelerate_with_tensorrt(
     )
 
     if not os.path.exists(unet_engine_path):
-        if stream.is_controlnet_enabled:
+        if is_controlnet_enabled:
             compile_unet(
                 unet,
                 unet_model,
@@ -255,7 +257,7 @@ def accelerate_with_tensorrt(
 
     cuda_stream = cuda.Stream()
     
-    if stream.is_controlnet_enabled:
+    if is_controlnet_enabled:
         stream.unet = UNet2DConditionControlNetModelEngine(unet_engine_path, cuda_stream, use_cuda_graph=False)
     else:
         stream.unet = UNet2DConditionModelEngine(unet_engine_path, cuda_stream, use_cuda_graph=False)
