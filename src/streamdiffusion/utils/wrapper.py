@@ -649,7 +649,7 @@ class StreamDiffusionWrapper:
                             unet_config = stream.unet.unet.config
                             print("unet config", unet_config)
                             stream.unet = UNet2DConditionXLControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
-                            stream.unet.unet.config = unet_config
+                            setattr(stream.unet, "config", unet_config)
                         else:
                             stream.unet = UNet2DConditionControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
                     else:
