@@ -157,7 +157,6 @@ def accelerate_with_tensorrt(
     vae_decoder_engine_path = f"{engine_dir}/vae_decoder.engine"
     
     if stream.sdxl and is_controlnet_enabled:
-        print("In load unet")
         unet_model = UNetXLWithControlNet(
         fp16=True,
         device=stream.device,
@@ -169,7 +168,6 @@ def accelerate_with_tensorrt(
     )
     
     elif stream.sdxl and not is_controlnet_enabled:
-        
         unet_model = UNetXL(
         fp16=True,
         device=stream.device,
@@ -207,18 +205,15 @@ def accelerate_with_tensorrt(
         min_batch_size=vae_batch_size[0],
         max_batch_size=vae_batch_size[1]
     )
-    print("In load vae decoder")
 
     vae_encoder_model = VAEEncoder(
         device=stream.device,
         min_batch_size=vae_batch_size[0],
         max_batch_size=vae_batch_size[1]
     )
-    print("In load vae encoder")
 
     if not os.path.exists(unet_engine_path):
         if not is_controlnet_enabled:
-            print("In compile unet")
             compile_unet(
                 unet,
                 unet_model,
@@ -247,6 +242,7 @@ def accelerate_with_tensorrt(
             create_onnx_path("vae_decoder", onnx_dir, opt=True),
             vae_decoder_engine_path,
             engine_build_options=vae_engine_build_options)
+        print("In compile vae decoder")
 
     if not os.path.exists(vae_encoder_engine_path):
         vae_encoder = TorchVAEEncoder(vae).to(torch.device("cuda"))
@@ -257,6 +253,7 @@ def accelerate_with_tensorrt(
             create_onnx_path("vae_encoder", onnx_dir, opt=True),
             vae_encoder_engine_path,
             engine_build_options=vae_engine_build_options)
+        print("In compile vae encoder")
 
     del vae
 
@@ -267,6 +264,8 @@ def accelerate_with_tensorrt(
     else:
         stream.unet = UNet2DConditionModelEngine(unet_engine_path, cuda_stream, use_cuda_graph=False)
 
+    print("In stream unet")
+
     stream.vae = AutoencoderKLEngine(
         vae_encoder_engine_path,
         vae_decoder_engine_path,
@@ -274,6 +273,9 @@ def accelerate_with_tensorrt(
         stream.pipe.vae_scale_factor,
         use_cuda_graph=use_cuda_graph,
     )
+    
+    print("In autoencoder kl")
+
     setattr(stream.vae, "config", vae_config)
     setattr(stream.vae, "dtype", vae_dtype)
 
