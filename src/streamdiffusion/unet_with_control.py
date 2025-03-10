@@ -1,15 +1,15 @@
 import torch
 from diffusers import ControlNetModel, UNet2DConditionModel
 
-
-class UNet2DConditionControlNetModel(torch.nn.Module):
+class UNet2DConditionControlNetModelExtended(torch.nn.Module):
     def __init__(self, unet: UNet2DConditionModel, controlnets: list[ControlNetModel], controlnet_scales: list[float]):
         super().__init__()
         self.unet = unet.to(unet.device, dtype=unet.dtype)
         self.controlnets = [controlnet.to(unet.device, dtype=unet.dtype) for controlnet in controlnets]
         self.controlnet_scales = controlnet_scales
 
-    def forward(self, sample, timestep, encoder_hidden_states, controlnet_images, **kwargs) -> torch.Tensor:
+    def forward(self, sample, timestep, encoder_hidden_states, controlnet_images, text_embeds=None, **kwargs) -> torch.Tensor:
+        # Esegui i controlli per ciascun controlnet
         for i in range(len(self.controlnets)):
             down_samples, mid_sample = self.controlnets[i](
                 sample,
@@ -20,12 +20,11 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
                 return_dict=False,
                 **kwargs
             )
-
-            #down_samples = [down_sample * self.controlnet_scales[i] for down_sample in down_samples]
+            # Moltiplica i down_samples per la scala (detach per evitare gradiente)
             down_samples = [down_sample * self.controlnet_scales[i].detach() for down_sample in down_samples]
             mid_sample *= self.controlnet_scales[i]
 
-            # merge samples
+            # Unisci i residui dei blocchi
             if i == 0:
                 down_block_res_samples, mid_block_res_sample = down_samples, mid_sample
             else:
@@ -35,6 +34,7 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
                 ]
                 mid_block_res_sample += mid_sample
 
+        # Passa text_embeds alla UNet se disponibile; in SDXL la UNet potrebbe aspettarselo
         noise_pred = self.unet(
             sample,
             timestep,
@@ -42,6 +42,7 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
             down_block_additional_residuals=down_block_res_samples,
             mid_block_additional_residual=mid_block_res_sample,
             return_dict=False,
+            **({"text_embeds": text_embeds} if text_embeds is not None else {}),
             **kwargs
         )
         return noise_pred
