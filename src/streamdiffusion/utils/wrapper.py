@@ -564,7 +564,7 @@ class StreamDiffusionWrapper:
 
                     unet = stream.unet
                     vae = stream.vae
-                    del stream.unet, stream.vae, stream.pipe.unet, stream.pipe.vae
+                    del stream.unet, stream.vae
                     vae_config = vae.config
                     vae_dtype = vae.dtype
                     unet_config = unet.unet.config if self.is_controlnet_enabled else unet.config
