@@ -605,7 +605,8 @@ class UNetXLWithControlNet(BaseModel):
         encoder_hidden_states_input = torch.randn(batch_size, self.text_maxlen, self.encoder_hidden_states_dim, dtype=dtype, device=self.device)
         #text_embeds_input = torch.randn(batch_size, self.text_embeds_dim, dtype=dtype, device=self.device)
         controlnet_images_input = torch.randn(self.num_controlnets, batch_size, 3, image_height, image_width, dtype=dtype, device=self.device)
-        return sample_input, timestep_input, encoder_hidden_states_input, text_embeds_input, controlnet_images_input
+        #return sample_input, timestep_input, encoder_hidden_states_input, text_embeds_input, controlnet_images_input
+        return sample_input, timestep_input, encoder_hidden_states_input, controlnet_images_input
 
 class UNetXLTurbo(BaseModel):
     def __init__(
