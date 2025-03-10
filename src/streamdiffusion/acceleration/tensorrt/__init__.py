@@ -157,7 +157,7 @@ def accelerate_with_tensorrt(
     vae_decoder_engine_path = f"{engine_dir}/vae_decoder.engine"
     
     if stream.sdxl and is_controlnet_enabled:
-    
+        print("In load unet")
         unet_model = UNetXLWithControlNet(
         fp16=True,
         device=stream.device,
@@ -207,14 +207,18 @@ def accelerate_with_tensorrt(
         min_batch_size=vae_batch_size[0],
         max_batch_size=vae_batch_size[1]
     )
+    print("In load vae decoder")
+
     vae_encoder_model = VAEEncoder(
         device=stream.device,
         min_batch_size=vae_batch_size[0],
         max_batch_size=vae_batch_size[1]
     )
+    print("In load vae encoder")
 
     if not os.path.exists(unet_engine_path):
-        if is_controlnet_enabled:
+        if not is_controlnet_enabled:
+            print("In compile unet")
             compile_unet(
                 unet,
                 unet_model,
@@ -223,6 +227,7 @@ def accelerate_with_tensorrt(
                 unet_engine_path,
                 engine_build_options=unet_engine_build_options)
         else:
+            print("In compile unet control")
             compile_control_unet(
                 unet,
                 unet_model,
