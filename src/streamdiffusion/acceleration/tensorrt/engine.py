@@ -8,7 +8,6 @@ from polygraphy import cuda
 
 from .utilities import Engine
 
-
 class UNet2DConditionModelEngine:
     def __init__(self, filepath: str, stream: cuda.Stream, use_cuda_graph: bool = False):
         self.engine = Engine(filepath)
@@ -54,7 +53,6 @@ class UNet2DConditionModelEngine:
 
     def forward(self, *args, **kwargs):
         pass
-
 
 class UNet2DConditionControlNetModelEngine:
     def __init__(self, filepath: str, stream: cuda.Stream, use_cuda_graph: bool = False):
@@ -105,6 +103,68 @@ class UNet2DConditionControlNetModelEngine:
     def forward(self, *args, **kwargs):
         pass
 
+class UNet2DConditionXLControlNetModelEngine:
+    def __init__(self, filepath: str, stream: cuda.Stream, use_cuda_graph: bool = False):
+        self.engine = Engine(filepath)
+        self.stream = stream
+        self.use_cuda_graph = use_cuda_graph
+
+        self.engine.load()
+        self.engine.activate()
+
+    def __call__(
+        self,
+        latent_model_input: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        controlnet_images: torch.Tensor,
+        text_embeds: torch.Tensor,
+        time_ids: torch.Tensor,
+        **kwargs,
+    ) -> UNet2DConditionOutput:
+        # Assicurati che timestep sia in float32
+        if timestep.dtype != torch.float32:
+            timestep = timestep.float()
+
+        # Allocazione dei buffer per tutti gli input necessari
+        self.engine.allocate_buffers(
+            shape_dict={
+                "sample": latent_model_input.shape,
+                "timestep": timestep.shape,
+                "encoder_hidden_states": encoder_hidden_states.shape,
+                "controlnet_images": controlnet_images.shape,
+                "text_embeds": text_embeds.shape,
+                "time_ids": time_ids.shape,
+                "latent": latent_model_input.shape,
+            },
+            device=latent_model_input.device,
+        )
+
+        # Costruzione del dizionario di input per l'inferenza
+        inputs = {
+            "sample": latent_model_input,
+            "timestep": timestep,
+            "encoder_hidden_states": encoder_hidden_states,
+            "controlnet_images": controlnet_images,
+            "text_embeds": text_embeds,
+            "time_ids": time_ids,
+        }
+
+        noise_pred = self.engine.infer(
+            inputs,
+            self.stream,
+            use_cuda_graph=self.use_cuda_graph,
+        )["latent"]
+
+        return UNet2DConditionOutput(sample=noise_pred)
+
+    def to(self, *args, **kwargs):
+        # Implementa se necessario
+        pass
+
+    def forward(self, *args, **kwargs):
+        # Implementa se necessario
+        pass
 
 class AutoencoderKLEngine:
     def __init__(

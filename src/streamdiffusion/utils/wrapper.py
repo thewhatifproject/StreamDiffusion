@@ -495,7 +495,8 @@ class StreamDiffusionWrapper:
                 
                 if acceleration == "tensorrt":
                     from streamdiffusion.acceleration.tensorrt import accelerate_with_tensorrt
-                    engine_dir = Path(engine_dir)
+                    #engine_dir = Path(engine_dir)
+                    engine_dir = "/workspace/thewhatifmirror/backend/engines/stable-diffusion-xl-base-1.0/"
                     stream = accelerate_with_tensorrt(
                         stream=stream,
                         engine_dir=str(engine_dir),

@@ -12,7 +12,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img impo
 from huggingface_hub import hf_hub_download
 
 from streamdiffusion.image_filter import SimilarImageFilter
-from streamdiffusion.unet_with_control import UNet2DConditionControlNetModel
+from streamdiffusion.unet_with_control import UNet2DConditionControlNetModel, UNet2DConditionXLControlNetModel
 
 
 class StreamDiffusion:
@@ -146,11 +146,18 @@ class StreamDiffusion:
             for controlnet_dict in controlnet_dicts
         ]
 
-        self.unet = UNet2DConditionControlNetModel(
-            unet=self.unet,
-            controlnets=controlnets,
-            controlnet_scales=[list(controlnet_dict.values())[0] for controlnet_dict in controlnet_dicts],
-        )
+        if self.sdxl:
+                self.unet = UNet2DConditionXLControlNetModel(
+                    unet=self.unet,
+                    controlnets=controlnets,
+                    controlnet_scales=[list(controlnet_dict.values())[0] for controlnet_dict in controlnet_dicts],
+                )
+        else:
+                self.unet = UNet2DConditionControlNetModel(
+                    unet=self.unet,
+                    controlnets=controlnets,
+                    controlnet_scales=[list(controlnet_dict.values())[0] for controlnet_dict in controlnet_dicts],
+                )
 
     def enable_similar_image_filter(self, threshold: float = 0.98, max_skip_frame: float = 10) -> None:
         self.similar_image_filter = True
