@@ -21,7 +21,8 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
                 **kwargs
             )
 
-            down_samples = [down_sample * self.controlnet_scales[i] for down_sample in down_samples]
+            #down_samples = [down_sample * self.controlnet_scales[i] for down_sample in down_samples]
+            down_samples = [down_sample * self.controlnet_scales[i].detach() for down_sample in down_samples]
             mid_sample *= self.controlnet_scales[i]
 
             # merge samples
