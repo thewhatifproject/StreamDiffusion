@@ -645,6 +645,7 @@ class StreamDiffusionWrapper:
 
                     if self.is_controlnet_enabled:
                         if self.sdxl:
+                            print("IIN")
                             unet_config = stream.unet.config
                             print("unet config", unet_config)
                             stream.unet = UNet2DConditionXLControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
