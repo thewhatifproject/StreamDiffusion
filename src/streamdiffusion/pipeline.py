@@ -277,7 +277,14 @@ class StreamDiffusion:
             return self.c_out[idx] * F_theta + self.c_skip[idx] * x_t_latent_batch
 
     @torch.inference_mode()
-    def unet_step(self, x_t_latent: torch.Tensor, t_list: Union[torch.Tensor, List[int]], added_cond_kwargs, idx: Optional[int] = None, controlnet_images: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def unet_step(self, 
+                x_t_latent: torch.Tensor, 
+                t_list: Union[torch.Tensor, List[int]], 
+                added_cond_kwargs, 
+                idx: Optional[int] = None, 
+                controlnet_images: Optional[torch.Tensor] = None
+                ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Gestione della guida: duplica per la guidance se richiesto
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
             t_list = torch.concat([t_list[0:1], t_list], dim=0)
@@ -287,16 +294,34 @@ class StreamDiffusion:
         else:
             x_t_latent_plus_uc = x_t_latent
 
-        # Passa le immagini di condizionamento se fornite
-        if controlnet_images is not None:
+        # Se il controllo è abilitato e sono fornite immagini di controllo,
+        # esegui il modulo controlnet separatamente.
+        if controlnet_images is not None and self.controlnet_enabled:
+            # Qui chiamiamo il modulo controlnet della pipeline
+            # (il parametro 'controlnet_cond' prende le immagini di controllo)
+            # Nota: potresti dover aggiustare 'conditioning_scale', 'guess_mode' e altri parametri
+            down_block_res_samples, mid_block_res_sample = self.pipe.controlnet(
+                x_t_latent_plus_uc,
+                t_list,
+                encoder_hidden_states=self.prompt_embeds,
+                controlnet_cond=controlnet_images,
+                added_cond_kwargs=added_cond_kwargs,
+                conditioning_scale=1.0,  # imposta il valore desiderato
+                guess_mode=False,
+                return_dict=False,
+            )
+            # Chiamata alla UNet senza passare "controlnet_images"
             model_pred = self.unet(
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
                 added_cond_kwargs=added_cond_kwargs,
-                controlnet_images=controlnet_images,
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+                return_dict=False,
             )[0]
         else:
+            # Se non c'è condizionamento controlnet, chiama la UNet normalmente.
             model_pred = self.unet(
                 x_t_latent_plus_uc,
                 t_list,
@@ -305,6 +330,7 @@ class StreamDiffusion:
                 return_dict=False,
             )[0]
 
+        # (Il resto del metodo rimane invariato: applica la guidance, gestisce R-CFG, ecc.)
         if self.cfg_type == "initialize":
             noise_pred_text = model_pred[1:]
             self.stock_noise = torch.concat([model_pred[0:1], self.stock_noise[1:]], dim=0)
