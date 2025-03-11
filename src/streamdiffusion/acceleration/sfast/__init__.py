@@ -1,6 +1,7 @@
 from typing import Optional
 
-from sfast.compilers.diffusion_pipeline_compiler import CompilationConfig, compile
+from sfast.compilers.diffusion_pipeline_compiler import CompilationConfig
+from diffusion_pipeline_compiler import compile
 
 from ...pipeline import StreamDiffusion
 
