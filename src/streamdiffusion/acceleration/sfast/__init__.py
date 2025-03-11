@@ -25,7 +25,7 @@ def accelerate_with_stable_fast(
         except ImportError:
             print("Triton not installed, skip")
         # CUDA Graph is suggested for small batch sizes and small resolutions to reduce CPU overhead.
-        config.enable_cuda_graph = True
+        config.enable_cuda_graph = False
     stream.pipe = compile(stream.pipe, config)
     stream.unet = stream.pipe.unet
     stream.vae = stream.pipe.vae
