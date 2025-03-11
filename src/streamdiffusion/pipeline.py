@@ -87,7 +87,7 @@ class StreamDiffusion:
 
         self.inference_time_ema = 0
         # Aggiorna il flag sdxl per riconoscere sia la versione standard sia quella ControlNet
-        self.sdxl = isinstance(pipe, StableDiffusionXLPipeline)
+        self.sdxl = True
         # Flag per indicare se il ControlNet è integrato
         self.controlnet_enabled = hasattr(pipe, "controlnet") and pipe.controlnet is not None
 
