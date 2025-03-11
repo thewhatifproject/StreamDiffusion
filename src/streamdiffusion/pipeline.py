@@ -93,7 +93,7 @@ class StreamDiffusion:
         self.vae = pipe.vae
 
         self.inference_time_ema = 0
-        self.sdxl = type(self.pipe) is StableDiffusionXLPipeline
+        self.sdxl = True
 
     def load_lcm_lora(
         self,

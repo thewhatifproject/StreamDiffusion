@@ -6,7 +6,7 @@ from typing import Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
-from diffusers import AutoencoderTiny, StableDiffusionPipeline, StableDiffusionXLPipeline
+from diffusers import AutoencoderTiny, ControlNetModel, StableDiffusionPipeline, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
@@ -460,19 +460,43 @@ class StreamDiffusionWrapper:
         """
         
         if self.sdxl:
-            try:  # Load from local directory
-                pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
+            
+            if self.is_controlnet_enabled:
+                
+                controlnets = [
+                        ControlNetModel.from_pretrained(list(controlnet_dict.keys())[0]).to(self.device, self.dtype)
+                        for controlnet_dict in controlnet_dicts
+                    ]
+                
+                try:  # Load from local directory
+                    pipe: StableDiffusionXLPipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
+                        model_id_or_path, controlnet=controlnets,
+                    ).to(device=self.device, dtype=self.dtype)
 
-            except ValueError:  # Load from huggingface
-                pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_single_file(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
-            except Exception:  # No model found
-                traceback.print_exc()
-                print("Model load has failed. Doesn't exist.")
-                exit()
+                except ValueError:  # Load from huggingface
+                    pipe: StableDiffusionXLPipeline = StableDiffusionXLControlNetPipeline.from_single_file(
+                        model_id_or_path, controlnet=controlnets,
+                    ).to(device=self.device, dtype=self.dtype)
+                except Exception:  # No model found
+                    traceback.print_exc()
+                    print("Model load has failed. Doesn't exist.")
+                    exit()
+                
+            else:
+                
+                try:  # Load from local directory
+                    pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
+                        model_id_or_path,
+                    ).to(device=self.device, dtype=self.dtype)
+
+                except ValueError:  # Load from huggingface
+                    pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_single_file(
+                        model_id_or_path,
+                    ).to(device=self.device, dtype=self.dtype)
+                except Exception:  # No model found
+                    traceback.print_exc()
+                    print("Model load has failed. Doesn't exist.")
+                    exit()
         else:
             try:  # Load from local directory
                 pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
@@ -535,10 +559,6 @@ class StreamDiffusionWrapper:
                     stream.load_lora(lora_name)
                     stream.fuse_lora(lora_scale=lora_scale)
                     print(f"Use LoRA: {lora_name} in weights {lora_scale}")
-
-            if controlnet_dicts is not None:
-                stream.load_controlnet(controlnet_dicts)
-                print(f"Use controlnet: {controlnet_dicts}")
 
         if use_tiny_vae:
             if vae_id is not None:
