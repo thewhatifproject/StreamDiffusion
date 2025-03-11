@@ -544,9 +544,7 @@ class StreamDiffusionWrapper:
                         ),
                         "unet.engine",
                     )
-                    
-                    print("unet path test", unet_path)
-                    
+                                        
                     vae_encoder_path = os.path.join(
                         engine_dir,
                         create_prefix(
@@ -625,6 +623,7 @@ class StreamDiffusionWrapper:
                             max_batch_size=stream.frame_bff_size,
                             min_batch_size=stream.frame_bff_size,
                         )
+                        print("COMPILE VAE DEC")
                         compile_vae_decoder(
                             vae,
                             vae_decoder_model,
@@ -643,6 +642,7 @@ class StreamDiffusionWrapper:
                             max_batch_size=stream.frame_bff_size,
                             min_batch_size=stream.frame_bff_size,
                         )
+                        print("VAEE ENC MODEL")
                         compile_vae_encoder(
                             vae_encoder,
                             vae_encoder_model,
