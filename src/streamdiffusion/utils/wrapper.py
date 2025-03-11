@@ -625,6 +625,7 @@ class StreamDiffusionWrapper:
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
                             num_controlnets = len(pipe.controlnet.nets) if hasattr(pipe, "controlnet") and hasattr(pipe.controlnet, "nets") else len(controlnet_dicts)
+                            print("QUI2")
                             unet_model = UNetWithControlNet(
                                 fp16=True,
                                 device=stream.device,
@@ -634,6 +635,7 @@ class StreamDiffusionWrapper:
                                 embedding_dim=stream.text_encoder.config.hidden_size,
                                 unet_dim=pipe.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
                             )
+                            print("QUI1")
                             compile_control_unet(
                                 stream.unet,
                                 unet_model,
@@ -652,7 +654,7 @@ class StreamDiffusionWrapper:
                                 unet_dim=pipe.unet.config.in_channels,
                             )
                             compile_unet(
-                                pipe.unet,
+                                stream.unet,
                                 unet_model,
                                 unet_path + ".onnx",
                                 unet_path + ".opt.onnx",
