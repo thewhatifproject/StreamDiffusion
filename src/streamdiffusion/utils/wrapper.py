@@ -263,6 +263,9 @@ class StreamDiffusionWrapper:
         Union[Image.Image, List[Image.Image]]
             The generated image.
         """
+        if prompt is None:
+            prompt = "elon musk"
+            
         if prompt is not None:
             self.stream.update_prompt(prompt)
 
