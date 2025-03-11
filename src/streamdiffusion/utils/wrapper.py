@@ -566,7 +566,9 @@ class StreamDiffusionWrapper:
 
                     unet = stream.unet
                     vae = stream.vae
+                    
                     del stream.unet, stream.vae
+                    
                     vae_config = vae.config
                     vae_dtype = vae.dtype
                     unet_config = unet.unet.config if self.is_controlnet_enabled else unet.config
@@ -623,7 +625,6 @@ class StreamDiffusionWrapper:
                             max_batch_size=stream.frame_bff_size,
                             min_batch_size=stream.frame_bff_size,
                         )
-                        print("COMPILE VAE DEC")
                         compile_vae_decoder(
                             vae,
                             vae_decoder_model,
@@ -642,7 +643,6 @@ class StreamDiffusionWrapper:
                             max_batch_size=stream.frame_bff_size,
                             min_batch_size=stream.frame_bff_size,
                         )
-                        print("VAEE ENC MODEL")
                         compile_vae_encoder(
                             vae_encoder,
                             vae_encoder_model,
@@ -651,10 +651,9 @@ class StreamDiffusionWrapper:
                             vae_encoder_path,
                             opt_batch_size=stream.frame_bff_size,
                         )
+                        print("VAEE COMILE ENC MODEL")
                         
                     del vae, unet
-                    gc.collect()
-                    torch.cuda.empty_cache()
 
                     cuda_stream = cuda.Stream()
 
