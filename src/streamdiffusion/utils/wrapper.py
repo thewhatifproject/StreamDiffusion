@@ -624,7 +624,6 @@ class StreamDiffusionWrapper:
                     if not os.path.exists(unet_path):
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
-                            # Se usi il ControlNet nativo, determina il numero di ControlNets:
                             num_controlnets = len(pipe.controlnet.nets) if hasattr(pipe, "controlnet") and hasattr(pipe.controlnet, "nets") else len(controlnet_dicts)
                             unet_model = UNetWithControlNet(
                                 fp16=True,
@@ -633,7 +632,7 @@ class StreamDiffusionWrapper:
                                 min_batch_size=stream.trt_unet_batch_size,
                                 num_controlnets=num_controlnets,
                                 embedding_dim=stream.text_encoder.config.hidden_size,
-                                unet_dim=stream.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
+                                unet_dim=stream.pipe.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
                             )
                             compile_control_unet(
                                 stream.unet,
@@ -650,7 +649,7 @@ class StreamDiffusionWrapper:
                                 max_batch_size=stream.trt_unet_batch_size,
                                 min_batch_size=stream.trt_unet_batch_size,
                                 embedding_dim=stream.text_encoder.config.hidden_size,
-                                unet_dim=stream.unet.config.in_channels,
+                                unet_dim=stream.pipe.unet.config.in_channels,
                             )
                             compile_unet(
                                 stream.unet,
