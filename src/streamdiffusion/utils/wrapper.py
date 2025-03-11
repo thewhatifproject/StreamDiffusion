@@ -564,18 +564,6 @@ class StreamDiffusionWrapper:
                         "vae_decoder.engine",
                     )
 
-                    unet = stream.unet
-                    vae = stream.vae
-                    
-                    del stream.unet, stream.vae
-                    
-                    vae_config = vae.config
-                    vae_dtype = vae.dtype
-                    unet_config = unet.unet.config if self.is_controlnet_enabled else unet.config
-
-                    gc.collect()
-                    torch.cuda.empty_cache()
-
                     if not os.path.exists(unet_path) and not self.sdxl:
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
@@ -619,25 +607,25 @@ class StreamDiffusionWrapper:
                     
                     if not os.path.exists(vae_decoder_path):
                         os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
-                        vae.forward = vae.decode
+                        stream.vae.forward = stream.vae.decode
                         vae_decoder_model = VAE(
                             device=stream.device,
                             max_batch_size=stream.frame_bff_size,
                             min_batch_size=stream.frame_bff_size,
                         )
                         compile_vae_decoder(
-                            vae,
+                            stream.vae,
                             vae_decoder_model,
                             vae_decoder_path + ".onnx",
                             vae_decoder_path + ".opt.onnx",
                             vae_decoder_path,
                             opt_batch_size=stream.frame_bff_size,
                         )
-                        delattr(vae, "forward")
+                        delattr(stream.vae, "forward")
 
                     if not os.path.exists(vae_encoder_path):
                         os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
-                        vae_encoder = TorchVAEEncoder(vae).to(torch.device("cuda"))
+                        vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
                         vae_encoder_model = VAEEncoder(
                             device=stream.device,
                             max_batch_size=stream.frame_bff_size,
@@ -653,9 +641,14 @@ class StreamDiffusionWrapper:
                         )
                         print("VAEE COMILE ENC MODEL")
                         
-                    del vae, unet
-
+                    gc.collect()
+                    torch.cuda.empty_cache()    
+                        
                     cuda_stream = cuda.Stream()
+                    
+                    vae_config = stream.vae.config
+                    vae_dtype = stream.vae.dtype
+                    unet_config = stream.unet.unet.config if self.is_controlnet_enabled else stream.unet.config
 
                     if self.is_controlnet_enabled:
                         if self.sdxl:
