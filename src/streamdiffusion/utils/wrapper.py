@@ -625,7 +625,6 @@ class StreamDiffusionWrapper:
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
                             num_controlnets = len(pipe.controlnet.nets) if hasattr(pipe, "controlnet") and hasattr(pipe.controlnet, "nets") else len(controlnet_dicts)
-                            print("QUI2")
                             unet_model = UNetWithControlNet(
                                 fp16=True,
                                 device=stream.device,
@@ -635,7 +634,6 @@ class StreamDiffusionWrapper:
                                 embedding_dim=stream.text_encoder.config.hidden_size,
                                 unet_dim=pipe.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
                             )
-                            print("QUI1")
                             compile_control_unet(
                                 stream.unet,
                                 unet_model,
@@ -663,6 +661,7 @@ class StreamDiffusionWrapper:
                             )
 
                     if not os.path.exists(vae_decoder_path):
+                        print("QUI3")
                         os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
                         stream.vae.forward = stream.vae.decode
                         vae_decoder_model = VAE(
