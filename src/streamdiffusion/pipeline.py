@@ -289,7 +289,6 @@ class StreamDiffusion:
             x_t_latent_plus_uc = x_t_latent
 
         if controlnet_images is not None and self.controlnet_enabled:
-            # Usa i conditioning scale passati in input come lista
             cond_scale = self.controlnet_conditioning_scales if hasattr(self, "controlnet_conditioning_scales") else [1.0]
             down_block_res_samples, mid_block_res_sample = self.pipe.controlnet(
                 x_t_latent_plus_uc,
@@ -363,6 +362,16 @@ class StreamDiffusion:
 
     def predict_x0_batch(self, x_t_latent: torch.Tensor, controlnet_images: Optional[torch.Tensor] = None) -> torch.Tensor:
         added_cond_kwargs = {}
+        if self.sdxl:
+        # Assicurati che self.add_text_embeds sia stato settato in update_prompt
+            if not hasattr(self, "add_text_embeds") or self.add_text_embeds is None:
+                # Fallback: usa prompt_embeds come text_embeds se non sono disponibili add_text_embeds
+                added_cond_kwargs = {"text_embeds": self.prompt_embeds.to(self.device)}
+            else:
+                added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), 
+                                    "time_ids": self.add_time_ids.to(self.device)}
+        else:
+                added_cond_kwargs = {}
         if controlnet_images is not None:
             prev_controlnet_images = self.controlnet_images_buffer
         if self.use_denoising_batch:
