@@ -632,7 +632,7 @@ class StreamDiffusionWrapper:
                                 min_batch_size=stream.trt_unet_batch_size,
                                 num_controlnets=num_controlnets,
                                 embedding_dim=stream.text_encoder.config.hidden_size,
-                                unet_dim=stream.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
+                                unet_dim=pipe.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
                             )
                             compile_control_unet(
                                 stream.unet,
@@ -649,10 +649,10 @@ class StreamDiffusionWrapper:
                                 max_batch_size=stream.trt_unet_batch_size,
                                 min_batch_size=stream.trt_unet_batch_size,
                                 embedding_dim=stream.text_encoder.config.hidden_size,
-                                unet_dim=stream.unet.config.in_channels,
+                                unet_dim=pipe.unet.config.in_channels,
                             )
                             compile_unet(
-                                stream.unet,
+                                pipe.unet,
                                 unet_model,
                                 unet_path + ".onnx",
                                 unet_path + ".opt.onnx",
