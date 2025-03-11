@@ -468,6 +468,8 @@ class StreamDiffusionWrapper:
                         for controlnet_dict in controlnet_dicts
                     ]
                 
+                self.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
+                
                 try:  # Load from local directory
                     pipe: StableDiffusionXLPipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
                         model_id_or_path, controlnet=controlnets,
