@@ -426,6 +426,7 @@ class StreamDiffusionWrapper:
                 print("Model load has failed. Doesn't exist.")
                 exit()
 
+        pipe.enable_model_cpu_offload()
         stream = StreamDiffusion(
             pipe=pipe,
             t_index_list=t_index_list,
@@ -605,7 +606,7 @@ class StreamDiffusionWrapper:
                                 unet_dim=stream.unet.config.in_channels,
                             )
                             compile_unet(
-                                stream.unet,
+                                unet,
                                 unet_model,
                                 unet_path + ".onnx",
                                 unet_path + ".opt.onnx",
@@ -632,11 +633,11 @@ class StreamDiffusionWrapper:
                             vae_decoder_path,
                             opt_batch_size=stream.frame_bff_size,
                         )
-                        delattr(stream.vae, "forward")
+                        delattr(vae, "forward")
 
                     if not os.path.exists(vae_encoder_path):
                         os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
-                        vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
+                        vae_encoder = TorchVAEEncoder(vae).to(torch.device("cuda"))
                         vae_encoder_model = VAEEncoder(
                             device=stream.device,
                             max_batch_size=stream.frame_bff_size,
@@ -651,8 +652,7 @@ class StreamDiffusionWrapper:
                             opt_batch_size=stream.frame_bff_size,
                         )
                         
-                    del vae
-                    
+                    del vae, unet
                     gc.collect()
                     torch.cuda.empty_cache()
 
