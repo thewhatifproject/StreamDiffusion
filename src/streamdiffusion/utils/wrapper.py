@@ -397,6 +397,9 @@ class StreamDiffusionWrapper:
             The loaded model.
         """
         
+        gc.collect()
+        torch.cuda.empty_cache()
+        
         if self.sdxl:
             try:  # Load from local directory
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
@@ -563,8 +566,7 @@ class StreamDiffusionWrapper:
                         ),
                         "vae_decoder.engine",
                     )
-                    print("C0")
-
+                    
                     if not os.path.exists(unet_path) and not self.sdxl:
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
@@ -606,7 +608,6 @@ class StreamDiffusionWrapper:
                     elif self.sdxl:
                         unet_path = "/workspace/thewhatifmirror/backend/engines/stable-diffusion-xl-base-1.0/unet/model.engine"
                     
-                    print("C1")
                     if not os.path.exists(vae_decoder_path):
                         os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
                         stream.vae.forward = stream.vae.decode
@@ -625,7 +626,6 @@ class StreamDiffusionWrapper:
                         )
                         delattr(stream.vae, "forward")
                     
-                    print("C2")
                     if not os.path.exists(vae_encoder_path):
                         os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
                         vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
@@ -643,7 +643,6 @@ class StreamDiffusionWrapper:
                             opt_batch_size=stream.frame_bff_size,
                         )
                     
-                    print("C3")
                     gc.collect()
                     torch.cuda.empty_cache()    
                         
@@ -655,16 +654,13 @@ class StreamDiffusionWrapper:
 
                     if self.is_controlnet_enabled:
                         if self.sdxl:
-                            print("in load sdxl")
                             stream.unet = UNet2DConditionXLControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
                             setattr(stream.unet, "config", unet_config)
-                            print("in unetconf")
                         else:
                             stream.unet = UNet2DConditionControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
                     else:
                         stream.unet = UNet2DConditionModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
                     
-                    print("C4")
                     stream.vae = AutoencoderKLEngine(
                         vae_encoder_path,
                         vae_decoder_path,
@@ -680,6 +676,13 @@ class StreamDiffusionWrapper:
 
                     print("TensorRT acceleration enabled.")
 
+                elif acceleration == "sfast":
+                    from streamdiffusion.acceleration.sfast import (
+                        accelerate_with_stable_fast,
+                    )
+
+                    stream = accelerate_with_stable_fast(stream)
+                    print("StableFast acceleration enabled.")
         except Exception as e:
             print(e)
             # traceback.print_exc()
