@@ -426,7 +426,7 @@ class StreamDiffusionWrapper:
                 print("Model load has failed. Doesn't exist.")
                 exit()
 
-        pipe.enable_model_cpu_offload()
+        #pipe.enable_model_cpu_offload()
         stream = StreamDiffusion(
             pipe=pipe,
             t_index_list=t_index_list,
@@ -563,6 +563,7 @@ class StreamDiffusionWrapper:
                         ),
                         "vae_decoder.engine",
                     )
+                    print("C0")
 
                     if not os.path.exists(unet_path) and not self.sdxl:
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
@@ -577,7 +578,7 @@ class StreamDiffusionWrapper:
                                 unet_dim=stream.unet.unet.config.in_channels,
                             )
                             compile_control_unet(
-                                unet,
+                                stream.unet,
                                 unet_model,
                                 unet_path + ".onnx",
                                 unet_path + ".opt.onnx",
@@ -594,7 +595,7 @@ class StreamDiffusionWrapper:
                                 unet_dim=stream.unet.config.in_channels,
                             )
                             compile_unet(
-                                unet,
+                                stream.unet,
                                 unet_model,
                                 unet_path + ".onnx",
                                 unet_path + ".opt.onnx",
@@ -605,6 +606,7 @@ class StreamDiffusionWrapper:
                     elif self.sdxl:
                         unet_path = "/workspace/thewhatifmirror/backend/engines/stable-diffusion-xl-base-1.0/unet/model.engine"
                     
+                    print("C1")
                     if not os.path.exists(vae_decoder_path):
                         os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
                         stream.vae.forward = stream.vae.decode
@@ -622,7 +624,8 @@ class StreamDiffusionWrapper:
                             opt_batch_size=stream.frame_bff_size,
                         )
                         delattr(stream.vae, "forward")
-
+                    
+                    print("C2")
                     if not os.path.exists(vae_encoder_path):
                         os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
                         vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
@@ -639,8 +642,8 @@ class StreamDiffusionWrapper:
                             vae_encoder_path,
                             opt_batch_size=stream.frame_bff_size,
                         )
-                        print("VAEE COMILE ENC MODEL")
-                        
+                    
+                    print("C3")
                     gc.collect()
                     torch.cuda.empty_cache()    
                         
@@ -661,6 +664,7 @@ class StreamDiffusionWrapper:
                     else:
                         stream.unet = UNet2DConditionModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
                     
+                    print("C4")
                     stream.vae = AutoencoderKLEngine(
                         vae_encoder_path,
                         vae_decoder_path,
