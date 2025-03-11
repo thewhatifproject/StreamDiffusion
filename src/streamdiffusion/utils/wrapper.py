@@ -578,7 +578,6 @@ class StreamDiffusionWrapper:
                     stream.pipe.enable_xformers_memory_efficient_attention()
                 if acceleration == "tensorrt":
                     from polygraphy import cuda
-
                     from streamdiffusion.acceleration.tensorrt import (
                         TorchVAEEncoder,
                         compile_control_unet,
@@ -598,11 +597,7 @@ class StreamDiffusionWrapper:
                         VAEEncoder,
                     )
 
-                    def create_prefix(
-                        model_id_or_path: str,
-                        max_batch_size: int,
-                        min_batch_size: int,
-                    ):
+                    def create_prefix(model_id_or_path: str, max_batch_size: int, min_batch_size: int):
                         maybe_path = Path(model_id_or_path)
                         if maybe_path.exists():
                             return f"{maybe_path.stem}--CM_lora_type-{CM_lora_type}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}--controlnet-{'enabled' if self.is_controlnet_enabled else 'disabled'}"
@@ -612,43 +607,33 @@ class StreamDiffusionWrapper:
                     engine_dir = Path(engine_dir)
                     unet_path = os.path.join(
                         engine_dir,
-                        create_prefix(
-                            model_id_or_path=model_id_or_path,
-                            max_batch_size=stream.trt_unet_batch_size,
-                            min_batch_size=stream.trt_unet_batch_size,
-                        ),
+                        create_prefix(model_id_or_path=model_id_or_path, max_batch_size=stream.trt_unet_batch_size, min_batch_size=stream.trt_unet_batch_size),
                         "unet.engine",
                     )
                     vae_encoder_path = os.path.join(
                         engine_dir,
-                        create_prefix(
-                            model_id_or_path=model_id_or_path,
-                            max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                            min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        ),
+                        create_prefix(model_id_or_path=model_id_or_path, max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size, min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size),
                         "vae_encoder.engine",
                     )
                     vae_decoder_path = os.path.join(
                         engine_dir,
-                        create_prefix(
-                            model_id_or_path=model_id_or_path,
-                            max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                            min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        ),
+                        create_prefix(model_id_or_path=model_id_or_path, max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size, min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size),
                         "vae_decoder.engine",
                     )
 
                     if not os.path.exists(unet_path):
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
+                            # Se usi il ControlNet nativo, determina il numero di ControlNets:
+                            num_controlnets = len(pipe.controlnet.nets) if hasattr(pipe, "controlnet") and hasattr(pipe.controlnet, "nets") else len(controlnet_dicts)
                             unet_model = UNetWithControlNet(
                                 fp16=True,
                                 device=stream.device,
                                 max_batch_size=stream.trt_unet_batch_size,
                                 min_batch_size=stream.trt_unet_batch_size,
-                                num_controlnets=len(controlnet_dicts),
+                                num_controlnets=num_controlnets,
                                 embedding_dim=stream.text_encoder.config.hidden_size,
-                                unet_dim=stream.unet.unet.config.in_channels,
+                                unet_dim=stream.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
                             )
                             compile_control_unet(
                                 stream.unet,
