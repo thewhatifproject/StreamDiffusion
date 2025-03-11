@@ -1,7 +1,7 @@
 from typing import Optional
 
-from sfast.compilers.diffusion_pipeline_compiler import CompilationConfig
-from .diffusion_pipeline_compiler import compile
+from sfast.compilers.diffusion_pipeline_compiler import CompilationConfig, compile
+#from .diffusion_pipeline_compiler import compile
 
 from ...pipeline import StreamDiffusion
 
@@ -28,7 +28,7 @@ def accelerate_with_stable_fast(
         # CUDA Graph is suggested for small batch sizes and small resolutions to reduce CPU overhead.
         config.enable_cuda_graph = False
     
-    stream.pipe.unet = stream.unet
+    #stream.pipe.unet = stream.unet
     stream.pipe = compile(stream.pipe, config)
     stream.unet = stream.pipe.unet
     stream.vae = stream.pipe.vae
