@@ -277,8 +277,9 @@ class StreamDiffusion:
             return self.c_out[idx] * F_theta + self.c_skip[idx] * x_t_latent_batch
 
     @torch.inference_mode()
-    def unet_step(self, x_t_latent: torch.Tensor, t_list: Union[torch.Tensor, List[int]], added_cond_kwargs, 
-                idx: Optional[int] = None, controlnet_images: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def unet_step(self, x_t_latent: torch.Tensor, t_list: Union[torch.Tensor, List[int]],
+                added_cond_kwargs, idx: Optional[int] = None,
+                controlnet_images: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
             t_list = torch.concat([t_list[0:1], t_list], dim=0)
@@ -287,6 +288,13 @@ class StreamDiffusion:
             t_list = torch.concat([t_list, t_list], dim=0)
         else:
             x_t_latent_plus_uc = x_t_latent
+
+        # Assicurati che added_cond_kwargs contenga "text_embeds"
+        if "text_embeds" not in added_cond_kwargs:
+            if hasattr(self, "add_text_embeds") and self.add_text_embeds is not None:
+                added_cond_kwargs["text_embeds"] = self.add_text_embeds.to(self.device)
+            else:
+                raise ValueError("Missing 'text_embeds' in added_cond_kwargs. Ensure update_prompt() sia stato chiamato correttamente.")
 
         if controlnet_images is not None and self.controlnet_enabled:
             cond_scale = self.controlnet_conditioning_scales if hasattr(self, "controlnet_conditioning_scales") else [1.0]
@@ -318,7 +326,7 @@ class StreamDiffusion:
                 return_dict=False,
             )[0]
 
-        # (Il resto del metodo rimane invariato)
+        # Resto del metodo invariato: applica guidance, gestione R-CFG, ecc.
         if self.cfg_type == "initialize":
             noise_pred_text = model_pred[1:]
             self.stock_noise = torch.concat([model_pred[0:1], self.stock_noise[1:]], dim=0)
@@ -347,7 +355,7 @@ class StreamDiffusion:
         else:
             denoised_batch = self.scheduler_step_batch(model_pred, x_t_latent, idx)
         return denoised_batch, model_pred
-
+ 
     @torch.inference_mode()
     def encode_image(self, image_tensors: torch.Tensor) -> torch.Tensor:
         image_tensors = image_tensors.to(device=self.device, dtype=self.vae.dtype)
