@@ -23,7 +23,6 @@ class StreamDiffusionWrapper:
         t_index_list: List[int],
         lora_dict: Optional[Dict[str, float]] = None,
         controlnet_dicts: Optional[List[Dict[str, float]]] = None,
-        mode: Literal["img2img", "txt2img"] = "img2img",
         output_type: Literal["pil", "pt", "np", "latent"] = "pil",
         lcm_lora_id: Optional[str] = None,
         HyperSD_lora_id: Optional[str] = None,
@@ -41,7 +40,6 @@ class StreamDiffusionWrapper:
         enable_similar_image_filter: bool = False,
         similar_image_filter_threshold: float = 0.98,
         similar_image_filter_max_skip_frame: int = 10,
-        use_denoising_batch: bool = True,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         seed: int = 2,
         use_safety_checker: bool = False,
@@ -128,27 +126,14 @@ class StreamDiffusionWrapper:
         self.sdxl = "xl" in model_id_or_path
         self.default_tiny_vae = "madebyollin/taesdxl" if self.sdxl else "madebyollin/taesd"
 
-        if mode == "txt2img":
-            if cfg_type != "none":
-                raise ValueError(f"txt2img mode accepts only cfg_type = 'none', but got {cfg_type}")
-            if use_denoising_batch and frame_buffer_size > 1:
-                if not self.sd_turbo:
-                    raise ValueError("txt2img mode cannot use denoising batch with frame_buffer_size > 1.")
-
-        if mode == "img2img":
-            if not use_denoising_batch:
-                raise NotImplementedError("img2img mode must use denoising batch for now.")
-
         self.device = device
         self.dtype = dtype
         self.width = width
         self.height = height
-        self.mode = mode
         self.output_type = output_type
         self.frame_buffer_size = frame_buffer_size
-        self.batch_size = len(t_index_list) * frame_buffer_size if use_denoising_batch else frame_buffer_size
+        self.batch_size = len(t_index_list) * frame_buffer_size
 
-        self.use_denoising_batch = use_denoising_batch
         self.use_safety_checker = use_safety_checker
 
         self.is_controlnet_enabled = controlnet_dicts is not None
@@ -237,59 +222,7 @@ class StreamDiffusionWrapper:
             not self.is_controlnet_enabled and controlnet_images is None
         ), "If ControlNet is disabled, please do not provide controlnet_images, vice versa."
 
-        if self.mode == "img2img":  
-            return self.img2img(image, prompt, controlnet_images)
-        else:
-            return self.txt2img(prompt, controlnet_images)
-
-    def txt2img(
-        self,
-        prompt: Optional[str] = None,
-        controlnet_images: Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]] = None,
-    ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
-        """
-        Performs txt2img.
-
-        Parameters
-        ----------
-        prompt : Optional[str]
-            The prompt to generate images from.
-        controlnet_images : Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]]
-            The controlnet image(s) to use for inference if controlnet is enabled.
-            by default None.
-
-        Returns
-        -------
-        Union[Image.Image, List[Image.Image]]
-            The generated image.
-        """
-        if prompt is None:
-            prompt = "elon musk"
-            
-        if prompt is not None:
-            self.stream.update_prompt(prompt)
-
-        if isinstance(controlnet_images, str) or isinstance(controlnet_images, Image.Image):
-            controlnet_images = self.preprocess_image(controlnet_images, is_controlnet_image=True)
-        elif isinstance(controlnet_images, list):
-            controlnet_images = [self.preprocess_image(img, is_controlnet_image=True) for img in controlnet_images]
-            controlnet_images = torch.stack(controlnet_images)
-
-        if self.sd_turbo:
-            image_tensor = self.stream.txt2img_sd_turbo(self.batch_size)
-        else:
-            image_tensor = self.stream.txt2img(self.frame_buffer_size, controlnet_images)
-        image = self.postprocess_image(image_tensor, output_type=self.output_type)
-        
-        if self.use_safety_checker:
-            safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(self.device)
-            _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.dtype),
-                clip_input=safety_checker_input.pixel_values.to(self.dtype),
-            )
-            image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
-
-        return image
+        return self.img2img(image, prompt, controlnet_images)
 
     def img2img(
         self,
@@ -522,7 +455,7 @@ class StreamDiffusionWrapper:
             height=self.height,
             do_add_noise=do_add_noise,
             frame_buffer_size=self.frame_buffer_size,
-            use_denoising_batch=self.use_denoising_batch,
+            use_denoising_batch=True,
             cfg_type=cfg_type,
         )
         if not self.sd_turbo:
