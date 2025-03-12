@@ -11,7 +11,6 @@ from PIL import Image
 
 from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
-from ..unet_with_control import UNetWrapper
 
 
 torch.set_grad_enabled(False)
@@ -177,7 +176,7 @@ class StreamDiffusionWrapper:
             self.stream.unet.config.addition_embed_type = None
 
         if device_ids is not None:
-            self.stream.unet = torch.nn.DataParallel(UNetWrapper(self.stream.unet), device_ids=device_ids)
+            self.stream.unet = torch.nn.DataParallel(self.stream.unet, device_ids=device_ids)
 
         if enable_similar_image_filter:
             self.stream.enable_similar_image_filter(

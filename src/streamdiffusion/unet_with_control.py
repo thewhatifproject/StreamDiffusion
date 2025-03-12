@@ -1,6 +1,6 @@
 import torch
 from diffusers import ControlNetModel, UNet2DConditionModel
-import torch.nn as nn
+
 
 class UNet2DConditionControlNetModel(torch.nn.Module):
     def __init__(self, unet: UNet2DConditionModel, controlnets: list[ControlNetModel], controlnet_scales: list[float]):
@@ -44,12 +44,3 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
             **kwargs
         )
         return noise_pred
-
-
-class UNetWrapper(nn.Module):
-    def __init__(self, unet):
-        super().__init__()
-        self.unet = unet
-
-    def forward(self, *args, **kwargs):
-        return self.unet(*args, **kwargs)
