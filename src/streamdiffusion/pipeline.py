@@ -290,7 +290,7 @@ class StreamDiffusion:
             model_pred = self.unet(
                 x_t_latent_plus_uc,
                 t_list,
-                self.prompt_embeds,
+                self.prompt_embeds,  # ora è posizionale
                 added_cond_kwargs,
                 down_block_additional_residuals=down_block_res_samples,
                 mid_block_additional_residual=mid_block_res_sample,
