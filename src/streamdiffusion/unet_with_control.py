@@ -51,11 +51,5 @@ class UNetWrapper(nn.Module):
         super().__init__()
         self.unet = unet
 
-    def forward(self, sample, timestep, encoder_hidden_states, controlnet_images, **kwargs):
-        return self.unet(
-            sample,
-            timestep,
-            encoder_hidden_states,
-            controlnet_images,
-            **kwargs
-        )
+    def forward(self, *args, **kwargs):
+        return self.unet(*args, **kwargs)
