@@ -258,15 +258,9 @@ class StreamDiffusion:
     def unet_step(self, x_t_latent: torch.Tensor, t_list: Union[torch.Tensor, List[int]],
                 added_cond_kwargs, idx: Optional[int] = None,
                 controlnet_images: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self.cfg_type == "initialize":
-            x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
-            t_list = torch.concat([t_list[0:1], t_list], dim=0)
-        elif self.cfg_type == "full":
-            x_t_latent_plus_uc = torch.concat([x_t_latent, x_t_latent], dim=0)
-            t_list = torch.concat([t_list, t_list], dim=0)
-        else:
-            x_t_latent_plus_uc = x_t_latent
 
+        x_t_latent_plus_uc = x_t_latent
+        
         # Assicurati che added_cond_kwargs contenga "text_embeds"
         if "text_embeds" not in added_cond_kwargs:
             if hasattr(self, "add_text_embeds") and self.add_text_embeds is not None:
