@@ -1,7 +1,6 @@
 import torch
 from diffusers import ControlNetModel, UNet2DConditionModel
 
-
 class UNet2DConditionControlNetModel(torch.nn.Module):
     def __init__(self, unet: UNet2DConditionModel, controlnets: list[ControlNetModel], controlnet_scales: list[float]):
         super().__init__()
@@ -10,13 +9,21 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
         self.controlnet_scales = controlnet_scales
 
     def forward(self, *args, **kwargs) -> torch.Tensor:
-        # Supponiamo che gli argomenti vengano passati in ordine:
-        # sample, timestep, encoder_hidden_states, controlnet_images
+        # Estrai i parametri dalla lista degli argomenti o, se non presenti, da kwargs.
         sample = args[0]
         timestep = args[1]
-        encoder_hidden_states = args[2] if len(args) > 2 else kwargs.get("encoder_hidden_states")
-        controlnet_images = args[3] if len(args) > 3 else kwargs.get("controlnet_images")
+        # Usa pop per rimuovere 'encoder_hidden_states' da kwargs se presente
+        if len(args) > 2:
+            encoder_hidden_states = args[2]
+        else:
+            encoder_hidden_states = kwargs.pop("encoder_hidden_states", None)
+        # Stessa cosa per 'controlnet_images'
+        if len(args) > 3:
+            controlnet_images = args[3]
+        else:
+            controlnet_images = kwargs.pop("controlnet_images", None)
 
+        # Passa esplicitamente gli argomenti e **kwargs senza duplicati.
         for i in range(len(self.controlnets)):
             down_samples, mid_sample = self.controlnets[i](
                 sample,
