@@ -11,8 +11,6 @@ from PIL import Image
 
 from streamdiffusion import StreamDiffusion
 
-from ..unet_with_control import UNet2DConditionControlNetModel
-
 torch.set_grad_enabled(False)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -173,8 +171,8 @@ class StreamDiffusionWrapper:
         )
 
         if device_ids is not None:
-            self.stream.unet = torch.nn.DataParallel(UNet2DConditionControlNetModel(self.stream.unet), device_ids=device_ids)
-
+            self.stream.unet = torch.nn.DataParallel(self.stream.unet, device_ids=device_ids)
+    
         if enable_similar_image_filter:
             self.stream.enable_similar_image_filter(
                 similar_image_filter_threshold, similar_image_filter_max_skip_frame
