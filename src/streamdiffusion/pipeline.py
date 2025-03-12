@@ -288,13 +288,13 @@ class StreamDiffusion:
                 return_dict=False,
             )
             model_pred = self.unet(
-                x_t_latent_plus_uc,
-                t_list,
-                self.prompt_embeds,
-                added_cond_kwargs,
+                sample=x_t_latent_plus_uc,
+                timestep=t_list,
+                encoder_hidden_states=self.prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs,
                 down_block_additional_residuals=down_block_res_samples,
                 mid_block_additional_residual=mid_block_res_sample,
-                return_dict=False,
+                return_dict=False
             )[0]
         else:
             model_pred = self.unet(
