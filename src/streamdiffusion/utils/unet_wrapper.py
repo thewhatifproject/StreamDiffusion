@@ -9,7 +9,7 @@ class WrappedUNet(torch.nn.Module):
         return self.unet(
             sample,
             timestep,
-            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states,
             added_cond_kwargs=added_cond_kwargs,
             **kwargs
         )
