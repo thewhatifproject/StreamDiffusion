@@ -6,4 +6,10 @@ class WrappedUNet(torch.nn.Module):
         self.unet = unet
 
     def forward(self, sample, timestep, encoder_hidden_states, added_cond_kwargs=None, **kwargs):
-        return self.unet(sample, timestep, encoder_hidden_states=encoder_hidden_states, added_cond_kwargs=added_cond_kwargs, **kwargs)
+        return self.unet(
+            sample,
+            timestep,
+            encoder_hidden_states=encoder_hidden_states,
+            added_cond_kwargs=added_cond_kwargs,
+            **kwargs
+        )
