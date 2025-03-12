@@ -620,7 +620,8 @@ class StreamDiffusionWrapper:
                         create_prefix(model_id_or_path=model_id_or_path, max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size, min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size),
                         "vae_decoder.engine",
                     )
-
+                    
+                    print("PREFIX PATH CREATED")
                     if not os.path.exists(unet_path):
                         os.makedirs(os.path.dirname(unet_path), exist_ok=True)
                         if self.is_controlnet_enabled:
@@ -661,7 +662,6 @@ class StreamDiffusionWrapper:
                             )
 
                     if not os.path.exists(vae_decoder_path):
-                        print("QUI3")
                         os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
                         stream.vae.forward = stream.vae.decode
                         vae_decoder_model = VAE(
@@ -669,6 +669,7 @@ class StreamDiffusionWrapper:
                             max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                             min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                         )
+                        print("VAE DECODER ISTANCE")
                         compile_vae_decoder(
                             stream.vae,
                             vae_decoder_model,
@@ -677,6 +678,7 @@ class StreamDiffusionWrapper:
                             vae_decoder_path,
                             opt_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                         )
+                        print("VAE DECODER COMPILED")
                         delattr(stream.vae, "forward")
 
                     if not os.path.exists(vae_encoder_path):
@@ -687,6 +689,8 @@ class StreamDiffusionWrapper:
                             max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                             min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                         )
+                        print("VAE ENCODER CREATED")
+
                         compile_vae_encoder(
                             vae_encoder,
                             vae_encoder_model,
@@ -695,7 +699,8 @@ class StreamDiffusionWrapper:
                             vae_encoder_path,
                             opt_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                         )
-
+                        print("VAE ENCODER COMPILED")
+                        
                     cuda_stream = cuda.Stream()
 
                     vae_config = stream.vae.config

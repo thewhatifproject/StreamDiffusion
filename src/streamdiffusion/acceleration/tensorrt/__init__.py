@@ -92,9 +92,17 @@ def compile_control_unet(
     opt_batch_size: int = 1,
     engine_build_options: dict = {},
 ):
+    # Manda l'intero modulo in CUDA in FP16
     unet = unet.to(torch.device("cuda"), dtype=torch.float16)
-    unet.unet = unet.unet.to(torch.device("cuda"), dtype=torch.float16)
-    unet.controlnets = [controlnet.to(torch.device("cuda"), dtype=torch.float16) for controlnet in unet.controlnets]
+    # Se esiste un sottomodulo 'unet', convertilo; altrimenti non fare nulla.
+    if hasattr(unet, "unet"):
+        unet.unet = unet.unet.to(torch.device("cuda"), dtype=torch.float16)
+    # Converte ogni controlnet (se presenti)
+    if hasattr(unet, "controlnets"):
+        unet.controlnets = [
+            controlnet.to(torch.device("cuda"), dtype=torch.float16)
+            for controlnet in unet.controlnets
+        ]
     builder = EngineBuilder(model_data, unet, device=torch.device("cuda"))
     builder.build(
         onnx_path,
