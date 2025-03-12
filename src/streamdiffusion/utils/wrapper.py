@@ -597,133 +597,141 @@ class StreamDiffusionWrapper:
                         VAEEncoder,
                     )
 
-                    def create_prefix(model_id_or_path: str, max_batch_size: int, min_batch_size: int):
-                        maybe_path = Path(model_id_or_path)
-                        if maybe_path.exists():
-                            return f"{maybe_path.stem}--CM_lora_type-{CM_lora_type}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}--controlnet-{'enabled' if self.is_controlnet_enabled else 'disabled'}"
-                        else:
-                            return f"{model_id_or_path}--CM_lora_type-{CM_lora_type}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}--controlnet-{'enabled' if self.is_controlnet_enabled else 'disabled'}"
-
-                    engine_dir = Path(engine_dir)
-                    unet_path = os.path.join(
-                        engine_dir,
-                        create_prefix(model_id_or_path=model_id_or_path, max_batch_size=stream.trt_unet_batch_size, min_batch_size=stream.trt_unet_batch_size),
-                        "unet.engine",
-                    )
-                    vae_encoder_path = os.path.join(
-                        engine_dir,
-                        create_prefix(model_id_or_path=model_id_or_path, max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size, min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size),
-                        "vae_encoder.engine",
-                    )
-                    vae_decoder_path = os.path.join(
-                        engine_dir,
-                        create_prefix(model_id_or_path=model_id_or_path, max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size, min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size),
-                        "vae_decoder.engine",
-                    )
-                    
-                    print("PREFIX PATH CREATED")
-                    if not os.path.exists(unet_path):
-                        os.makedirs(os.path.dirname(unet_path), exist_ok=True)
-                        if self.is_controlnet_enabled:
-                            num_controlnets = len(pipe.controlnet.nets) if hasattr(pipe, "controlnet") and hasattr(pipe.controlnet, "nets") else len(controlnet_dicts)
-                            unet_model = UNetWithControlNet(
-                                fp16=True,
-                                device=stream.device,
-                                max_batch_size=stream.trt_unet_batch_size,
-                                min_batch_size=stream.trt_unet_batch_size,
-                                num_controlnets=num_controlnets,
-                                embedding_dim=stream.text_encoder.config.hidden_size,
-                                unet_dim=stream.unet.config.in_channels,  # Accedi direttamente a stream.unet.config
-                            )
-                            compile_control_unet(
-                                stream.unet,
-                                unet_model,
-                                unet_path + ".onnx",
-                                unet_path + ".opt.onnx",
-                                unet_path,
-                                opt_batch_size=stream.trt_unet_batch_size,
-                            )
-                        else:
-                            unet_model = UNet(
-                                fp16=True,
-                                device=stream.device,
-                                max_batch_size=stream.trt_unet_batch_size,
-                                min_batch_size=stream.trt_unet_batch_size,
-                                embedding_dim=stream.text_encoder.config.hidden_size,
-                                unet_dim=pipe.unet.config.in_channels,
-                            )
-                            compile_unet(
-                                stream.unet,
-                                unet_model,
-                                unet_path + ".onnx",
-                                unet_path + ".opt.onnx",
-                                unet_path,
-                                opt_batch_size=stream.trt_unet_batch_size,
-                            )
-
-                    if not os.path.exists(vae_decoder_path):
-                        os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
-                        stream.vae.forward = stream.vae.decode
-                        vae_decoder_model = VAE(
-                            device=stream.device,
-                            max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                            min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        )
-                        print("VAE DECODER ISTANCE")
-                        compile_vae_decoder(
-                            stream.vae,
-                            vae_decoder_model,
-                            vae_decoder_path + ".onnx",
-                            vae_decoder_path + ".opt.onnx",
-                            vae_decoder_path,
-                            opt_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        )
-                        print("VAE DECODER COMPILED")
-                        delattr(stream.vae, "forward")
-
-                    if not os.path.exists(vae_encoder_path):
-                        os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
-                        vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
-                        vae_encoder_model = VAEEncoder(
-                            device=stream.device,
-                            max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                            min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        )
-                        print("VAE ENCODER CREATED")
-
-                        compile_vae_encoder(
-                            vae_encoder,
-                            vae_encoder_model,
-                            vae_encoder_path + ".onnx",
-                            vae_encoder_path + ".opt.onnx",
-                            vae_encoder_path,
-                            opt_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        )
-                        print("VAE ENCODER COMPILED")
-                        
-                    cuda_stream = cuda.Stream()
-
-                    vae_config = stream.vae.config
-                    vae_dtype = stream.vae.dtype
-
-                    if self.is_controlnet_enabled:
-                        stream.unet = UNet2DConditionControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
+                def create_prefix(model_id_or_path: str, max_batch_size: int, min_batch_size: int):
+                    maybe_path = Path(model_id_or_path)
+                    if maybe_path.exists():
+                        return f"{maybe_path.stem}--CM_lora_type-{stream.CM_lora_type}--tiny_vae-{stream.pipe.vae.__class__.__name__}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{stream.mode}--controlnet-{'enabled' if stream.controlnet_enabled else 'disabled'}"
                     else:
-                        stream.unet = UNet2DConditionModelEngine(unet_path, cuda_stream, use_cuda_graph=False)
-                    stream.vae = AutoencoderKLEngine(
-                        vae_encoder_path,
-                        vae_decoder_path,
-                        cuda_stream,
-                        stream.pipe.vae_scale_factor,
-                        use_cuda_graph=False,
+                        return f"{model_id_or_path}--CM_lora_type-{stream.CM_lora_type}--tiny_vae-{stream.pipe.vae.__class__.__name__}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{stream.mode}--controlnet-{'enabled' if stream.controlnet_enabled else 'disabled'}"
+
+                engine_dir = Path(engine_dir)
+                unet_path = os.path.join(
+                    engine_dir,
+                    create_prefix(model_id_or_path=stream.pipe.config.name_or_path, max_batch_size=stream.trt_unet_batch_size, min_batch_size=stream.trt_unet_batch_size),
+                    "unet.engine",
+                )
+                vae_encoder_path = os.path.join(
+                    engine_dir,
+                    create_prefix(model_id_or_path=stream.pipe.config.name_or_path,
+                                max_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
+                                min_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size),
+                    "vae_encoder.engine",
+                )
+                vae_decoder_path = os.path.join(
+                    engine_dir,
+                    create_prefix(model_id_or_path=stream.pipe.config.name_or_path,
+                                max_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
+                                min_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size),
+                    "vae_decoder.engine",
+                )
+
+                if not os.path.exists(unet_path):
+                    os.makedirs(os.path.dirname(unet_path), exist_ok=True)
+                    # Se il ControlNet è integrato, usa i parametri dal modulo originale della pipeline:
+                    if stream.controlnet_enabled:
+                        # Il numero di ControlNet lo prendiamo da pipe.controlnet.nets (se presente) o dalla lunghezza del dizionario
+                        if hasattr(stream.pipe, "controlnet") and hasattr(stream.pipe.controlnet, "nets"):
+                            num_controlnets = len(stream.pipe.controlnet.nets)
+                        else:
+                            num_controlnets = 1  # fallback
+
+                        unet_model = UNetWithControlNet(
+                            fp16=True,
+                            device=stream.device,
+                            max_batch_size=stream.trt_unet_batch_size,
+                            min_batch_size=stream.trt_unet_batch_size,
+                            num_controlnets=num_controlnets,
+                            embedding_dim=stream.text_encoder.config.hidden_size,
+                            # Qui usiamo pipe.unet per avere il modello base (senza eventuali wrapping)
+                            unet_dim=stream.pipe.unet.config.in_channels,
+                        )
+                        compile_control_unet(
+                            stream.unet,  # stream.unet è il modello attualmente in uso (integrato)
+                            unet_model,
+                            unet_path + ".onnx",
+                            unet_path + ".opt.onnx",
+                            unet_path,
+                            opt_batch_size=stream.trt_unet_batch_size,
+                        )
+                    else:
+                        unet_model = UNet(
+                            fp16=True,
+                            device=stream.device,
+                            max_batch_size=stream.trt_unet_batch_size,
+                            min_batch_size=stream.trt_unet_batch_size,
+                            embedding_dim=stream.text_encoder.config.hidden_size,
+                            unet_dim=stream.pipe.unet.config.in_channels,
+                        )
+                        compile_unet(
+                            stream.unet,
+                            unet_model,
+                            unet_path + ".onnx",
+                            unet_path + ".opt.onnx",
+                            unet_path,
+                            opt_batch_size=stream.trt_unet_batch_size,
+                        )
+
+                if not os.path.exists(vae_decoder_path):
+                    os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
+                    # Usa la funzione di decoding del VAE
+                    stream.vae.forward = stream.vae.decode
+                    vae_decoder_model = VAE(
+                        device=stream.device,
+                        max_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
+                        min_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
                     )
-                    setattr(stream.vae, "config", vae_config)
-                    setattr(stream.vae, "dtype", vae_dtype)
+                    compile_vae_decoder(
+                        stream.vae,
+                        vae_decoder_model,
+                        vae_decoder_path + ".onnx",
+                        vae_decoder_path + ".opt.onnx",
+                        vae_decoder_path,
+                        opt_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
+                    )
+                    delattr(stream.vae, "forward")
 
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                if not os.path.exists(vae_encoder_path):
+                    os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
+                    vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
+                    vae_encoder_model = VAEEncoder(
+                        device=stream.device,
+                        max_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
+                        min_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
+                    )
+                    compile_vae_encoder(
+                        vae_encoder,
+                        vae_encoder_model,
+                        vae_encoder_path + ".onnx",
+                        vae_encoder_path + ".opt.onnx",
+                        vae_encoder_path,
+                        opt_batch_size=stream.batch_size if stream.mode == "txt2img" else stream.frame_buffer_size,
+                    )
 
-                    print("TensorRT acceleration enabled.")
+                cuda_stream = cuda.Stream()
+
+                vae_config = stream.vae.config
+                vae_dtype = stream.vae.dtype
+
+                if stream.controlnet_enabled:
+                    stream.unet = UNet2DConditionControlNetModelEngine(unet_path, cuda_stream, use_cuda_graph=use_cuda_graph)
+                else:
+                    stream.unet = UNet2DConditionModelEngine(unet_path, cuda_stream, use_cuda_graph=use_cuda_graph)
+
+                stream.vae = AutoencoderKLEngine(
+                    vae_encoder_path,
+                    vae_decoder_path,
+                    cuda_stream,
+                    stream.pipe.vae_scale_factor,
+                    use_cuda_graph=use_cuda_graph,
+                )
+                setattr(stream.vae, "config", vae_config)
+                setattr(stream.vae, "dtype", vae_dtype)
+
+                gc.collect()
+                torch.cuda.empty_cache()
+
+                print("TensorRT acceleration enabled.")
+                return stream
                 if acceleration == "sfast":
                     from streamdiffusion.acceleration.sfast import (
                         accelerate_with_stable_fast,
