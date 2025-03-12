@@ -277,6 +277,7 @@ class StreamDiffusion:
         if controlnet_images is not None and self.controlnet_enabled:
             cond_scale = self.controlnet_conditioning_scales if hasattr(self, "controlnet_conditioning_scales") else [1.0]
             print("QUIII")
+            t_list = torch.tensor(t_list, dtype=torch.long, device=self.device)
             down_block_res_samples, mid_block_res_sample = self.pipe.controlnet(
                 x_t_latent_plus_uc,
                 t_list,
