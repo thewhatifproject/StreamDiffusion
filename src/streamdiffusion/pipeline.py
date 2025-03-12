@@ -89,10 +89,6 @@ class StreamDiffusion:
         # Flag per indicare se il ControlNet è integrato
         self.controlnet_enabled = hasattr(pipe, "controlnet") and pipe.controlnet is not None
 
-    # --- NOTA: il metodo load_controlnet non è più necessario ---
-    # def load_controlnet(self, controlnet_dicts: List[Dict[str, float]]) -> None:
-    #     ...
-
     def load_lcm_lora(
         self,
         pretrained_model_name_or_path_or_dict: Union[str, Dict[str, torch.Tensor]] = "latent-consistency/lcm-lora-sdv1-5",
@@ -423,21 +419,9 @@ class StreamDiffusion:
         return x_0_pred_out
 
     def _get_add_time_ids(self, original_size, crops_coords_top_left, target_size, dtype, text_encoder_projection_dim=None):
-        config = getattr(self.unet, "config", None)
-        if config is None and hasattr(self.unet, "unet"):
-            config = self.unet.unet.config
-        if config is None:
-            raise AttributeError("Config not available from self.unet or self.unet.unet")
-        add_embed = getattr(self.unet, "add_embedding", None)
-        if add_embed is None and hasattr(self.unet, "unet"):
-            add_embed = self.unet.unet.add_embedding
-        if add_embed is None:
-            raise AttributeError("add_embedding not available in self.unet or self.unet.unet")
+
         add_time_ids = list(original_size + crops_coords_top_left + target_size)
-        passed_add_embed_dim = config.addition_time_embed_dim * len(add_time_ids) + text_encoder_projection_dim
-        expected_add_embed_dim = add_embed.linear_1.in_features
-        if expected_add_embed_dim != passed_add_embed_dim:
-            raise ValueError(f"Model expects an added time embedding vector of length {expected_add_embed_dim}, but vector of length {passed_add_embed_dim} was created.")
+
         return torch.tensor([add_time_ids], dtype=dtype)
 
     @torch.inference_mode()
