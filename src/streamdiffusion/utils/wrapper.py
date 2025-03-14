@@ -649,7 +649,7 @@ class StreamDiffusionWrapper:
                     torch.cuda.empty_cache()
 
                     print("TensorRT acceleration enabled.") """
-                if acceleration == "sfast":
+
                     from streamdiffusion.acceleration.sfast import (
                         accelerate_with_stable_fast,
                     )
