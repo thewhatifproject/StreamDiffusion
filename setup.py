@@ -18,7 +18,7 @@ _deps = [
     "pywin32;sys_platform == 'win32'",
     "controlnet-aux==0.0.9",
     "huggingface_hub==0.25.0",
-    "numpy==1.26.4",
+    "numpy",
     "peft==0.6.0"
 ]
 
