@@ -4,22 +4,16 @@ from setuptools import find_packages, setup
 
 _deps = [
     "torch",
-    "xformers",
     "diffusers",
     "transformers",
     "accelerate",
     "fire",
     "omegaconf",
-    "cuda-python",
-    "onnx==1.15.0",
-    "onnxruntime-gpu==1.16.3",
-    "protobuf==3.20.2",
-    "colored",
     "pywin32;sys_platform == 'win32'",
     "controlnet-aux==0.0.9",
-    "huggingface_hub==0.25.0",
+    "huggingface_hub",
     "numpy",
-    "peft==0.6.0"
+    "peft"
 ]
 
 deps = {b: a for a, b in (re.findall(r"^(([^!=<>~]+)(?:[!=<>~].*)?$)", x)[0] for x in _deps)}
@@ -29,11 +23,10 @@ def deps_list(*pkgs):
     return [deps[pkg] for pkg in pkgs]
 
 extras = {}
-extras["xformers"] = deps_list("xformers")
 extras["torch"] = deps_list("torch", "accelerate")
-extras["tensorrt"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime-gpu", "colored")
+extras["torch_compile"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime-gpu", "colored")
 
-extras["dev"] = extras["xformers"] + extras["torch"] + extras["tensorrt"]
+extras["dev"] = extras["torch"] + extras["torch_compile"]
 
 install_requires = [
     deps["fire"],

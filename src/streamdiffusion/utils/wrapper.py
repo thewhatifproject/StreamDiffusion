@@ -4,7 +4,7 @@ from typing import Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
-from diffusers import AutoencoderTiny, StableDiffusionPipeline, StableDiffusionXLPipeline
+from diffusers import  ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
@@ -29,7 +29,7 @@ class StreamDiffusionWrapper:
         frame_buffer_size: int = 1,
         width: int = 512,
         height: int = 512,
-        acceleration: Literal["none", "xformers", "tensorrt"] = "none",
+        acceleration: bool = False,
         do_add_noise: bool = True,
         device_ids: Optional[List[int]] = None,
         CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "none",
@@ -42,85 +42,6 @@ class StreamDiffusionWrapper:
         use_safety_checker: bool = False,
         engine_dir: Optional[Union[str, Path]] = "engines",
     ):
-        """
-        Initializes the StreamDiffusionWrapper.
-
-        Parameters
-        ----------
-        model_id_or_path : str
-            The model id or path to load.
-        t_index_list : List[int]
-            The t_index_list to use for inference.
-        lora_dict : Optional[Dict[str, float]], optional
-            The lora_dict to load, by default None.
-            Keys are the LoRA names and values are the LoRA scales.
-            Example: {'LoRA_1' : 0.5 , 'LoRA_2' : 0.7 ,...}
-        controlnet_dicts : Optional[List[Dict[str, float]]], optional
-            The controlnet_dicts to load, by default None.
-            Keys are the controlnet names and values are the controlnet scales.
-            Example: [{'controlnet_1' : 0.5}, {'controlnet_2' : 0.7},...]
-        mode : Literal["img2img", "txt2img"], optional
-            txt2img or img2img, by default "img2img".
-        output_type : Literal["pil", "pt", "np", "latent"], optional
-            The output type of image, by default "pil".
-        lcm_lora_id : Optional[str], optional
-            The lcm_lora_id to load, by default None.
-            If None, the default LCM-LoRA
-            ("latent-consistency/lcm-lora-sdv1-5") will be used.
-        HyperSD_lora_id : Optional[str], optional
-            The HyperSD_lora_id to load, by default None.
-            If None, the default Hyper-SD
-            ("ByteDance/Hyper-SD/Hyper-SD15-1step-lora.safetensors") will be used.
-
-            "Hyper_SD_1step": "Hyper-SD15-1step-lora.safetensors"
-            "Hyper_SD_2step" : "Hyper-SD15-2steps-lora.safetensors"
-            "Hyper_SD_4step" : "Hyper-SD15-4steps-lora.safetensors"
-            "Hyper_SD_8step" : "Hyper-SD15-8steps-lora.safetensors"
-
-            Select the Hyper_SD_LoRA_name from the above list
-        vae_id : Optional[str], optional
-            The vae_id to load, by default None.
-            If None, the default TinyVAE
-            ("madebyollin/taesd") will be used.
-        device : Literal["cpu", "cuda"], optional
-            The device to use for inference, by default "cuda".
-        dtype : torch.dtype, optional
-            The dtype for inference, by default torch.float16.
-        frame_buffer_size : int, optional
-            The frame buffer size for denoising batch, by default 1.
-        width : int, optional
-            The width of the image, by default 512.
-        height : int, optional
-            The height of the image, by default 512.
-        acceleration : Literal["none", "xformers", "tensorrt"], optional
-            The acceleration method, by default "tensorrt".
-        do_add_noise : bool, optional
-            Whether to add noise for following denoising steps or not,
-            by default True.
-        device_ids : Optional[List[int]], optional
-            The device ids to use for DataParallel, by default None.
-        use_lcm_lora : bool, optional
-            Whether to use LCM-LoRA or not, by default True.
-        use_tiny_vae : bool, optional
-            Whether to use TinyVAE or not, by default True.
-        enable_similar_image_filter : bool, optional
-            Whether to enable similar image filter or not,
-            by default False.
-        similar_image_filter_threshold : float, optional
-            The threshold for similar image filter, by default 0.98.
-        similar_image_filter_max_skip_frame : int, optional
-            The max skip frame for similar image filter, by default 10.
-        use_denoising_batch : bool, optional
-            Whether to use denoising batch or not, by default True.
-        cfg_type : Literal["none", "full", "self", "initialize"],
-        optional
-            The cfg_type for img2img mode, by default "self".
-            You cannot use anything other than "none" for txt2img mode.
-        seed : int, optional
-            The seed, by default 2.
-        use_safety_checker : bool, optional
-            Whether to use safety checker or not, by default False.
-        """
         self.sd_turbo = "turbo" in model_id_or_path
         self.device = device
         self.dtype = dtype
@@ -129,12 +50,9 @@ class StreamDiffusionWrapper:
         self.output_type = output_type
         self.frame_buffer_size = frame_buffer_size
         self.batch_size = len(t_index_list) * frame_buffer_size
-
         self.use_safety_checker = use_safety_checker
-
         self.is_controlnet_enabled = controlnet_dicts is not None
-        self.sdxl = "xl" in model_id_or_path
-        self.default_tiny_vae = "madebyollin/taesdxl" if self.sdxl else "madebyollin/taesd"
+        self.default_tiny_vae = "madebyollin/taesdxl"
 
         self.stream: StreamDiffusion = self._load_model(
             model_id_or_path=model_id_or_path,
@@ -153,8 +71,9 @@ class StreamDiffusionWrapper:
             engine_dir=engine_dir,
         )
         
-        if hasattr(self.stream.unet, 'config'):
-            self.stream.unet.config.addition_embed_type = None
+        #Eliminare se gira cosi
+        #if hasattr(self.stream.unet, 'config'):
+        #    self.stream.unet.config.addition_embed_type = None
             
         if device_ids is not None:
             self.stream.unet = torch.nn.DataParallel(self.stream.unet, device_ids=device_ids)
@@ -256,90 +175,38 @@ class StreamDiffusionWrapper:
         lcm_lora_id: Optional[str] = None,
         HyperSD_lora_id: Optional[str] = None,
         vae_id: Optional[str] = None,
-        acceleration: Literal["none", "xformers", "tensorrt"] = "tensorrt",
+        acceleration: bool = False,
         do_add_noise: bool = True,
-        CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "lcm",
+        CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "none",
         use_tiny_vae: bool = True,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
-        seed: int = 2,
-        engine_dir: Optional[Union[str, Path]] = "engines",
+        seed: int = 2
     ) -> StreamDiffusion:
-        """
-        Loads the model.
-
-        This method does the following:
-
-        1. Loads the model from the model_id_or_path.
-        2. Loads and fuses the LCM-LoRA model from the lcm_lora_id if needed.
-        3. Loads the VAE model from the vae_id if needed.
-        4. Enables acceleration if needed.
-        5. Prepares the model for inference.
-        6. Load the safety checker if needed.
-
-        Parameters
-        ----------
-        model_id_or_path : str
-            The model id or path to load.
-        t_index_list : List[int]
-            The t_index_list to use for inference.
-        lora_dict : Optional[Dict[str, float]], optional
-            The lora_dict to load, by default None.
-            Keys are the LoRA names and values are the LoRA scales.
-            Example: {'LoRA_1' : 0.5 , 'LoRA_2' : 0.7 ,...}
-        controlnet_dicts : Optional[Dict[str, float]], optional
-            The controlnet_dict to load, by default None.
-            Keys are the controlnet names and values are the controlnet scales.
-            Example: {'controlnet_1' : 0.5 , 'controlnet_2' : 0.7 ,...}
-        lcm_lora_id : Optional[str], optional
-            The lcm_lora_id to load, by default None.
-        vae_id : Optional[str], optional
-            The vae_id to load, by default None.
-        acceleration : Literal["none", "xfomers", "sfast", "tensorrt"], optional
-            The acceleration method, by default "tensorrt".
-        do_add_noise : bool, optional
-            Whether to add noise for following denoising steps or not,
-            by default True.
-        use_lcm_lora : bool, optional
-            Whether to use LCM-LoRA or not, by default True.
-        use_tiny_vae : bool, optional
-            Whether to use TinyVAE or not, by default True.
-        cfg_type : Literal["none", "full", "self", "initialize"],
-        optional
-            The cfg_type for img2img mode, by default "self".
-            You cannot use anything other than "none" for txt2img mode.
-        seed : int, optional
-            The seed, by default 2.
-
-        Returns
-        -------
-        StreamDiffusion
-            The loaded model.
-        """
-
-        if self.sdxl:
+        if self.is_controlnet_enabled:
+            controlnets = [
+                ControlNetModel.from_pretrained(list(controlnet_dict.keys())[0]).to(self.device, self.dtype)
+                for controlnet_dict in controlnet_dicts
+            ]
+            try:
+                pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
+                    model_id_or_path, controlnet=controlnets,
+                ).to(device=self.device, dtype=self.dtype)
+                pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
+            except ValueError:
+                pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_single_file(
+                    model_id_or_path, controlnet=controlnets,
+                ).to(device=self.device, dtype=self.dtype)
+                pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
+        else:
             try:  # Load from local directory
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
                     model_id_or_path,
                 ).to(device=self.device, dtype=self.dtype)
-
             except ValueError:  # Load from huggingface
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_single_file(
                     model_id_or_path,
                 ).to(device=self.device, dtype=self.dtype)
-            except Exception:  # No model found
-                traceback.print_exc()
-                print("Model load has failed. Doesn't exist.")
-                exit()
-        else:
-            try:  # Load from local directory
-                pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
 
-            except ValueError:  # Load from huggingface
-                pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_single_file(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
             except Exception:  # No model found
                 traceback.print_exc()
                 print("Model load has failed. Doesn't exist.")
@@ -392,10 +259,6 @@ class StreamDiffusionWrapper:
                     stream.load_lora(lora_name)
                     stream.fuse_lora(lora_scale=lora_scale)
                     print(f"Use LoRA: {lora_name} in weights {lora_scale}")
-
-        if controlnet_dicts is not None:
-            stream.load_controlnet(controlnet_dicts)
-            print(f"Use controlnet: {controlnet_dicts}")
 
         if use_tiny_vae:
             if vae_id is not None:

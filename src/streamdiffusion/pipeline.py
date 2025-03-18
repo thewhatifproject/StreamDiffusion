@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import PIL.Image
 import torch
-from diffusers import ControlNetModel, LCMScheduler, StableDiffusionXLPipeline, DiffusionPipeline
+from diffusers import LCMScheduler, DiffusionPipeline
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
     retrieve_latents,
@@ -12,8 +12,6 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img impo
 from huggingface_hub import hf_hub_download
 
 from streamdiffusion.image_filter import SimilarImageFilter
-from streamdiffusion.unet_with_control import UNet2DConditionControlNetModel
-#from compel import Compel, ReturnedEmbeddingsType
 
 class StreamDiffusion:
     def __init__(
@@ -90,24 +88,16 @@ class StreamDiffusion:
         )
         
         if pipe:
-            # save pipe
             self.pipe = pipe
-            # save pipeline components
             self.vae = pipe.vae
             self.unet = pipe.unet
             self.text_encoder = pipe.text_encoder
             self.pipe.scheduler.config['original_inference_steps'] = original_inference_steps
             self.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
-            
-        #self.compel = Compel(tokenizer=self.pipe.tokenizer, text_encoder=self.pipe.text_encoder)
-        self.sdxl = type(self.pipe) is StableDiffusionXLPipeline or type(self.pipe)
-        #if self.sdxl:
-        #    self.compel = Compel(tokenizer=[self.pipe.tokenizer, self.pipe.tokenizer_2],
-        #                         text_encoder=[self.pipe.text_encoder, self.pipe.text_encoder_2],
-        #                         returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-        #                         requires_pooled=[False, True])
-        
         self.inference_time_ema = 0
+        self.controlnet_enabled = hasattr(pipe, "controlnet") and pipe.controlnet is not None
+        if hasattr(pipe, "controlnet_conditioning_scales"):
+            self.controlnet_conditioning_scales = pipe.controlnet_conditioning_scales
 
     def load_lcm_lora(
         self,
@@ -158,18 +148,6 @@ class StreamDiffusion:
             fuse_text_encoder=fuse_text_encoder,
             lora_scale=lora_scale,
             safe_fusing=safe_fusing,
-        )
-
-    def load_controlnet(self, controlnet_dicts: List[Dict[str, float]]) -> None:
-        controlnets = [
-            ControlNetModel.from_pretrained(list(controlnet_dict.keys())[0]).to(self.device, self.dtype)
-            for controlnet_dict in controlnet_dicts
-        ]
-
-        self.unet = UNet2DConditionControlNetModel(
-            unet=self.unet,
-            controlnets=controlnets,
-            controlnet_scales=[list(controlnet_dict.values())[0] for controlnet_dict in controlnet_dicts],
         )
 
     def enable_similar_image_filter(self, threshold: float = 0.98, max_skip_frame: float = 10) -> None:
@@ -487,13 +465,26 @@ class StreamDiffusion:
         else:
             x_t_latent_plus_uc = x_t_latent
 
-        if controlnet_images is not None:
-            model_pred = self.unet(
+        if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
+            t_list = torch.tensor(t_list, dtype=torch.long, device=self.device)
+            down_block_res_samples, mid_block_res_sample = self.pipe.controlnet(
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
+                controlnet_cond=controlnet_images,
                 added_cond_kwargs=added_cond_kwargs,
-                controlnet_images=controlnet_images,
+                conditioning_scale=self.controlnet_conditioning_scales,
+                guess_mode=False,
+                return_dict=False,
+            )
+            model_pred = self.unet(
+                sample=x_t_latent_plus_uc,
+                timestep=t_list,
+                encoder_hidden_states=self.prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs,
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+                return_dict=False
             )[0]
         else:
             model_pred = self.unet(
@@ -556,7 +547,6 @@ class StreamDiffusion:
         add_time_ids = list(original_size + crops_coords_top_left + target_size)
         add_time_ids = torch.tensor([add_time_ids], dtype=dtype)
         return add_time_ids
-
 
     @torch.inference_mode()
     def encode_image(self, image_tensors: torch.Tensor, add_init_noise: bool = True) -> torch.Tensor:
@@ -687,9 +677,6 @@ class StreamDiffusion:
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
         return x_output
-
-    @staticmethod
-    def slerp(v1, v2, t, DOT_THR=0.9995, zdim=-1):
         """SLERP for pytorch tensors interpolating `v1` to `v2` with scale of `t`.
 
         `DOT_THR` determines when the vectors are too close to parallel.
