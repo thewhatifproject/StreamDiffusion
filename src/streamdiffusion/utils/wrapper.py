@@ -40,8 +40,7 @@ class StreamDiffusionWrapper:
         similar_image_filter_max_skip_frame: int = 10,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         seed: int = 2,
-        use_safety_checker: bool = False,
-        engine_dir: Optional[Union[str, Path]] = "engines",
+        use_safety_checker: bool = False
     ):
         self.sd_turbo = "turbo" in model_id_or_path
         self.device = device
@@ -68,8 +67,7 @@ class StreamDiffusionWrapper:
             CM_lora_type=CM_lora_type,
             use_tiny_vae=use_tiny_vae,
             cfg_type=cfg_type,
-            seed=seed,
-            engine_dir=engine_dir,
+            seed=seed
         )
         
         #Eliminare se gira cosi
