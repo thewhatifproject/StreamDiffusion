@@ -13,7 +13,8 @@ _deps = [
     "controlnet-aux==0.0.9",
     "huggingface_hub",
     "numpy",
-    "peft"
+    "peft",
+    "torchao"
 ]
 
 deps = {b: a for a, b in (re.findall(r"^(([^!=<>~]+)(?:[!=<>~].*)?$)", x)[0] for x in _deps)}
@@ -24,7 +25,7 @@ def deps_list(*pkgs):
 
 extras = {}
 extras["torch"] = deps_list("torch", "accelerate")
-extras["torch_compile"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime-gpu", "colored")
+extras["torch_compile"] = deps_list("torchao","")
 
 extras["dev"] = extras["torch"] + extras["torch_compile"]
 

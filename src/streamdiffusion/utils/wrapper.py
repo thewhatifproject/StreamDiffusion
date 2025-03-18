@@ -9,6 +9,7 @@ from PIL import Image
 
 from streamdiffusion import StreamDiffusion
 
+torch.set_float32_matmul_precision('high') #test
 torch.set_grad_enabled(False)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -182,6 +183,16 @@ class StreamDiffusionWrapper:
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         seed: int = 2
     ) -> StreamDiffusion:
+        
+        if acceleration:
+            print ("Init acceleration inductor...")
+            torch._inductor.config.conv_1x1_as_mm = True
+            torch._inductor.config.coordinate_descent_tuning = True
+            torch._inductor.config.epilogue_fusion = False
+            torch._inductor.config.coordinate_descent_check_all_directions = True
+            #torch._inductor.config.force_fuse_int_mm_with_mul = True
+            #torch._inductor.config.use_mixed_mm = True
+
         if self.is_controlnet_enabled:
             controlnets = [
                 ControlNetModel.from_pretrained(list(controlnet_dict.keys())[0]).to(self.device, self.dtype)
@@ -190,27 +201,31 @@ class StreamDiffusionWrapper:
             try:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
                     model_id_or_path, controlnet=controlnets,
-                ).to(device=self.device, dtype=self.dtype)
+                ).to(device=self.device, dtype=torch.bfloat16)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
             except ValueError:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_single_file(
                     model_id_or_path, controlnet=controlnets,
-                ).to(device=self.device, dtype=self.dtype)
+                ).to(device=self.device, dtype=torch.bfloat16)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
         else:
             try:  # Load from local directory
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
                     model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
+                ).to(device=self.device, dtype=torch.bfloat16)
             except ValueError:  # Load from huggingface
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_single_file(
                     model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
+                ).to(device=self.device, dtype=torch.bfloat16)
 
             except Exception:  # No model found
                 traceback.print_exc()
                 print("Model load has failed. Doesn't exist.")
                 exit()
+        
+        #if acceleration:
+        #    print ("Fuse QKV Projections...")
+        #    pipe.fuse_qkv_projections()
 
         stream = StreamDiffusion(
             pipe=pipe,
@@ -262,12 +277,36 @@ class StreamDiffusionWrapper:
 
         if use_tiny_vae:
             if vae_id is not None:
-                stream.vae = AutoencoderTiny.from_pretrained(vae_id).to(device=pipe.device, dtype=pipe.dtype)
+                stream.vae = AutoencoderTiny.from_pretrained(vae_id).to(device=pipe.device, dtype=torch.bfloat16)
             else:
                 stream.vae = AutoencoderTiny.from_pretrained(self.default_tiny_vae).to(
-                    device=pipe.device, dtype=pipe.dtype
+                    device=pipe.device, dtype=torch.bfloat16
                 )
-        
+
+        #if acceleration and pipe is not None:
+
+            #print ("Memory format conversion...")
+            #stream.unet.to(memory_format=torch.channels_last)
+            #stream.vae.to(memory_format=torch.channels_last)
+            #if self.is_controlnet_enabled:
+            #    stream.controlnet.to(memory_format=torch.channels_last)
+            
+            #print ("Apply dynamic quantization...")
+            #from torchao import swap_conv2d_1x1_to_linear, apply_dynamic_quant
+            #swap_conv2d_1x1_to_linear(stream.unet, self.conv_filter_fn)
+            #swap_conv2d_1x1_to_linear(stream.vae, self.conv_filter_fn)
+            #swap_conv2d_1x1_to_linear(stream.controlnet, self.conv_filter_fn)
+            #apply_dynamic_quant(stream.unet, self.dynamic_quant_filter_fn)
+            #apply_dynamic_quant(stream.vae, self.dynamic_quant_filter_fn)
+            #apply_dynamic_quant(stream.controlnet, self.dynamic_quant_filter_fn)
+
+            #print ("Apply torch compile optimization...")
+            #stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
+            #stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
+            ##stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
+            #if self.is_controlnet_enabled:
+            #    stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
+
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
 
@@ -293,3 +332,37 @@ class StreamDiffusionWrapper:
             self.nsfw_fallback_img = Image.new("RGB", (512, 512), (0, 0, 0))
 
         return stream
+    
+    def dynamic_quant_filter_fn(mod, *args):
+        return (
+            isinstance(mod, torch.nn.Linear)
+            and mod.in_features > 16
+            and (mod.in_features, mod.out_features)
+            not in [
+                (1280, 640),
+                (1920, 1280),
+                (1920, 640),
+                (2048, 1280),
+                (2048, 2560),
+                (2560, 1280),
+                (256, 128),
+                (2816, 1280),
+                (320, 640),
+                (512, 1536),
+                (512, 256),
+                (512, 512),
+                (640, 1280),
+                (640, 1920),
+                (640, 320),
+                (640, 5120),
+                (640, 640),
+                (960, 320),
+                (960, 640),
+            ]
+        )
+
+
+    def conv_filter_fn(mod, *args):
+        return (
+            isinstance(mod, torch.nn.Conv2d) and mod.kernel_size == (1, 1) and 128 in [mod.in_channels, mod.out_channels]
+        )

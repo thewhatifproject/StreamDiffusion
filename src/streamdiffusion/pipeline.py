@@ -93,9 +93,10 @@ class StreamDiffusion:
             self.unet = pipe.unet
             self.text_encoder = pipe.text_encoder
             self.pipe.scheduler.config['original_inference_steps'] = original_inference_steps
+            self.controlnet = pipe.controlnet
             self.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
         self.inference_time_ema = 0
-        self.controlnet_enabled = hasattr(pipe, "controlnet") and pipe.controlnet is not None
+        self.controlnet_enabled = hasattr(pipe, "controlnet") and self.controlnet is not None
         if hasattr(pipe, "controlnet_conditioning_scales"):
             self.controlnet_conditioning_scales = pipe.controlnet_conditioning_scales
 
@@ -467,7 +468,7 @@ class StreamDiffusion:
 
         if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
             t_list = torch.tensor(t_list, dtype=torch.long, device=self.device)
-            down_block_res_samples, mid_block_res_sample = self.pipe.controlnet(
+            down_block_res_samples, mid_block_res_sample = self.controlnet (
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
