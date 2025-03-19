@@ -455,10 +455,8 @@ class StreamDiffusion:
         idx: Optional[int] = None,
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        print("IN")
         # TODO: Re-implement R-CFG according to the equation in the paper
         torch.compiler.cudagraph_mark_step_begin()
-        print("IN2")
 
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
@@ -470,7 +468,6 @@ class StreamDiffusion:
             x_t_latent_plus_uc = x_t_latent
 
         if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
-            #t_list = torch.tensor(t_list, dtype=torch.long, device=self.device)
             print("IN3")
             down_block_res_samples, mid_block_res_sample = self.controlnet (
                 x_t_latent_plus_uc,
