@@ -456,6 +456,7 @@ class StreamDiffusion:
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO: Re-implement R-CFG according to the equation in the paper
+        torch.compiler.cudagraph_mark_step_begin()
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
             t_list = torch.concat([t_list[0:1], t_list], dim=0)
