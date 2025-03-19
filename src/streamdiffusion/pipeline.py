@@ -466,7 +466,7 @@ class StreamDiffusion:
             x_t_latent_plus_uc = x_t_latent
 
         if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
-            t_list = torch.tensor(t_list, dtype=torch.long, device=self.device)
+            #t_list = torch.tensor(t_list, dtype=torch.long, device=self.device)
             down_block_res_samples, mid_block_res_sample = self.controlnet (
                 x_t_latent_plus_uc,
                 t_list,
