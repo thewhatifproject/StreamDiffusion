@@ -8,7 +8,7 @@ from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeli
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
-from torchao.quantization import autoquant
+from torchao.quantization import apply_dynamic_quant, swap_conv2d_1x1_to_linear
 
 torch.set_float32_matmul_precision('high')
 torch.set_grad_enabled(False)
@@ -292,6 +292,14 @@ class StreamDiffusionWrapper:
             stream.text_encoder.to(memory_format=torch.channels_last)
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
+                
+            # Swap the pointwise convs with linears.
+            swap_conv2d_1x1_to_linear(stream.unet, self.conv_filter_fn)
+            swap_conv2d_1x1_to_linear(stream.vae, self.conv_filter_fn)
+
+            # Apply dynamic quantization.
+            apply_dynamic_quant(stream.unet, self.dynamic_quant_filter_fn)
+            apply_dynamic_quant(stream.vae, self.dynamic_quant_filter_fn)
 
             print("Apply torch compile optimization...")
             stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
@@ -300,9 +308,6 @@ class StreamDiffusionWrapper:
             stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
             if self.is_controlnet_enabled:
                 stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
-        
-            stream.unet = autoquant(stream.vae, error_on_unseen=False)
-            #stream.vae = autoquant(stream.vae, error_on_unseen=False)
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
