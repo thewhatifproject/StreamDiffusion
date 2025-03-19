@@ -25,7 +25,7 @@ def deps_list(*pkgs):
 
 extras = {}
 extras["torch"] = deps_list("torch", "accelerate")
-extras["torch_compile"] = deps_list("torchao","")
+extras["torch_compile"] = deps_list("torchao")
 
 extras["dev"] = extras["torch"] + extras["torch_compile"]
 
