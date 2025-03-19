@@ -222,9 +222,9 @@ class StreamDiffusionWrapper:
                 print("Model load has failed. Doesn't exist.")
                 exit()
         
-        #if acceleration:
-        #    print ("Fuse QKV Projections...")
-        #    pipe.fuse_qkv_projections()
+        if acceleration:
+            print ("Fuse QKV Projections...")
+            pipe.fuse_qkv_projections()
 
         stream = StreamDiffusion(
             pipe=pipe,
