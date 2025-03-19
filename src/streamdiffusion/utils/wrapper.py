@@ -302,6 +302,7 @@ class StreamDiffusionWrapper:
                 stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
 
             from torchao.quantization import quantize_, autoquant
+            stream.unet = autoquant(stream.unet, error_on_unseen=False)
             stream.vae = autoquant(stream.vae, error_on_unseen=False)
 
         if seed < 0:  # Random seed
