@@ -225,15 +225,6 @@ class StreamDiffusionWrapper:
         
         if acceleration and pipe is not None:
             print ("Fuse QKV Projections...")
-            
-            from DeepCache import DeepCacheSDHelper
-            helper = DeepCacheSDHelper(pipe=pipe)
-            helper.set_params(
-                    cache_interval=3,
-                    cache_branch_id=0,
-                    )
-            helper.enable()
-
             pipe.fuse_qkv_projections()
 
 
