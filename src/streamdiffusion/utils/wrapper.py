@@ -287,6 +287,7 @@ class StreamDiffusionWrapper:
             print("Memory format conversion...")
             stream.unet.to(memory_format=torch.channels_last)
             stream.vae.to(memory_format=torch.channels_last)
+            stream.text_encoder.to(memory_format=torch.channels_last)
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
             
