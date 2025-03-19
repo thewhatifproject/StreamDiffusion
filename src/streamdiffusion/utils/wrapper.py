@@ -283,8 +283,6 @@ class StreamDiffusionWrapper:
             
             print ("Fuse QKV Projections...")
             stream.pipe.fuse_qkv_projections()
-            stream.unet.fuse_qkv_projections()
-            stream.text_encoder.fuse_qkv_projections()
 
             print("Memory format conversion...")
             stream.unet.to(memory_format=torch.channels_last)
