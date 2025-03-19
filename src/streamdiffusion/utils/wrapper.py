@@ -199,22 +199,22 @@ class StreamDiffusionWrapper:
             try:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
                     model_id_or_path, controlnet=controlnets,
-                ).to(device=self.device, dtype=torch.bfloat16)
+                ).to(device=self.device, dtype=torch.dtype)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
             except ValueError:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_single_file(
                     model_id_or_path, controlnet=controlnets,
-                ).to(device=self.device, dtype=torch.bfloat16)
+                ).to(device=self.device, dtype=torch.dtype)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
         else:
             try:  # Load from local directory
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
                     model_id_or_path,
-                ).to(device=self.device, dtype=torch.bfloat16)
+                ).to(device=self.device, dtype=torch.dtype)
             except ValueError:  # Load from huggingface
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_single_file(
                     model_id_or_path,
-                ).to(device=self.device, dtype=torch.bfloat16)
+                ).to(device=self.device, dtype=torch.dtype)
 
             except Exception:  # No model found
                 traceback.print_exc()
@@ -275,10 +275,10 @@ class StreamDiffusionWrapper:
 
         if use_tiny_vae:
             if vae_id is not None:
-                stream.vae = AutoencoderTiny.from_pretrained(vae_id).to(device=pipe.device, dtype=torch.bfloat16)
+                stream.vae = AutoencoderTiny.from_pretrained(vae_id).to(device=pipe.device, dtype=torch.dtype)
             else:
                 stream.vae = AutoencoderTiny.from_pretrained(self.default_tiny_vae).to(
-                    device=pipe.device, dtype=torch.bfloat16
+                    device=pipe.device, dtype=torch.dtype
                 )
 
         #if acceleration and pipe is not None:
