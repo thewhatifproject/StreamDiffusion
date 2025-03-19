@@ -189,8 +189,8 @@ class StreamDiffusionWrapper:
             torch._inductor.config.coordinate_descent_tuning = True
             torch._inductor.config.epilogue_fusion = False
             torch._inductor.config.coordinate_descent_check_all_directions = True
-            torch._inductor.config.force_fuse_int_mm_with_mul = True
-            torch._inductor.config.use_mixed_mm = True
+            #torch._inductor.config.force_fuse_int_mm_with_mul = True
+            #torch._inductor.config.use_mixed_mm = True
 
         if self.is_controlnet_enabled:
             controlnets = [
@@ -292,7 +292,7 @@ class StreamDiffusionWrapper:
             stream.text_encoder.to(memory_format=torch.channels_last)
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
-
+            
             print("Apply torch compile optimization...")
             stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
             stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
@@ -300,6 +300,9 @@ class StreamDiffusionWrapper:
             stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
             if self.is_controlnet_enabled:
                 stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
+
+            from torchao.quantization import quantize_, autoquant
+            stream.vae = autoquant(stream.vae, error_on_unseen=False)
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
