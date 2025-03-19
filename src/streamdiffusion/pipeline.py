@@ -262,19 +262,18 @@ class StreamDiffusion:
             self.negative_prompt_embeds = encoder_output[1]
         self.prompt_embeds = encoder_output[0].repeat(self.batch_size, 1, 1)
         
-        if self.sdxl:
-            self.add_text_embeds = encoder_output[2]
-            original_size = (self.height, self.width)
-            crops_coords_top_left = (0, 0)
-            target_size = (self.height, self.width)
-            text_encoder_projection_dim = int(self.add_text_embeds.shape[-1])
-            self.add_time_ids = self._get_add_time_ids(
-                original_size,
-                crops_coords_top_left,
-                target_size,
-                dtype=encoder_output[0].dtype,
-                text_encoder_projection_dim=text_encoder_projection_dim,
-            )
+        self.add_text_embeds = encoder_output[2]
+        original_size = (self.height, self.width)
+        crops_coords_top_left = (0, 0)
+        target_size = (self.height, self.width)
+        text_encoder_projection_dim = int(self.add_text_embeds.shape[-1])
+        self.add_time_ids = self._get_add_time_ids(
+            original_size,
+            crops_coords_top_left,
+            target_size,
+            dtype=encoder_output[0].dtype,
+            text_encoder_projection_dim=text_encoder_projection_dim,
+        )
 
         if self.use_denoising_batch and self.cfg_type == "full":
             uncond_prompt_embeds = self.negative_prompt_embeds.repeat(self.batch_size, 1, 1)
@@ -586,8 +585,7 @@ class StreamDiffusion:
             if controlnet_images is not None:
                 controlnet_images = torch.cat((controlnet_images, prev_controlnet_images), dim=0)
 
-            if self.sdxl:
-                added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
+            added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
 
             x_t_latent = x_t_latent.to(self.device)
             t_list = t_list.to(self.device)
@@ -614,8 +612,7 @@ class StreamDiffusion:
             self.init_noise = x_t_latent
             for idx, t in enumerate(self.sub_timesteps_tensor):
                 t = t.view(1).repeat(self.frame_bff_size)
-                if self.sdxl:
-                    added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
+                added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
                 x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx=idx, controlnet_images=controlnet_images, added_cond_kwargs=added_cond_kwargs)                
                 if idx < len(self.sub_timesteps_tensor) - 1:
                     if self.CM_lora_type == "Hyper_SD":
