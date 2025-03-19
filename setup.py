@@ -38,8 +38,7 @@ install_requires = [
     deps["controlnet-aux"],
     deps["huggingface_hub"],
     deps["numpy"],
-    deps["peft"],
-    deps["colored"]
+    deps["peft"]
 ]
 
 setup(
