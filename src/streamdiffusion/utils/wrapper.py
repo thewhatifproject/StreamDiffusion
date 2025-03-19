@@ -283,7 +283,6 @@ class StreamDiffusionWrapper:
             
             print ("Fuse QKV Projections...")
             stream.unet.fuse_qkv_projections()
-            stream.vae.fuse_qkv_projections()
             stream.text_encoder.fuse_qkv_projections()
 
             print("Memory format conversion...")
