@@ -284,7 +284,7 @@ class StreamDiffusionWrapper:
 
         if acceleration and pipe is not None:
 
-            print ("Memory format conversion...")
+            print("Memory format conversion...")
             stream.unet.to(memory_format=torch.channels_last)
             stream.vae.to(memory_format=torch.channels_last)
             if self.is_controlnet_enabled:
@@ -292,20 +292,22 @@ class StreamDiffusionWrapper:
             
             #print ("Apply dynamic quantization...")
             #from torchao import swap_conv2d_1x1_to_linear, apply_dynamic_quant
-            #swap_conv2d_1x1_to_linear(stream.unet, self.conv_filter_fn)
+            #swap_conv2d_1x1_ato_linear(stream.unet, self.conv_filter_fn)
             #swap_conv2d_1x1_to_linear(stream.vae, self.conv_filter_fn)
             #swap_conv2d_1x1_to_linear(stream.controlnet, self.conv_filter_fn)
             #apply_dynamic_quant(stream.unet, self.dynamic_quant_filter_fn)
             #apply_dynamic_quant(stream.vae, self.dynamic_quant_filter_fn)
             #apply_dynamic_quant(stream.controlnet, self.dynamic_quant_filter_fn)
 
-            print ("Apply torch compile optimization...")
+            print("Apply torch compile optimization...")
             stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
             stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
-            #stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
+            # Compilazione aggiuntiva per vae.encode e text_encoder:
+            stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
+            stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
             if self.is_controlnet_enabled:
                 stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
-
+        
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
 
