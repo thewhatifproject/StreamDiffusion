@@ -225,7 +225,17 @@ class StreamDiffusionWrapper:
         
         if acceleration and pipe is not None:
             print ("Fuse QKV Projections...")
+            
+            from DeepCache import DeepCacheSDHelper
+            helper = DeepCacheSDHelper(pipe=pipe)
+            helper.set_params(
+                    cache_interval=3,
+                    cache_branch_id=0,
+                    )
+            helper.enable()
+
             pipe.fuse_qkv_projections()
+
 
         stream = StreamDiffusion(
             pipe=pipe,
@@ -291,15 +301,6 @@ class StreamDiffusionWrapper:
             stream.text_encoder.to(memory_format=torch.channels_last)
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
-                
-            from torchao.quantization import swap_conv2d_1x1_to_linear
-
-            swap_conv2d_1x1_to_linear(stream.unet, self.conv_filter_fn)
-            swap_conv2d_1x1_to_linear(stream.vae, self.conv_filter_fn)
-
-            from torchao.quantization import apply_dynamic_quant
-            apply_dynamic_quant(stream.unet, self.dynamic_quant_filter_fn)
-            apply_dynamic_quant(stream.vae, self.dynamic_quant_filter_fn)
 
             print("Apply torch compile optimization...")
             stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
