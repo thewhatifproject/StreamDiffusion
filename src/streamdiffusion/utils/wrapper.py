@@ -4,12 +4,13 @@ from typing import Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
-from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline, TorchAoConfig
+from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
+from torchao.quantization import autoquant
 
-torch.set_float32_matmul_precision('high') #test
+torch.set_float32_matmul_precision('high')
 torch.set_grad_enabled(False)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -191,7 +192,6 @@ class StreamDiffusionWrapper:
             torch._inductor.config.coordinate_descent_check_all_directions = True
             torch._inductor.config.force_fuse_int_mm_with_mul = True
             torch._inductor.config.use_mixed_mm = True
-            quantization_config = TorchAoConfig("int8wo")
 
         if self.is_controlnet_enabled:
             controlnets = [
@@ -200,32 +200,28 @@ class StreamDiffusionWrapper:
             ]
             try:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
-                    model_id_or_path, controlnet=controlnets, quantization_config=quantization_config
+                    model_id_or_path, controlnet=controlnets
                 ).to(device=self.device, dtype=self.dtype)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
             except ValueError:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_single_file(
-                    model_id_or_path, controlnet=controlnets, quantization_config=quantization_config
+                    model_id_or_path, controlnet=controlnets
                 ).to(device=self.device, dtype=self.dtype)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
         else:
             try:  # Load from local directory
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
-                    model_id_or_path, quantization_config=quantization_config
+                    model_id_or_path
                 ).to(device=self.device, dtype=self.dtype)
             except ValueError:  # Load from huggingface
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_single_file(
-                    model_id_or_path, quantization_config=quantization_config
+                    model_id_or_path
                 ).to(device=self.device, dtype=self.dtype)
 
             except Exception:  # No model found
                 traceback.print_exc()
                 print("Model load has failed. Doesn't exist.")
                 exit()
-        
-        if acceleration:
-            print ("Fuse QKV Projections...")
-            pipe.fuse_qkv_projections()
 
         stream = StreamDiffusion(
             pipe=pipe,
@@ -284,6 +280,11 @@ class StreamDiffusionWrapper:
                 )
 
         if acceleration and pipe is not None:
+            
+            print ("Fuse QKV Projections...")
+            stream.unet.fuse_qkv_projections()
+            stream.vae.fuse_qkv_projections()
+            stream.text_encoder.fuse_qkv_projections()
 
             print("Memory format conversion...")
             stream.unet.to(memory_format=torch.channels_last)
