@@ -8,7 +8,7 @@ from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeli
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
-from torchao.quantization import apply_dynamic_quant, swap_conv2d_1x1_to_linear
+from torchao import apply_dynamic_quant, swap_conv2d_1x1_to_linear
 
 torch.set_float32_matmul_precision('high')
 torch.set_grad_enabled(False)
