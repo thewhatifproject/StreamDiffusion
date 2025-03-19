@@ -4,7 +4,7 @@ from typing import Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
-from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
+from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline, TorchAoConfig
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
@@ -191,6 +191,7 @@ class StreamDiffusionWrapper:
             torch._inductor.config.coordinate_descent_check_all_directions = True
             torch._inductor.config.force_fuse_int_mm_with_mul = True
             torch._inductor.config.use_mixed_mm = True
+            quantization_config = TorchAoConfig("int8wo")
 
         if self.is_controlnet_enabled:
             controlnets = [
@@ -199,22 +200,22 @@ class StreamDiffusionWrapper:
             ]
             try:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
-                    model_id_or_path, controlnet=controlnets,
+                    model_id_or_path, controlnet=controlnets, quantization_config=quantization_config
                 ).to(device=self.device, dtype=self.dtype)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
             except ValueError:
                 pipe: StableDiffusionXLControlNetPipeline = StableDiffusionXLControlNetPipeline.from_single_file(
-                    model_id_or_path, controlnet=controlnets,
+                    model_id_or_path, controlnet=controlnets, quantization_config=quantization_config
                 ).to(device=self.device, dtype=self.dtype)
                 pipe.controlnet_conditioning_scales = [list(d.values())[0] for d in controlnet_dicts]
         else:
             try:  # Load from local directory
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_pretrained(
-                    model_id_or_path,
+                    model_id_or_path, quantization_config=quantization_config
                 ).to(device=self.device, dtype=self.dtype)
             except ValueError:  # Load from huggingface
                 pipe: StableDiffusionXLPipeline = StableDiffusionXLPipeline.from_single_file(
-                    model_id_or_path,
+                    model_id_or_path, quantization_config=quantization_config
                 ).to(device=self.device, dtype=self.dtype)
 
             except Exception:  # No model found
@@ -290,19 +291,6 @@ class StreamDiffusionWrapper:
             stream.text_encoder.to(memory_format=torch.channels_last)
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
-            
-            print ("Apply dynamic quantization...")
-            from torchao.quantization import apply_dynamic_quant, swap_conv2d_1x1_to_linear
-            
-            swap_conv2d_1x1_ato_linear(stream.unet, self.conv_filter_fn)
-            swap_conv2d_1x1_to_linear(stream.vae, self.conv_filter_fn)
-            swap_conv2d_1x1_to_linear(stream.controlnet, self.conv_filter_fn)
-            swap_conv2d_1x1_ato_linear(stream.text_encoder, self.conv_filter_fn)
-            
-            apply_dynamic_quant(stream.unet, self.dynamic_quant_filter_fn)
-            apply_dynamic_quant(stream.vae, self.dynamic_quant_filter_fn)
-            apply_dynamic_quant(stream.controlnet, self.dynamic_quant_filter_fn)
-            apply_dynamic_quant(stream.text_encoder, self.dynamic_quant_filter_fn)
 
             print("Apply torch compile optimization...")
             stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
