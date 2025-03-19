@@ -8,7 +8,6 @@ from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeli
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
-#from torchao import apply_dynamic_quant, swap_conv2d_1x1_to_linear
 
 torch.set_float32_matmul_precision('high')
 torch.set_grad_enabled(False)
@@ -293,11 +292,12 @@ class StreamDiffusionWrapper:
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
                 
-            # Swap the pointwise convs with linears.
+            from torchao.quantization import swap_conv2d_1x1_to_linear
+
             swap_conv2d_1x1_to_linear(stream.unet, self.conv_filter_fn)
             swap_conv2d_1x1_to_linear(stream.vae, self.conv_filter_fn)
 
-            # Apply dynamic quantization.
+            from torchao.quantization import apply_dynamic_quant
             apply_dynamic_quant(stream.unet, self.dynamic_quant_filter_fn)
             apply_dynamic_quant(stream.vae, self.dynamic_quant_filter_fn)
 
