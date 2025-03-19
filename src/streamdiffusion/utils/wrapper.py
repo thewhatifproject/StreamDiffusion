@@ -4,7 +4,7 @@ from typing import Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
-from diffusers import  ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
+from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
