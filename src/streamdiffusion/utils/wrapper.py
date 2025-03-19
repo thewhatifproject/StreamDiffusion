@@ -282,6 +282,7 @@ class StreamDiffusionWrapper:
         if acceleration and pipe is not None:
             
             print ("Fuse QKV Projections...")
+            stream.pipe.fuse_qkv_projections()
             stream.unet.fuse_qkv_projections()
             stream.text_encoder.fuse_qkv_projections()
 
