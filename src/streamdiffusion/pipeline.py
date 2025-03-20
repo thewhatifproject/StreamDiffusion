@@ -447,7 +447,6 @@ class StreamDiffusion:
                 mid_block_additional_residual=mid_block_res_sample,
                 return_dict=False
             )[0]
-            torch.cuda.synchronize()
         else:
             model_pred = self.unet(
                 x_t_latent_plus_uc,
@@ -456,8 +455,8 @@ class StreamDiffusion:
                 added_cond_kwargs=added_cond_kwargs,
                 return_dict=False,
             )[0]
-
-        print("Samples and unet initialized...")
+        
+        torch.cuda.synchronize()
         if self.cfg_type == "initialize":
             noise_pred_text = model_pred[1:]
             self.stock_noise = torch.concat([model_pred[0:1], self.stock_noise[1:]], dim=0)
@@ -475,7 +474,6 @@ class StreamDiffusion:
 
         # compute the previous noisy sample x_t -> x_t-1
         if self.use_denoising_batch:
-            print("Assign denoise batch")
             denoised_batch = self.scheduler_step_batch(model_pred, x_t_latent, idx)
             if self.cfg_type == "self" or self.cfg_type == "initialize":
                 # TODO: Re-implement R-CFG
