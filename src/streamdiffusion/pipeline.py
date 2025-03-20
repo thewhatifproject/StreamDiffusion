@@ -188,7 +188,9 @@ class StreamDiffusion:
             )
 
         # make sub timesteps list based on the indices in the t_list list and the values in the timesteps list
-        self.sub_timesteps = self.timesteps[self.t_list]
+        self.sub_timesteps = []
+        for t in self.t_list:
+            self.sub_timesteps.append(self.timesteps[t])
 
         sub_timesteps_tensor = torch.tensor(self.sub_timesteps, dtype=torch.long, device=self.device)
         self.sub_timesteps_tensor = torch.repeat_interleave(
