@@ -283,40 +283,6 @@ class StreamDiffusion:
         if self.cfg_type == "initialize" or self.cfg_type == "full":
             self.prompt_embeds = torch.cat([uncond_prompt_embeds, self.prompt_embeds], dim=0)
 
-    """@torch.no_grad()
-    def update_prompt(self, prompt: str) -> None:
-
-        # build weighted embeddings for prompt
-        encoder_output = self.compel.build_weighted_embedding(prompt)
-        self.prompt_embeds = encoder_output[0].to(dtype=torch.float16).repeat(self.batch_size, 1, 1)
-
-        # TODO: Fix Compel for SDXL's add_text_embeds etc.
-        # if self.sdxl:
-        #     self.add_text_embeds = encoder_output[2]
-        #     original_size = (self.height, self.width)
-        #     crops_coords_top_left = (0, 0)
-        #     target_size = (self.height, self.width)
-        #     text_encoder_projection_dim = int(self.add_text_embeds.shape[-1])
-        #     self.add_time_ids = self._get_add_time_ids(
-        #         original_size,
-        #         crops_coords_top_left,
-        #         target_size,
-        #         dtype=encoder_output[0].dtype,
-        #         text_encoder_projection_dim=text_encoder_projection_dim,
-        #     )
-
-        if self.use_denoising_batch and self.cfg_type == "full":
-            uncond_prompt_embeds = encoder_output[1].repeat(self.batch_size, 1, 1)
-        elif self.cfg_type == "initialize":
-            uncond_prompt_embeds = encoder_output[1].repeat(self.frame_bff_size, 1, 1)
-
-        if self.guidance_scale > 1.0 and (
-                self.cfg_type == "initialize" or self.cfg_type == "full"
-        ):
-            self.prompt_embeds = torch.cat(
-                [uncond_prompt_embeds, self.prompt_embeds], dim=0
-            ) """
-
     @torch.no_grad()
     def update_noise(self, noise: Union[None, torch.Tensor] = None) -> None:
         if noise is None:
@@ -468,7 +434,6 @@ class StreamDiffusion:
             x_t_latent_plus_uc = x_t_latent
 
         if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
-            print("IN3")
             down_block_res_samples, mid_block_res_sample = self.controlnet (
                 x_t_latent_plus_uc,
                 t_list,
@@ -479,7 +444,6 @@ class StreamDiffusion:
                 guess_mode=False,
                 return_dict=False,
             )
-            print("IN4")
             model_pred = self.unet(
                 sample=x_t_latent_plus_uc,
                 timestep=t_list,
@@ -678,46 +642,3 @@ class StreamDiffusion:
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
         return x_output
-        """SLERP for pytorch tensors interpolating `v1` to `v2` with scale of `t`.
-
-        `DOT_THR` determines when the vectors are too close to parallel.
-            If they are too close, then a regular linear interpolation is used.
-
-        `zdim` is the feature dimension over which to compute norms and find angles.
-            For example: if a sequence of 5 vectors is input with shape [5, 768]
-            Then `zdim = 1` or `zdim = -1` computes SLERP along the feature dim of 768.
-
-        Theory Reference:
-        https://splines.readthedocs.io/en/latest/rotation/slerp.html
-        PyTorch reference:
-        https://discuss.pytorch.org/t/help-regarding-slerp-function-for-generative-model-sampling/32475/3
-        Numpy reference:
-        https://gist.github.com/dvschultz/3af50c40df002da3b751efab1daddf2c
-        """
-
-        # take the dot product between normalized vectors
-        v1_norm = v1 / torch.norm(v1, dim=zdim, keepdim=True)
-        v2_norm = v2 / torch.norm(v2, dim=zdim, keepdim=True)
-        dot = (v1_norm * v2_norm).sum(zdim)
-
-        # if the vectors are too close, return a simple linear interpolation
-        if (torch.abs(dot) > DOT_THR).any():
-            print(f'warning: v1 and v2 close to parallel, using linear interpolation instead.')
-            res = (1 - t) * v1 + t * v2
-
-        # else apply SLERP
-        else:
-            # compute the angle terms we need
-            theta = torch.acos(dot)
-            theta_t = theta * t
-            sin_theta = torch.sin(theta)
-            sin_theta_t = torch.sin(theta_t)
-
-            # compute the sine scaling terms for the vectors
-            s1 = torch.sin(theta - theta_t) / sin_theta
-            s2 = sin_theta_t / sin_theta
-
-            # interpolate the vectors
-            res = (s1.unsqueeze(zdim) * v1) + (s2.unsqueeze(zdim) * v2)
-
-        return res
