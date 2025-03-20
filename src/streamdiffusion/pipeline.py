@@ -202,11 +202,11 @@ class StreamDiffusion:
         self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
 
-        sub_timesteps_tensor = torch.tensor(self.sub_timesteps, device=self.device)
+        sub_timesteps_tensor = torch.tensor(self.sub_timesteps, device=self.scheduler.alphas_cumprod.device)
 
         # Seleziona direttamente i valori e applica sqrt in batch
-        alphas = self.scheduler.alphas_cumprod[sub_timesteps_tensor].sqrt()
-        betas = (1 - self.scheduler.alphas_cumprod[sub_timesteps_tensor]).sqrt()
+        alphas = self.scheduler.alphas_cumprod[sub_timesteps_tensor].sqrt().to(device=self.device, dtype=self.dtype)
+        betas = (1 - self.scheduler.alphas_cumprod[sub_timesteps_tensor]).sqrt().to(device=self.device, dtype=self.dtype)
 
         alpha_prod_t_sqrt = alphas.view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         beta_prod_t_sqrt = betas.view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
