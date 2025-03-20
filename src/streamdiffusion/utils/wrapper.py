@@ -188,8 +188,8 @@ class StreamDiffusionWrapper:
             torch._inductor.config.coordinate_descent_tuning = True
             torch._inductor.config.epilogue_fusion = False
             torch._inductor.config.coordinate_descent_check_all_directions = True
-            #torch._inductor.config.force_fuse_int_mm_with_mul = True
-            #torch._inductor.config.use_mixed_mm = True
+            torch._inductor.config.force_fuse_int_mm_with_mul = True
+            torch._inductor.config.use_mixed_mm = True
 
         if self.is_controlnet_enabled:
             controlnets = [
@@ -298,9 +298,6 @@ class StreamDiffusionWrapper:
             if self.is_controlnet_enabled:
                 stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
 
-            from torchao import autoquant
-            stream.unet = autoquant(stream.unet, error_on_unseen=False)
-
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
 
@@ -326,31 +323,3 @@ class StreamDiffusionWrapper:
             self.nsfw_fallback_img = Image.new("RGB", (512, 512), (0, 0, 0))
 
         return stream
-    
-    def dynamic_quant_filter_fn(mod, *args):
-        return (
-            isinstance(mod, torch.nn.Linear)
-            and mod.in_features > 16
-            and (mod.in_features, mod.out_features)
-            not in [
-                (1280, 640),
-                (1920, 1280),
-                (1920, 640),
-                (2048, 1280),
-                (2048, 2560),
-                (2560, 1280),
-                (256, 128),
-                (2816, 1280),
-                (320, 640),
-                (512, 1536),
-                (512, 256),
-                (512, 512),
-                (640, 1280),
-                (640, 1920),
-                (640, 320),
-                (640, 5120),
-                (640, 640),
-                (960, 320),
-                (960, 640),
-            ]
-        )
