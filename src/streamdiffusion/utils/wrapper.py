@@ -284,7 +284,7 @@ class StreamDiffusionWrapper:
                 )
 
         if acceleration and pipe is not None:
-
+                
             print("Memory format conversion...")
             stream.unet.to(memory_format=torch.channels_last)
             #stream.vae.to(memory_format=torch.channels_last)
