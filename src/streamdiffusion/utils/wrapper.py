@@ -3,7 +3,7 @@ from typing import Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
-from diffusers import  AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
+from diffusers import AutoencoderTiny, ControlNetModel, StableDiffusionXLPipeline, StableDiffusionXLControlNetPipeline
 from PIL import Image
 
 from streamdiffusion import StreamDiffusion
@@ -290,10 +290,6 @@ class StreamDiffusionWrapper:
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
             
-            from torchao.quantization import apply_dynamic_quant
-            apply_dynamic_quant(stream.unet, self.dynamic_quant_filter_fn)
-            apply_dynamic_quant(stream.vae, self.dynamic_quant_filter_fn)
-            
             print("Apply torch compile optimization...")
             stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
             stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
@@ -301,6 +297,9 @@ class StreamDiffusionWrapper:
             stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
             if self.is_controlnet_enabled:
                 stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
+
+            from torchao import autoquant
+            stream.unet = autoquant(stream.unet, error_on_unseen=False)
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
