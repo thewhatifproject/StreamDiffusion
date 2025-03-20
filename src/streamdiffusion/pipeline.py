@@ -36,8 +36,6 @@ class StreamDiffusion:
         self.vae_scale_factor = pipe.vae_scale_factor if pipe else vae_scale_factor
         self.dtype = torch_dtype
         self.generator = generator
-        self.timer_event = getattr(torch, str(self.device).split(':', 1)[0])
-
         self.height = height
         self.width = width
 
@@ -605,8 +603,8 @@ class StreamDiffusion:
         controlnet_images: Optional[torch.Tensor] = None,
         decode_output: bool = True
     ) -> torch.Tensor:
-        start = self.timer_event.Event(enable_timing=True)
-        end = self.timer_event.Event(enable_timing=True)
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
         start.record()
         # Set x_t_latent. Shape: (1, 4, H, W)
         if x_t_latent is not None:
@@ -638,7 +636,6 @@ class StreamDiffusion:
         self.prev_image_result = x_output
         end.record()
         torch.cuda.synchronize() 
-        self.timer_event.synchronize()
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
         return x_output
