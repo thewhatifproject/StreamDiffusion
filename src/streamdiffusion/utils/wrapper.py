@@ -142,7 +142,7 @@ class StreamDiffusionWrapper:
 
     def preprocess_image(self, image: Union[str, Image.Image], is_controlnet_image: bool = False) -> torch.Tensor:
         if isinstance(image, str):
-            image = Image.open(image).convert("RGB").resize((self.width, self.height))
+            image = Image.open(image)
         if isinstance(image, Image.Image):
             image = image.convert("RGB").resize((self.width, self.height))
 

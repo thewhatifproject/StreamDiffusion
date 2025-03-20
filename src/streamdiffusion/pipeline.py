@@ -188,9 +188,7 @@ class StreamDiffusion:
             )
 
         # make sub timesteps list based on the indices in the t_list list and the values in the timesteps list
-        self.sub_timesteps = []
-        for t in self.t_list:
-            self.sub_timesteps.append(self.timesteps[t])
+        self.sub_timesteps = self.timesteps[self.t_list]
 
         sub_timesteps_tensor = torch.tensor(self.sub_timesteps, dtype=torch.long, device=self.device)
         self.sub_timesteps_tensor = torch.repeat_interleave(
@@ -198,13 +196,8 @@ class StreamDiffusion:
             repeats=self.frame_bff_size if self.use_denoising_batch else 1,
             dim=0,
         )
-
-        c_skip_list = []
-        c_out_list = []
-        for timestep in self.sub_timesteps:
-            c_skip, c_out = self.scheduler.get_scalings_for_boundary_condition_discrete(timestep)
-            c_skip_list.append(c_skip)
-            c_out_list.append(c_out)
+        
+        c_skip_list, c_out_list = zip(*[self.scheduler.get_scalings_for_boundary_condition_discrete(t) for t in self.sub_timesteps])
 
         self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
