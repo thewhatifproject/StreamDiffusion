@@ -430,7 +430,6 @@ class StreamDiffusion:
             x_t_latent_plus_uc = x_t_latent
 
         if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
-            print("Assign models unet")
             down_block_res_samples, mid_block_res_sample = self.controlnet (
                 x_t_latent_plus_uc,
                 t_list,
@@ -441,7 +440,6 @@ class StreamDiffusion:
                 guess_mode=False,
                 return_dict=False,
             )
-            print("Assign model pred")
             model_pred = self.unet(
                 sample=x_t_latent_plus_uc,
                 timestep=t_list,
@@ -460,6 +458,7 @@ class StreamDiffusion:
                 return_dict=False,
             )[0]
 
+        print("Samples and unet initialized...")
         if self.cfg_type == "initialize":
             noise_pred_text = model_pred[1:]
             self.stock_noise = torch.concat([model_pred[0:1], self.stock_noise[1:]], dim=0)
@@ -505,7 +504,6 @@ class StreamDiffusion:
             # denoised_batch = self.scheduler.step(model_pred, t_list[0], x_t_latent).denoised
             denoised_batch = self.scheduler_step_batch(model_pred, x_t_latent, idx)
         
-        print("Return models")
         return denoised_batch, model_pred
 
     def _get_add_time_ids(
@@ -606,6 +604,7 @@ class StreamDiffusion:
         controlnet_images: Optional[torch.Tensor] = None,
         decode_output: bool = True
     ) -> torch.Tensor:
+        torch.cuda.synchronize()
         start = self.timer_event.Event(enable_timing=True)
         end = self.timer_event.Event(enable_timing=True)
         start.record()
@@ -638,6 +637,7 @@ class StreamDiffusion:
 
         self.prev_image_result = x_output
         end.record()
+        torch.cuda.synchronize() 
         self.timer_event.synchronize()
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
