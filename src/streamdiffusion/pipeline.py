@@ -202,14 +202,23 @@ class StreamDiffusion:
         self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
 
-        sub_timesteps_tensor = torch.tensor(self.sub_timesteps, device=self.scheduler.alphas_cumprod.device)
 
-        # Seleziona direttamente i valori e applica sqrt in batch
-        alphas = self.scheduler.alphas_cumprod[sub_timesteps_tensor].sqrt().to(device=self.device, dtype=self.dtype)
-        betas = (1 - self.scheduler.alphas_cumprod[sub_timesteps_tensor]).sqrt().to(device=self.device, dtype=self.dtype)
 
-        alpha_prod_t_sqrt = alphas.view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
-        beta_prod_t_sqrt = betas.view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        alpha_prod_t_sqrt_list = []
+        beta_prod_t_sqrt_list = []
+        for timestep in self.sub_timesteps:
+            alpha_prod_t_sqrt = self.scheduler.alphas_cumprod[timestep].sqrt()
+            beta_prod_t_sqrt = (1 - self.scheduler.alphas_cumprod[timestep]).sqrt()
+            alpha_prod_t_sqrt_list.append(alpha_prod_t_sqrt)
+            beta_prod_t_sqrt_list.append(beta_prod_t_sqrt)
+        alpha_prod_t_sqrt = (
+            torch.stack(alpha_prod_t_sqrt_list)
+            .view(len(self.t_list), 1, 1, 1)
+            .to(dtype=self.dtype, device=self.device)
+        )
+        beta_prod_t_sqrt = (
+            torch.stack(beta_prod_t_sqrt_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
+        )
 
         self.alpha_prod_t_sqrt = torch.repeat_interleave(
             alpha_prod_t_sqrt,
