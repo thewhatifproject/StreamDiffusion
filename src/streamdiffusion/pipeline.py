@@ -419,6 +419,7 @@ class StreamDiffusion:
         # TODO: Re-implement R-CFG according to the equation in the paper
         #torch.compiler.cudagraph_mark_step_begin()
 
+        print("Start unet step")
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
             t_list = torch.concat([t_list[0:1], t_list], dim=0)
@@ -429,6 +430,7 @@ class StreamDiffusion:
             x_t_latent_plus_uc = x_t_latent
 
         if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
+            print("Assign models unet")
             down_block_res_samples, mid_block_res_sample = self.controlnet (
                 x_t_latent_plus_uc,
                 t_list,
@@ -439,6 +441,7 @@ class StreamDiffusion:
                 guess_mode=False,
                 return_dict=False,
             )
+            print("Assign model pred")
             model_pred = self.unet(
                 sample=x_t_latent_plus_uc,
                 timestep=t_list,
@@ -474,6 +477,7 @@ class StreamDiffusion:
 
         # compute the previous noisy sample x_t -> x_t-1
         if self.use_denoising_batch:
+            print("Assign denoise batch")
             denoised_batch = self.scheduler_step_batch(model_pred, x_t_latent, idx)
             if self.cfg_type == "self" or self.cfg_type == "initialize":
                 # TODO: Re-implement R-CFG
@@ -500,7 +504,8 @@ class StreamDiffusion:
         else:
             # denoised_batch = self.scheduler.step(model_pred, t_list[0], x_t_latent).denoised
             denoised_batch = self.scheduler_step_batch(model_pred, x_t_latent, idx)
-
+        
+        print("Return models")
         return denoised_batch, model_pred
 
     def _get_add_time_ids(
