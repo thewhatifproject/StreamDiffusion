@@ -188,7 +188,6 @@ class StreamDiffusionWrapper:
             torch._inductor.config.coordinate_descent_tuning = True
             torch._inductor.config.epilogue_fusion = False
             torch._inductor.config.coordinate_descent_check_all_directions = True
-            print("Type:", self.dtype)
 
         if self.is_controlnet_enabled:
             controlnets = [
@@ -219,12 +218,10 @@ class StreamDiffusionWrapper:
                 traceback.print_exc()
                 print("Model load has failed. Doesn't exist.")
                 exit()
-                
         
         if acceleration and pipe is not None:
             print ("Fuse QKV Projections...")
             pipe.fuse_qkv_projections()
-
 
         stream = StreamDiffusion(
             pipe=pipe,
