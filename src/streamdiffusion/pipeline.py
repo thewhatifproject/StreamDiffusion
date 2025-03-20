@@ -417,7 +417,7 @@ class StreamDiffusion:
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO: Re-implement R-CFG according to the equation in the paper
-        #torch.compiler.cudagraph_mark_step_begin()
+        torch.compiler.cudagraph_mark_step_begin()
 
         print("Start unet step")
         if self.cfg_type == "initialize":
