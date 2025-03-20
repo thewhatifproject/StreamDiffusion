@@ -605,7 +605,6 @@ class StreamDiffusion:
         controlnet_images: Optional[torch.Tensor] = None,
         decode_output: bool = True
     ) -> torch.Tensor:
-        torch.cuda.synchronize()
         start = self.timer_event.Event(enable_timing=True)
         end = self.timer_event.Event(enable_timing=True)
         start.record()
