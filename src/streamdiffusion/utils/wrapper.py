@@ -188,8 +188,8 @@ class StreamDiffusionWrapper:
             torch._inductor.config.coordinate_descent_tuning = True
             torch._inductor.config.epilogue_fusion = False
             torch._inductor.config.coordinate_descent_check_all_directions = True
-            torch._inductor.config.force_fuse_int_mm_with_mul = True
-            torch._inductor.config.use_mixed_mm = True
+            #torch._inductor.config.force_fuse_int_mm_with_mul = True
+            #torch._inductor.config.use_mixed_mm = True
 
         if self.is_controlnet_enabled:
             controlnets = [
