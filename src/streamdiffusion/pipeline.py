@@ -202,8 +202,6 @@ class StreamDiffusion:
         self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
 
-
-
         alpha_prod_t_sqrt_list = []
         beta_prod_t_sqrt_list = []
         for timestep in self.sub_timesteps:
