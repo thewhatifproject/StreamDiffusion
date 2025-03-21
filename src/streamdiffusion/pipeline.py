@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import PIL.Image
 import torch
-from diffusers import LCMScheduler, DiffusionPipeline
+from diffusers import ControlNetModel, LCMScheduler, StableDiffusionPipeline
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
     retrieve_latents,
@@ -12,11 +12,13 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img impo
 from huggingface_hub import hf_hub_download
 
 from streamdiffusion.image_filter import SimilarImageFilter
+from streamdiffusion.unet_with_control import UNet2DConditionControlNetModel
+
 
 class StreamDiffusion:
     def __init__(
         self,
-        pipe: Optional[DiffusionPipeline],
+        pipe: StableDiffusionPipeline,
         t_index_list: Union[None, List[int]] = None,
         torch_dtype: torch.dtype = torch.float16,
         width: int = 512,
@@ -25,29 +27,25 @@ class StreamDiffusion:
         use_denoising_batch: bool = True,
         frame_buffer_size: int = 1,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
-        device: Optional[str] = None,
-        vae_scale_factor: Optional[int] = 8,
-        original_inference_steps: Optional[int] = 50,
         generator: Optional[torch.Generator] = torch.Generator(),
         denoising_steps_num: Union[None, int] = None,
         CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "none",
     ) -> None:
-        self.device = pipe.device if pipe else device
-        self.vae_scale_factor = pipe.vae_scale_factor if pipe else vae_scale_factor
+        self.device = pipe.device
         self.dtype = torch_dtype
         self.generator = generator
+
         self.height = height
         self.width = width
 
         self.latent_height = int(height // pipe.vae_scale_factor)
         self.latent_width = int(width // pipe.vae_scale_factor)
-        self.prompt_embeds = None
+
         self.cfg_type = cfg_type
-        self.alpha_prod_t_sqrt = None
-        self.beta_prod_t_sqrt = None
         self.CM_lora_type = CM_lora_type
 
         self.frame_bff_size = frame_buffer_size
+
         # Set time step index list and denoising steps number
         if t_index_list is None and denoising_steps_num is None:
             raise ValueError("Please provide either t_index_list or num_denosing_steps")
@@ -80,23 +78,18 @@ class StreamDiffusion:
         self.prev_image_result = None
 
         # Set pipeline components
-        self.image_processor = VaeImageProcessor(self.vae_scale_factor)
+        self.pipe = pipe
+        self.image_processor = VaeImageProcessor(pipe.vae_scale_factor)
         self.controlnet_image_processor = VaeImageProcessor(
             pipe.vae_scale_factor, do_convert_rgb=True, do_normalize=False
         )
-        
-        if pipe:
-            self.pipe = pipe
-            self.vae = pipe.vae
-            self.unet = pipe.unet
-            self.text_encoder = pipe.text_encoder
-            self.pipe.scheduler.config['original_inference_steps'] = original_inference_steps
-            self.controlnet = pipe.controlnet
-            self.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
+
+        self.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
+        self.text_encoder = pipe.text_encoder
+        self.unet = pipe.unet
+        self.vae = pipe.vae
+
         self.inference_time_ema = 0
-        self.controlnet_enabled = hasattr(pipe, "controlnet") and self.controlnet is not None
-        if hasattr(pipe, "controlnet_conditioning_scales"):
-            self.controlnet_conditioning_scales = pipe.controlnet_conditioning_scales
 
     def load_lcm_lora(
         self,
@@ -106,8 +99,6 @@ class StreamDiffusion:
         adapter_name: Optional[Any] = None,
         **kwargs,
     ) -> None:
-        if not self.pipe:
-            raise Exception("No pipeline")
         self.CM_lora_type = "lcm"
         self.pipe.load_lora_weights(pretrained_model_name_or_path_or_dict, adapter_name, **kwargs)
 
@@ -129,8 +120,6 @@ class StreamDiffusion:
         adapter_name: Optional[Any] = None,
         **kwargs,
     ) -> None:
-        if not self.pipe:
-            raise Exception("No pipeline")
         self.pipe.load_lora_weights(pretrained_lora_model_name_or_path_or_dict, adapter_name, **kwargs)
 
     def fuse_lora(
@@ -140,13 +129,23 @@ class StreamDiffusion:
         lora_scale: float = 1.0,
         safe_fusing: bool = False,
     ) -> None:
-        if not self.pipe:
-            raise Exception("No pipeline")
         self.pipe.fuse_lora(
             fuse_unet=fuse_unet,
             fuse_text_encoder=fuse_text_encoder,
             lora_scale=lora_scale,
             safe_fusing=safe_fusing,
+        )
+
+    def load_controlnet(self, controlnet_dicts: List[Dict[str, float]]) -> None:
+        controlnets = [
+            ControlNetModel.from_pretrained(list(controlnet_dict.keys())[0]).to(self.device, self.dtype)
+            for controlnet_dict in controlnet_dicts
+        ]
+
+        self.unet = UNet2DConditionControlNetModel(
+            unet=self.unet,
+            controlnets=controlnets,
+            controlnet_scales=[list(controlnet_dict.values())[0] for controlnet_dict in controlnet_dicts],
         )
 
     def enable_similar_image_filter(self, threshold: float = 0.98, max_skip_frame: float = 10) -> None:
@@ -163,10 +162,26 @@ class StreamDiffusion:
         else:
             self.generator.manual_seed(seed)
 
+    def generate_t_index_list(
+        self,
+        noise_strength: float = 0.4,
+        num_inference_steps: int = 50,
+        mode: Literal["linear"] = "linear",
+    ) -> List[int]:
+        initial_t_index = int((num_inference_steps - 1) * (1 - noise_strength))
+        t_index_list = [initial_t_index]
+        if mode == "linear":
+            t_index_interval = ((num_inference_steps - 1) - initial_t_index) / (self.denoising_steps_num - 1)
+            for idx in range(1, self.denoising_steps_num):
+                t_index = initial_t_index + int(idx * t_index_interval)
+                t_index_list.append(t_index)
+        else:
+            raise ValueError(f"Unsupported mode {mode}")
+        return t_index_list
+
     @torch.no_grad()
-    def update_scheduler(self, t_index_list: Union[None, List[int]] = None, num_inference_steps: int = 50, strength: float = 1.0) -> None:
+    def update_scheduler(self, t_index_list: Union[None, List[int]] = None, num_inference_steps: int = 50) -> None:
         self.scheduler.set_timesteps(num_inference_steps, self.device)
-        #self.scheduler.set_timesteps(num_inference_steps, self.device, strength)
         self.timesteps = self.scheduler.timesteps.to(self.device)
 
         # Sanity check for t_index_list
@@ -196,8 +211,13 @@ class StreamDiffusion:
             repeats=self.frame_bff_size if self.use_denoising_batch else 1,
             dim=0,
         )
-        
-        c_skip_list, c_out_list = zip(*[self.scheduler.get_scalings_for_boundary_condition_discrete(t) for t in self.sub_timesteps])
+
+        c_skip_list = []
+        c_out_list = []
+        for timestep in self.sub_timesteps:
+            c_skip, c_out = self.scheduler.get_scalings_for_boundary_condition_discrete(timestep)
+            c_skip_list.append(c_skip)
+            c_out_list.append(c_out)
 
         self.c_skip = torch.stack(c_skip_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
         self.c_out = torch.stack(c_out_list).view(len(self.t_list), 1, 1, 1).to(dtype=self.dtype, device=self.device)
@@ -243,7 +263,7 @@ class StreamDiffusion:
                 device=self.device,
                 num_images_per_prompt=1,
                 do_classifier_free_guidance=False,
-            )   
+            )
         else:
             encoder_output = self.pipe.encode_prompt(
                 prompt=prompt,
@@ -254,19 +274,6 @@ class StreamDiffusion:
             )
             self.negative_prompt_embeds = encoder_output[1]
         self.prompt_embeds = encoder_output[0].repeat(self.batch_size, 1, 1)
-        
-        self.add_text_embeds = encoder_output[2]
-        original_size = (self.height, self.width)
-        crops_coords_top_left = (0, 0)
-        target_size = (self.height, self.width)
-        text_encoder_projection_dim = int(self.add_text_embeds.shape[-1])
-        self.add_time_ids = self._get_add_time_ids(
-            original_size,
-            crops_coords_top_left,
-            target_size,
-            dtype=encoder_output[0].dtype,
-            text_encoder_projection_dim=text_encoder_projection_dim,
-        )
 
         if self.use_denoising_batch and self.cfg_type == "full":
             uncond_prompt_embeds = self.negative_prompt_embeds.repeat(self.batch_size, 1, 1)
@@ -348,7 +355,6 @@ class StreamDiffusion:
         num_inference_steps: int = 50,
         guidance_scale: float = 1.2,
         delta: float = 1.0,
-        strength: float = 1.0,
         generator: Optional[torch.Generator] = None,
         seed: Union[None, int] = None,
         t_index_list: Union[None, List[int]] = None,
@@ -356,7 +362,6 @@ class StreamDiffusion:
         # initialize the generator for random number generation
         if generator is not None:
             self.generator = generator
-            
         self.init_generator(seed)
 
         # initialize stream batch
@@ -371,12 +376,10 @@ class StreamDiffusion:
         # set prompt embeds cache
         if (self.cfg_type == "initialize" or self.cfg_type == "full") and negative_prompt is None:
             negative_prompt = ""
-            
-        if prompt:
-            self.update_prompt(prompt)
-            
+        self.update_prompt(prompt, negative_prompt)
+
         # set scheduler cache
-        self.update_scheduler(t_index_list, num_inference_steps, strength)
+        self.update_scheduler(t_index_list, num_inference_steps)
 
         # set noise cache
         self.update_noise()
@@ -410,12 +413,10 @@ class StreamDiffusion:
         self,
         x_t_latent: torch.Tensor,
         t_list: Union[torch.Tensor, list[int]],
-        added_cond_kwargs,
         idx: Optional[int] = None,
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO: Re-implement R-CFG according to the equation in the paper
-        torch.compiler.cudagraph_mark_step_begin()
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
             t_list = torch.concat([t_list[0:1], t_list], dim=0)
@@ -425,39 +426,20 @@ class StreamDiffusion:
         else:
             x_t_latent_plus_uc = x_t_latent
 
-        if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
-            
-            down_block_res_samples, mid_block_res_sample = self.controlnet (
+        if controlnet_images is not None:
+            model_pred = self.unet(
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
-                controlnet_cond=controlnet_images,
-                added_cond_kwargs=added_cond_kwargs,
-                conditioning_scale=self.controlnet_conditioning_scales,
-                guess_mode=False,
-                return_dict=False,
-            )
-            torch.cuda.synchronize()
-
-            model_pred = self.unet(
-                sample=x_t_latent_plus_uc,
-                timestep=t_list,
-                encoder_hidden_states=self.prompt_embeds,
-                added_cond_kwargs=added_cond_kwargs,
-                down_block_additional_residuals=down_block_res_samples,
-                mid_block_additional_residual=mid_block_res_sample,
-                return_dict=False
+                controlnet_images=controlnet_images,
             )[0]
-            torch.cuda.synchronize()
         else:
             model_pred = self.unet(
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
-                added_cond_kwargs=added_cond_kwargs,
                 return_dict=False,
             )[0]
-            torch.cuda.synchronize()
 
         if self.cfg_type == "initialize":
             noise_pred_text = model_pred[1:]
@@ -502,27 +484,19 @@ class StreamDiffusion:
         else:
             # denoised_batch = self.scheduler.step(model_pred, t_list[0], x_t_latent).denoised
             denoised_batch = self.scheduler_step_batch(model_pred, x_t_latent, idx)
-        
+
         return denoised_batch, model_pred
 
-    def _get_add_time_ids(
-        self, original_size, crops_coords_top_left, target_size, dtype, text_encoder_projection_dim=None
-    ):
-        add_time_ids = list(original_size + crops_coords_top_left + target_size)
-        add_time_ids = torch.tensor([add_time_ids], dtype=dtype)
-        return add_time_ids
-
     @torch.inference_mode()
-    def encode_image(self, image_tensors: torch.Tensor, add_init_noise: bool = True) -> torch.Tensor:
+    def encode_image(self, image_tensors: torch.Tensor) -> torch.Tensor:
         image_tensors = image_tensors.to(
             device=self.device,
             dtype=self.vae.dtype,
         )
         img_latent = retrieve_latents(self.vae.encode(image_tensors), self.generator)
         img_latent = img_latent * self.vae.config.scaling_factor
-        if add_init_noise:
-            img_latent = self.add_noise(img_latent, self.init_noise[0], 0)
-        return img_latent
+        x_t_latent = self.add_noise(img_latent, self.init_noise[0], 0)
+        return x_t_latent
 
     @torch.inference_mode()
     def decode_image(self, x_0_pred_out: torch.Tensor) -> torch.Tensor:
@@ -532,7 +506,6 @@ class StreamDiffusion:
     def predict_x0_batch(
         self, x_t_latent: torch.Tensor, controlnet_images: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        added_cond_kwargs = {}
         prev_latent_batch = self.x_t_latent_buffer
 
         if controlnet_images is not None:
@@ -549,9 +522,8 @@ class StreamDiffusion:
             if controlnet_images is not None:
                 controlnet_images = torch.cat((controlnet_images, prev_controlnet_images), dim=0)
 
-            added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
-            x_0_pred_batch, model_pred = self.unet_step(x_t_latent, t_list, controlnet_images=controlnet_images, added_cond_kwargs=added_cond_kwargs)
-   
+            x_0_pred_batch, model_pred = self.unet_step(x_t_latent, t_list, controlnet_images=controlnet_images)
+
             if self.denoising_steps_num > 1:
                 x_0_pred_out = x_0_pred_batch[-1].unsqueeze(0)
                 if self.CM_lora_type == "Hyper_SD":
@@ -573,8 +545,7 @@ class StreamDiffusion:
             self.init_noise = x_t_latent
             for idx, t in enumerate(self.sub_timesteps_tensor):
                 t = t.view(1).repeat(self.frame_bff_size)
-                added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
-                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx=idx, controlnet_images=controlnet_images, added_cond_kwargs=added_cond_kwargs)                
+                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx, controlnet_images=controlnet_images)
                 if idx < len(self.sub_timesteps_tensor) - 1:
                     if self.CM_lora_type == "Hyper_SD":
                         x_t_latent = (
@@ -595,44 +566,65 @@ class StreamDiffusion:
     def __call__(
         self,
         x: Union[torch.Tensor, PIL.Image.Image, np.ndarray] = None,
-        encode_input: bool = True,
         x_t_latent: Optional[torch.Tensor] = None,
         controlnet_images: Optional[torch.Tensor] = None,
-        decode_output: bool = True
     ) -> torch.Tensor:
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()
+
         # Set x_t_latent. Shape: (1, 4, H, W)
         if x_t_latent is not None:
             x_t_latent = x_t_latent.to(device=self.device, dtype=self.dtype)
         else:
             if x is not None:
+                x = self.image_processor.preprocess(x, self.height, self.width).to(
+                    device=self.device, dtype=self.dtype
+                )
                 if self.similar_image_filter:
                     x = self.similar_filter(x)
                     if x is None:
                         time.sleep(self.inference_time_ema)
                         return self.prev_image_result
-
-                if encode_input:
-                    x_t_latent = self.encode_image(x)
-                else:
-                    x_t_latent = x
+                x_t_latent = self.encode_image(x)
             else:
                 # TODO: check the dimension of x_t_latent
                 x_t_latent = torch.randn((1, 4, self.latent_height, self.latent_width)).to(
                     device=self.device, dtype=self.dtype
                 )
         x_0_pred_out = self.predict_x0_batch(x_t_latent, controlnet_images=controlnet_images)
-        
-        if decode_output:
-            x_output = self.decode_image(x_0_pred_out).detach().clone()
-        else:
-            x_output = x_0_pred_out
+        x_output = self.decode_image(x_0_pred_out).detach().clone()
 
         self.prev_image_result = x_output
         end.record()
-        torch.cuda.synchronize() 
+        torch.cuda.synchronize()
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
         return x_output
+
+    @torch.inference_mode()
+    def txt2img(self, batch_size: int = 1, controlnet_images: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x_0_pred_out = self.predict_x0_batch(
+            torch.randn((batch_size, 4, self.latent_height, self.latent_width)).to(
+                device=self.device, dtype=self.dtype
+            ),
+            controlnet_images=controlnet_images,
+        )
+        x_output = self.decode_image(x_0_pred_out).detach().clone()
+        return x_output
+
+    @torch.inference_mode()
+    def txt2img_sd_turbo(self, batch_size: int = 1) -> torch.Tensor:
+        x_t_latent = torch.randn(
+            (batch_size, 4, self.latent_height, self.latent_width),
+            device=self.device,
+            dtype=self.dtype,
+        )
+        model_pred = self.unet(
+            x_t_latent,
+            self.sub_timesteps_tensor,
+            encoder_hidden_states=self.prompt_embeds,
+            return_dict=False,
+        )[0]
+        x_0_pred_out = (x_t_latent - self.beta_prod_t_sqrt * model_pred) / self.alpha_prod_t_sqrt
+        return self.decode_image(x_0_pred_out)
