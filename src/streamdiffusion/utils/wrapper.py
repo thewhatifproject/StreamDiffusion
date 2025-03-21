@@ -46,85 +46,6 @@ class StreamDiffusionWrapper:
         seed: int = 2,
         use_safety_checker: bool = False
     ):
-        """
-        Initializes the StreamDiffusionWrapper.
-
-        Parameters
-        ----------
-        model_id_or_path : str
-            The model id or path to load.
-        t_index_list : List[int]
-            The t_index_list to use for inference.
-        lora_dict : Optional[Dict[str, float]], optional
-            The lora_dict to load, by default None.
-            Keys are the LoRA names and values are the LoRA scales.
-            Example: {'LoRA_1' : 0.5 , 'LoRA_2' : 0.7 ,...}
-        controlnet_dicts : Optional[List[Dict[str, float]]], optional
-            The controlnet_dicts to load, by default None.
-            Keys are the controlnet names and values are the controlnet scales.
-            Example: [{'controlnet_1' : 0.5}, {'controlnet_2' : 0.7},...]
-        mode : Literal["img2img", "txt2img"], optional
-            txt2img or img2img, by default "img2img".
-        output_type : Literal["pil", "pt", "np", "latent"], optional
-            The output type of image, by default "pil".
-        lcm_lora_id : Optional[str], optional
-            The lcm_lora_id to load, by default None.
-            If None, the default LCM-LoRA
-            ("latent-consistency/lcm-lora-sdv1-5") will be used.
-        HyperSD_lora_id : Optional[str], optional
-            The HyperSD_lora_id to load, by default None.
-            If None, the default Hyper-SD
-            ("ByteDance/Hyper-SD/Hyper-SD15-1step-lora.safetensors") will be used.
-
-            "Hyper_SD_1step": "Hyper-SD15-1step-lora.safetensors"
-            "Hyper_SD_2step" : "Hyper-SD15-2steps-lora.safetensors"
-            "Hyper_SD_4step" : "Hyper-SD15-4steps-lora.safetensors"
-            "Hyper_SD_8step" : "Hyper-SD15-8steps-lora.safetensors"
-
-            Select the Hyper_SD_LoRA_name from the above list
-        vae_id : Optional[str], optional
-            The vae_id to load, by default None.
-            If None, the default TinyVAE
-            ("madebyollin/taesd") will be used.
-        device : Literal["cpu", "cuda"], optional
-            The device to use for inference, by default "cuda".
-        dtype : torch.dtype, optional
-            The dtype for inference, by default torch.float16.
-        frame_buffer_size : int, optional
-            The frame buffer size for denoising batch, by default 1.
-        width : int, optional
-            The width of the image, by default 512.
-        height : int, optional
-            The height of the image, by default 512.
-        acceleration : Literal["none", "xformers", "tensorrt"], optional
-            The acceleration method, by default "tensorrt".
-        do_add_noise : bool, optional
-            Whether to add noise for following denoising steps or not,
-            by default True.
-        device_ids : Optional[List[int]], optional
-            The device ids to use for DataParallel, by default None.
-        use_lcm_lora : bool, optional
-            Whether to use LCM-LoRA or not, by default True.
-        use_tiny_vae : bool, optional
-            Whether to use TinyVAE or not, by default True.
-        enable_similar_image_filter : bool, optional
-            Whether to enable similar image filter or not,
-            by default False.
-        similar_image_filter_threshold : float, optional
-            The threshold for similar image filter, by default 0.98.
-        similar_image_filter_max_skip_frame : int, optional
-            The max skip frame for similar image filter, by default 10.
-        use_denoising_batch : bool, optional
-            Whether to use denoising batch or not, by default True.
-        cfg_type : Literal["none", "full", "self", "initialize"],
-        optional
-            The cfg_type for img2img mode, by default "self".
-            You cannot use anything other than "none" for txt2img mode.
-        seed : int, optional
-            The seed, by default 2.
-        use_safety_checker : bool, optional
-            Whether to use safety checker or not, by default False.
-        """
         self.sd_turbo = "turbo" in model_id_or_path
         self.device = device
         self.dtype = dtype
@@ -132,11 +53,9 @@ class StreamDiffusionWrapper:
         self.height = height
         self.output_type = output_type
         self.frame_buffer_size = frame_buffer_size
-        self.batch_size = len(t_index_list) * frame_buffer_size if use_denoising_batch else frame_buffer_size
-
+        self.batch_size = len(t_index_list) * frame_buffer_size
         self.use_denoising_batch = use_denoising_batch
         self.use_safety_checker = use_safety_checker
-
         self.is_controlnet_enabled = controlnet_dicts is not None
 
         self.stream: StreamDiffusion = self._load_model(
@@ -170,21 +89,6 @@ class StreamDiffusionWrapper:
         guidance_scale: float = 1.2,
         delta: float = 1.0,
     ) -> None:
-        """
-        Prepares the model for inference.
-
-        Parameters
-        ----------
-        prompt : str
-            The prompt to generate images from.
-        num_inference_steps : int, optional
-            The number of inference steps to perform, by default 50.
-        guidance_scale : float, optional
-            The guidance scale to use, by default 1.2.
-        delta : float, optional
-            The delta multiplier of virtual residual noise,
-            by default 1.0.
-        """
         self.stream.prepare(
             prompt,
             negative_prompt,
@@ -199,29 +103,11 @@ class StreamDiffusionWrapper:
         prompt: Optional[str] = None,
         controlnet_images: Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]] = None,
     ) -> Union[Image.Image, List[Image.Image]]:
-        """
-        Performs img2img or txt2img based on the mode.
-
-        Parameters
-        ----------
-        image : Optional[Union[str, Image.Image, torch.Tensor]]
-            The image to generate from.
-        prompt : Optional[str]
-            The prompt to generate images from.
-        controlnet_images : Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]]
-            The controlnet image(s) to use for inference if controlnet is enabled.
-            by default None.
-
-        Returns
-        -------
-        Union[Image.Image, List[Image.Image]]
-            The generated image.
-        """
         assert (self.is_controlnet_enabled and controlnet_images is not None) or (
             not self.is_controlnet_enabled and controlnet_images is None
         ), "If ControlNet is disabled, please do not provide controlnet_images, vice versa."
 
-        return self.txt2img(prompt, controlnet_images)
+        return self.img2img(image, prompt, controlnet_images)
 
     def img2img(
         self,
@@ -229,23 +115,6 @@ class StreamDiffusionWrapper:
         prompt: Optional[str] = None,
         controlnet_images: Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]] = None,
     ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
-        """
-        Performs img2img.
-
-        Parameters
-        ----------
-        image : Union[str, Image.Image, torch.Tensor]
-            The image to generate from.
-        prompt : Optional[str]
-            The prompt to generate images from.
-        controlnet_images : Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]]
-            The controlnet image(s) to use for inference if controlnet is enabled.
-
-        Returns
-        -------
-        Image.Image
-            The generated image.
-        """
         if prompt is not None:
             self.stream.update_prompt(prompt)
 
@@ -273,21 +142,6 @@ class StreamDiffusionWrapper:
         return image
 
     def preprocess_image(self, image: Union[str, Image.Image], is_controlnet_image: bool = False) -> torch.Tensor:
-        """
-        Preprocesses the image.
-
-        Parameters
-        ----------
-        image : Union[str, Image.Image, torch.Tensor]
-            The image to preprocess.
-        is_controlnet_image : bool, optional
-            Whether the image is a control image or not, by default False.
-
-        Returns
-        -------
-        torch.Tensor
-            The preprocessed image.
-        """
         if isinstance(image, str):
             image = Image.open(image).convert("RGB").resize((self.width, self.height))
         if isinstance(image, Image.Image):
@@ -306,23 +160,10 @@ class StreamDiffusionWrapper:
     def postprocess_image(
         self, image_tensor: torch.Tensor, output_type: str = "pil"
     ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
-        """
-        Postprocesses the image.
-
-        Parameters
-        ----------
-        image_tensor : torch.Tensor
-            The image tensor to postprocess.
-
-        Returns
-        -------
-        Union[Image.Image, List[Image.Image]]
-            The postprocessed image.
-        """
         if self.frame_buffer_size > 1:
-            return postprocess_image(image_tensor.cpu(), output_type=output_type)
+            return self.stream.image_processor.postprocess(image_tensor.cpu(), output_type=output_type)
         else:
-            return postprocess_image(image_tensor.cpu(), output_type=output_type)[0]
+            return self.stream.image_processor.postprocess(image_tensor.cpu(), output_type=output_type)[0]
 
     def _load_model(
         self,
@@ -339,58 +180,6 @@ class StreamDiffusionWrapper:
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         seed: int = 2
     ) -> StreamDiffusion:
-        """
-        Loads the model.
-
-        This method does the following:
-
-        1. Loads the model from the model_id_or_path.
-        2. Loads and fuses the LCM-LoRA model from the lcm_lora_id if needed.
-        3. Loads the VAE model from the vae_id if needed.
-        4. Enables acceleration if needed.
-        5. Prepares the model for inference.
-        6. Load the safety checker if needed.
-
-        Parameters
-        ----------
-        model_id_or_path : str
-            The model id or path to load.
-        t_index_list : List[int]
-            The t_index_list to use for inference.
-        lora_dict : Optional[Dict[str, float]], optional
-            The lora_dict to load, by default None.
-            Keys are the LoRA names and values are the LoRA scales.
-            Example: {'LoRA_1' : 0.5 , 'LoRA_2' : 0.7 ,...}
-        controlnet_dicts : Optional[Dict[str, float]], optional
-            The controlnet_dict to load, by default None.
-            Keys are the controlnet names and values are the controlnet scales.
-            Example: {'controlnet_1' : 0.5 , 'controlnet_2' : 0.7 ,...}
-        lcm_lora_id : Optional[str], optional
-            The lcm_lora_id to load, by default None.
-        vae_id : Optional[str], optional
-            The vae_id to load, by default None.
-        acceleration : Literal["none", "xfomers", "sfast", "tensorrt"], optional
-            The acceleration method, by default "tensorrt".
-        do_add_noise : bool, optional
-            Whether to add noise for following denoising steps or not,
-            by default True.
-        use_lcm_lora : bool, optional
-            Whether to use LCM-LoRA or not, by default True.
-        use_tiny_vae : bool, optional
-            Whether to use TinyVAE or not, by default True.
-        cfg_type : Literal["none", "full", "self", "initialize"],
-        optional
-            The cfg_type for img2img mode, by default "self".
-            You cannot use anything other than "none" for txt2img mode.
-        seed : int, optional
-            The seed, by default 2.
-
-        Returns
-        -------
-        StreamDiffusion
-            The loaded model.
-        """
-
         try:  # Load from local directory
             pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
                 model_id_or_path,
@@ -464,6 +253,13 @@ class StreamDiffusionWrapper:
                 stream.vae = AutoencoderTiny.from_pretrained("madebyollin/taesd").to(
                     device=pipe.device, dtype=pipe.dtype
                 )
+        
+        print ("Init acceleration inductor...")
+        self.dtype = torch.bfloat16
+        torch._inductor.config.conv_1x1_as_mm = True
+        torch._inductor.config.coordinate_descent_tuning = True
+        torch._inductor.config.epilogue_fusion = False
+        torch._inductor.config.coordinate_descent_check_all_directions = True
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
