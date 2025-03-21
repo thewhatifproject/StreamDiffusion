@@ -191,8 +191,8 @@ class StreamDiffusionWrapper:
             print("Model load has failed. Doesn't exist.")
             exit()
 
-        print ("Fuse QKV Projections...")
-        pipe.fuse_qkv_projections()
+        #print ("Fuse QKV Projections...")
+        #pipe.fuse_qkv_projections()
 
         stream = StreamDiffusion(
             pipe=pipe,
@@ -254,20 +254,20 @@ class StreamDiffusionWrapper:
                     device=pipe.device, dtype=pipe.dtype
                 )
                 
-        print ("Init acceleration inductor...")
-        torch._inductor.config.conv_1x1_as_mm = True
-        torch._inductor.config.coordinate_descent_tuning = True
-        torch._inductor.config.epilogue_fusion = False
-        torch._inductor.config.coordinate_descent_check_all_directions = True
+        #print ("Init acceleration inductor...")
+        #torch._inductor.config.conv_1x1_as_mm = True
+        #torch._inductor.config.coordinate_descent_tuning = True
+        #torch._inductor.config.epilogue_fusion = False
+        #torch._inductor.config.coordinate_descent_check_all_directions = True
                 
-        print("Memory format conversion...")
-        stream.unet.to(memory_format=torch.channels_last)
-        stream.vae.to(memory_format=torch.channels_last)
+        #print("Memory format conversion...")
+        #stream.unet.to(memory_format=torch.channels_last)
+        #stream.vae.to(memory_format=torch.channels_last)
         
-        print("Apply torch compile optimization...")
-        stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
-        stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
-        #stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
+        #print("Apply torch compile optimization...")
+        #stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
+        #stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
+        ##stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)

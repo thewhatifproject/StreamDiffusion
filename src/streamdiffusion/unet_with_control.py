@@ -20,7 +20,6 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
                 guess_mode=False,
                 return_dict=False,
             )
-            torch.cuda.synchronize()
 
             down_samples = [down_sample * self.controlnet_scales[i] for down_sample in down_samples]
             mid_sample *= self.controlnet_scales[i]
@@ -43,5 +42,4 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
             mid_block_additional_residual=mid_block_res_sample,
             return_dict=False,
         )
-        torch.cuda.synchronize()
         return noise_pred
