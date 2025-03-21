@@ -25,7 +25,6 @@ class StreamDiffusionWrapper:
         t_index_list: List[int],
         lora_dict: Optional[Dict[str, float]] = None,
         controlnet_dicts: Optional[List[Dict[str, float]]] = None,
-        mode: Literal["img2img", "txt2img"] = "img2img",
         output_type: Literal["pil", "pt", "np", "latent"] = "pil",
         lcm_lora_id: Optional[str] = None,
         HyperSD_lora_id: Optional[str] = None,
@@ -35,10 +34,9 @@ class StreamDiffusionWrapper:
         frame_buffer_size: int = 1,
         width: int = 512,
         height: int = 512,
-        acceleration: Literal["none", "xformers", "tensorrt"] = "tensorrt",
         do_add_noise: bool = True,
         device_ids: Optional[List[int]] = None,
-        CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "Hyper_SD",
+        CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "none",
         use_tiny_vae: bool = True,
         enable_similar_image_filter: bool = False,
         similar_image_filter_threshold: float = 0.98,
@@ -46,8 +44,7 @@ class StreamDiffusionWrapper:
         use_denoising_batch: bool = True,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         seed: int = 2,
-        use_safety_checker: bool = False,
-        engine_dir: Optional[Union[str, Path]] = "engines",
+        use_safety_checker: bool = False
     ):
         """
         Initializes the StreamDiffusionWrapper.
@@ -129,23 +126,10 @@ class StreamDiffusionWrapper:
             Whether to use safety checker or not, by default False.
         """
         self.sd_turbo = "turbo" in model_id_or_path
-
-        if mode == "txt2img":
-            if cfg_type != "none":
-                raise ValueError(f"txt2img mode accepts only cfg_type = 'none', but got {cfg_type}")
-            if use_denoising_batch and frame_buffer_size > 1:
-                if not self.sd_turbo:
-                    raise ValueError("txt2img mode cannot use denoising batch with frame_buffer_size > 1.")
-
-        if mode == "img2img":
-            if not use_denoising_batch:
-                raise NotImplementedError("img2img mode must use denoising batch for now.")
-
         self.device = device
         self.dtype = dtype
         self.width = width
         self.height = height
-        self.mode = mode
         self.output_type = output_type
         self.frame_buffer_size = frame_buffer_size
         self.batch_size = len(t_index_list) * frame_buffer_size if use_denoising_batch else frame_buffer_size
@@ -163,13 +147,11 @@ class StreamDiffusionWrapper:
             HyperSD_lora_id=HyperSD_lora_id,
             vae_id=vae_id,
             t_index_list=t_index_list,
-            acceleration=acceleration,
             do_add_noise=do_add_noise,
             CM_lora_type=CM_lora_type,
             use_tiny_vae=use_tiny_vae,
             cfg_type=cfg_type,
-            seed=seed,
-            engine_dir=engine_dir,
+            seed=seed
         )
 
         if device_ids is not None:
@@ -239,56 +221,7 @@ class StreamDiffusionWrapper:
             not self.is_controlnet_enabled and controlnet_images is None
         ), "If ControlNet is disabled, please do not provide controlnet_images, vice versa."
 
-        if self.mode == "img2img":
-            return self.img2img(image, prompt, controlnet_images)
-        else:
-            return self.txt2img(prompt, controlnet_images)
-
-    def txt2img(
-        self,
-        prompt: Optional[str] = None,
-        controlnet_images: Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]] = None,
-    ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
-        """
-        Performs txt2img.
-
-        Parameters
-        ----------
-        prompt : Optional[str]
-            The prompt to generate images from.
-        controlnet_images : Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]]
-            The controlnet image(s) to use for inference if controlnet is enabled.
-            by default None.
-
-        Returns
-        -------
-        Union[Image.Image, List[Image.Image]]
-            The generated image.
-        """
-        if prompt is not None:
-            self.stream.update_prompt(prompt)
-
-        if isinstance(controlnet_images, str) or isinstance(controlnet_images, Image.Image):
-            controlnet_images = self.preprocess_image(controlnet_images, is_controlnet_image=True)
-        elif isinstance(controlnet_images, list):
-            controlnet_images = [self.preprocess_image(img, is_controlnet_image=True) for img in controlnet_images]
-            controlnet_images = torch.stack(controlnet_images)
-
-        if self.sd_turbo:
-            image_tensor = self.stream.txt2img_sd_turbo(self.batch_size)
-        else:
-            image_tensor = self.stream.txt2img(self.frame_buffer_size, controlnet_images)
-        image = self.postprocess_image(image_tensor, output_type=self.output_type)
-
-        if self.use_safety_checker:
-            safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(self.device)
-            _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.dtype),
-                clip_input=safety_checker_input.pixel_values.to(self.dtype),
-            )
-            image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
-
-        return image
+        return self.txt2img(prompt, controlnet_images)
 
     def img2img(
         self,
@@ -400,13 +333,11 @@ class StreamDiffusionWrapper:
         lcm_lora_id: Optional[str] = None,
         HyperSD_lora_id: Optional[str] = None,
         vae_id: Optional[str] = None,
-        acceleration: Literal["none", "xformers", "tensorrt"] = "tensorrt",
         do_add_noise: bool = True,
         CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "lcm",
         use_tiny_vae: bool = True,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
-        seed: int = 2,
-        engine_dir: Optional[Union[str, Path]] = "engines",
+        seed: int = 2
     ) -> StreamDiffusion:
         """
         Loads the model.
@@ -533,179 +464,6 @@ class StreamDiffusionWrapper:
                 stream.vae = AutoencoderTiny.from_pretrained("madebyollin/taesd").to(
                     device=pipe.device, dtype=pipe.dtype
                 )
-
-        try:
-            if acceleration == "xformers":
-                stream.pipe.enable_xformers_memory_efficient_attention()
-            if acceleration == "tensorrt":
-                from polygraphy import cuda
-
-                from streamdiffusion.acceleration.tensorrt import (
-                    TorchVAEEncoder,
-                    compile_control_unet,
-                    compile_unet,
-                    compile_vae_decoder,
-                    compile_vae_encoder,
-                )
-                from streamdiffusion.acceleration.tensorrt.engine import (
-                    AutoencoderKLEngine,
-                    UNet2DConditionControlNetModelEngine,
-                    UNet2DConditionModelEngine,
-                )
-                from streamdiffusion.acceleration.tensorrt.models import (
-                    VAE,
-                    UNet,
-                    UNetWithControlNet,
-                    VAEEncoder,
-                )
-
-                def create_prefix(
-                    model_id_or_path: str,
-                    max_batch_size: int,
-                    min_batch_size: int,
-                ):
-                    maybe_path = Path(model_id_or_path)
-                    if maybe_path.exists():
-                        return f"{maybe_path.stem}--CM_lora_type-{CM_lora_type}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}--controlnet-{'enabled' if self.is_controlnet_enabled else 'disabled'}"
-                    else:
-                        return f"{model_id_or_path}--CM_lora_type-{CM_lora_type}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}--controlnet-{'enabled' if self.is_controlnet_enabled else 'disabled'}"
-
-                engine_dir = Path(engine_dir)
-                unet_path = os.path.join(
-                    engine_dir,
-                    create_prefix(
-                        model_id_or_path=model_id_or_path,
-                        max_batch_size=stream.trt_unet_batch_size,
-                        min_batch_size=stream.trt_unet_batch_size,
-                    ),
-                    "unet.engine",
-                )
-                vae_encoder_path = os.path.join(
-                    engine_dir,
-                    create_prefix(
-                        model_id_or_path=model_id_or_path,
-                        max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    ),
-                    "vae_encoder.engine",
-                )
-                vae_decoder_path = os.path.join(
-                    engine_dir,
-                    create_prefix(
-                        model_id_or_path=model_id_or_path,
-                        max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    ),
-                    "vae_decoder.engine",
-                )
-
-                if not os.path.exists(unet_path):
-                    os.makedirs(os.path.dirname(unet_path), exist_ok=True)
-                    if self.is_controlnet_enabled:
-                        unet_model = UNetWithControlNet(
-                            fp16=True,
-                            device=stream.device,
-                            max_batch_size=stream.trt_unet_batch_size,
-                            min_batch_size=stream.trt_unet_batch_size,
-                            num_controlnets=len(controlnet_dicts),
-                            embedding_dim=stream.text_encoder.config.hidden_size,
-                            unet_dim=stream.unet.unet.config.in_channels,
-                        )
-                        compile_control_unet(
-                            stream.unet,
-                            unet_model,
-                            unet_path + ".onnx",
-                            unet_path + ".opt.onnx",
-                            unet_path,
-                            opt_batch_size=stream.trt_unet_batch_size,
-                        )
-                    else:
-                        unet_model = UNet(
-                            fp16=True,
-                            device=stream.device,
-                            max_batch_size=stream.trt_unet_batch_size,
-                            min_batch_size=stream.trt_unet_batch_size,
-                            embedding_dim=stream.text_encoder.config.hidden_size,
-                            unet_dim=stream.unet.config.in_channels,
-                        )
-                        compile_unet(
-                            stream.unet,
-                            unet_model,
-                            unet_path + ".onnx",
-                            unet_path + ".opt.onnx",
-                            unet_path,
-                            opt_batch_size=stream.trt_unet_batch_size,
-                        )
-
-                if not os.path.exists(vae_decoder_path):
-                    os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
-                    stream.vae.forward = stream.vae.decode
-                    vae_decoder_model = VAE(
-                        device=stream.device,
-                        max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    )
-                    compile_vae_decoder(
-                        stream.vae,
-                        vae_decoder_model,
-                        vae_decoder_path + ".onnx",
-                        vae_decoder_path + ".opt.onnx",
-                        vae_decoder_path,
-                        opt_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    )
-                    delattr(stream.vae, "forward")
-
-                if not os.path.exists(vae_encoder_path):
-                    os.makedirs(os.path.dirname(vae_encoder_path), exist_ok=True)
-                    vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
-                    vae_encoder_model = VAEEncoder(
-                        device=stream.device,
-                        max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    )
-                    compile_vae_encoder(
-                        vae_encoder,
-                        vae_encoder_model,
-                        vae_encoder_path + ".onnx",
-                        vae_encoder_path + ".opt.onnx",
-                        vae_encoder_path,
-                        opt_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    )
-
-                cuda_steram = cuda.Stream()
-
-                vae_config = stream.vae.config
-                vae_dtype = stream.vae.dtype
-
-                if self.is_controlnet_enabled:
-                    stream.unet = UNet2DConditionControlNetModelEngine(unet_path, cuda_steram, use_cuda_graph=False)
-                else:
-                    stream.unet = UNet2DConditionModelEngine(unet_path, cuda_steram, use_cuda_graph=False)
-                stream.vae = AutoencoderKLEngine(
-                    vae_encoder_path,
-                    vae_decoder_path,
-                    cuda_steram,
-                    stream.pipe.vae_scale_factor,
-                    use_cuda_graph=False,
-                )
-                setattr(stream.vae, "config", vae_config)
-                setattr(stream.vae, "dtype", vae_dtype)
-
-                gc.collect()
-                torch.cuda.empty_cache()
-
-                print("TensorRT acceleration enabled.")
-            if acceleration == "sfast":
-                from streamdiffusion.acceleration.sfast import (
-                    accelerate_with_stable_fast,
-                )
-
-                stream = accelerate_with_stable_fast(stream)
-                print("StableFast acceleration enabled.")
-        except Exception as e:
-            print(e)
-            # traceback.print_exc()
-            print("Acceleration has failed. Falling back to normal mode.")
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
