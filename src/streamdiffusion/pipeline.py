@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import PIL.Image
 import torch
-from diffusers import LCMScheduler, DiffusionPipeline, DDIMScheduler
+from diffusers import LCMScheduler, DiffusionPipeline
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
     retrieve_latents,
@@ -92,9 +92,7 @@ class StreamDiffusion:
             self.text_encoder = pipe.text_encoder
             self.pipe.scheduler.config['original_inference_steps'] = original_inference_steps
             self.controlnet = pipe.controlnet
-            #self.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
-            self.scheduler = DDIMScheduler.from_config(self.pipe.scheduler.config, timestep_spacing="trailing")
-
+            self.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
         self.inference_time_ema = 0
         self.controlnet_enabled = hasattr(pipe, "controlnet") and self.controlnet is not None
         if hasattr(pipe, "controlnet_conditioning_scales"):
