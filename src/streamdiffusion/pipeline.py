@@ -162,23 +162,6 @@ class StreamDiffusion:
         else:
             self.generator.manual_seed(seed)
 
-    def generate_t_index_list(
-        self,
-        noise_strength: float = 0.4,
-        num_inference_steps: int = 50,
-        mode: Literal["linear"] = "linear",
-    ) -> List[int]:
-        initial_t_index = int((num_inference_steps - 1) * (1 - noise_strength))
-        t_index_list = [initial_t_index]
-        if mode == "linear":
-            t_index_interval = ((num_inference_steps - 1) - initial_t_index) / (self.denoising_steps_num - 1)
-            for idx in range(1, self.denoising_steps_num):
-                t_index = initial_t_index + int(idx * t_index_interval)
-                t_index_list.append(t_index)
-        else:
-            raise ValueError(f"Unsupported mode {mode}")
-        return t_index_list
-
     @torch.no_grad()
     def update_scheduler(self, t_index_list: Union[None, List[int]] = None, num_inference_steps: int = 50) -> None:
         self.scheduler.set_timesteps(num_inference_steps, self.device)
@@ -578,9 +561,6 @@ class StreamDiffusion:
             x_t_latent = x_t_latent.to(device=self.device, dtype=self.dtype)
         else:
             if x is not None:
-                x = self.image_processor.preprocess(x, self.height, self.width).to(
-                    device=self.device, dtype=self.dtype
-                )
                 if self.similar_image_filter:
                     x = self.similar_filter(x)
                     if x is None:
@@ -601,30 +581,3 @@ class StreamDiffusion:
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
         return x_output
-
-    @torch.inference_mode()
-    def txt2img(self, batch_size: int = 1, controlnet_images: Optional[torch.Tensor] = None) -> torch.Tensor:
-        x_0_pred_out = self.predict_x0_batch(
-            torch.randn((batch_size, 4, self.latent_height, self.latent_width)).to(
-                device=self.device, dtype=self.dtype
-            ),
-            controlnet_images=controlnet_images,
-        )
-        x_output = self.decode_image(x_0_pred_out).detach().clone()
-        return x_output
-
-    @torch.inference_mode()
-    def txt2img_sd_turbo(self, batch_size: int = 1) -> torch.Tensor:
-        x_t_latent = torch.randn(
-            (batch_size, 4, self.latent_height, self.latent_width),
-            device=self.device,
-            dtype=self.dtype,
-        )
-        model_pred = self.unet(
-            x_t_latent,
-            self.sub_timesteps_tensor,
-            encoder_hidden_states=self.prompt_embeds,
-            return_dict=False,
-        )[0]
-        x_0_pred_out = (x_t_latent - self.beta_prod_t_sqrt * model_pred) / self.alpha_prod_t_sqrt
-        return self.decode_image(x_0_pred_out)
