@@ -409,6 +409,7 @@ class StreamDiffusion:
         self,
         x_t_latent: torch.Tensor,
         t_list: Union[torch.Tensor, list[int]],
+        added_cond_kwargs,
         idx: Optional[int] = None,
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -428,13 +429,16 @@ class StreamDiffusion:
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
                 controlnet_images=controlnet_images,
+                added_cond_kwargs=added_cond_kwargs,
+                return_dict=False
             )[0]
         else:
             model_pred = self.unet(
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
-                return_dict=False,
+                added_cond_kwargs=added_cond_kwargs,
+                return_dict=False
             )[0]
 
         if self.cfg_type == "initialize":
@@ -502,6 +506,7 @@ class StreamDiffusion:
     def predict_x0_batch(
         self, x_t_latent: torch.Tensor, controlnet_images: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
+        added_cond_kwargs = {}
         prev_latent_batch = self.x_t_latent_buffer
 
         if controlnet_images is not None:
@@ -518,7 +523,8 @@ class StreamDiffusion:
             if controlnet_images is not None:
                 controlnet_images = torch.cat((controlnet_images, prev_controlnet_images), dim=0)
 
-            x_0_pred_batch, model_pred = self.unet_step(x_t_latent, t_list, controlnet_images=controlnet_images)
+            added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
+            x_0_pred_batch, model_pred = self.unet_step(x_t_latent, t_list, controlnet_images=controlnet_images, added_cond_kwargs=added_cond_kwargs)
 
             if self.denoising_steps_num > 1:
                 x_0_pred_out = x_0_pred_batch[-1].unsqueeze(0)
@@ -541,7 +547,8 @@ class StreamDiffusion:
             self.init_noise = x_t_latent
             for idx, t in enumerate(self.sub_timesteps_tensor):
                 t = t.view(1).repeat(self.frame_bff_size)
-                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx, controlnet_images=controlnet_images)
+                added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
+                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx, controlnet_images=controlnet_images, added_cond_kwargs=added_cond_kwargs)
                 if idx < len(self.sub_timesteps_tensor) - 1:
                     if self.CM_lora_type == "Hyper_SD":
                         x_t_latent = (
