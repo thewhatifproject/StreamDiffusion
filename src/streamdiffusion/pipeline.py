@@ -429,8 +429,7 @@ class StreamDiffusion:
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
                 controlnet_images=controlnet_images,
-                added_cond_kwargs=added_cond_kwargs,
-                return_dict=False
+                added_cond_kwargs=added_cond_kwargs
             )[0]
         else:
             model_pred = self.unet(
