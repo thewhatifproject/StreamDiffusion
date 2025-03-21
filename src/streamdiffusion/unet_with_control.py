@@ -11,7 +11,6 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
 
     def forward(self, sample, timestep, encoder_hidden_states, controlnet_images, added_cond_kwargs) -> torch.Tensor:
         for i in range(len(self.controlnets)):
-            torch.compiler.cudagraph_mark_step_begin()
             down_samples, mid_sample = self.controlnets[i](
                 sample,
                 timestep,
