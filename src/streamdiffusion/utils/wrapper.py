@@ -29,7 +29,6 @@ class StreamDiffusionWrapper:
         frame_buffer_size: int = 1,
         width: int = 512,
         height: int = 512,
-        acceleration: bool = False,
         do_add_noise: bool = True,
         device_ids: Optional[List[int]] = None,
         CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "none",
@@ -61,7 +60,6 @@ class StreamDiffusionWrapper:
             HyperSD_lora_id=HyperSD_lora_id,
             vae_id=vae_id,
             t_index_list=t_index_list,
-            acceleration=acceleration,
             do_add_noise=do_add_noise,
             CM_lora_type=CM_lora_type,
             use_tiny_vae=use_tiny_vae,
@@ -173,7 +171,6 @@ class StreamDiffusionWrapper:
         lcm_lora_id: Optional[str] = None,
         HyperSD_lora_id: Optional[str] = None,
         vae_id: Optional[str] = None,
-        acceleration: bool = False,
         do_add_noise: bool = True,
         CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "none",
         use_tiny_vae: bool = True,
@@ -181,13 +178,12 @@ class StreamDiffusionWrapper:
         seed: int = 2
     ) -> StreamDiffusion:
         
-        if acceleration:
-            print ("Init acceleration inductor...")
-            self.dtype = torch.bfloat16
-            torch._inductor.config.conv_1x1_as_mm = True
-            torch._inductor.config.coordinate_descent_tuning = True
-            torch._inductor.config.epilogue_fusion = False
-            torch._inductor.config.coordinate_descent_check_all_directions = True
+        print ("Init acceleration inductor...")
+        self.dtype = torch.bfloat16
+        torch._inductor.config.conv_1x1_as_mm = True
+        torch._inductor.config.coordinate_descent_tuning = True
+        torch._inductor.config.epilogue_fusion = False
+        torch._inductor.config.coordinate_descent_check_all_directions = True
 
         if self.is_controlnet_enabled:
             controlnets = [
@@ -219,9 +215,8 @@ class StreamDiffusionWrapper:
                 print("Model load has failed. Doesn't exist.")
                 exit()
         
-        if acceleration and pipe is not None:
-            print ("Fuse QKV Projections...")
-            pipe.fuse_qkv_projections()
+        print ("Fuse QKV Projections...")
+        pipe.fuse_qkv_projections()
 
         stream = StreamDiffusion(
             pipe=pipe,
@@ -279,22 +274,20 @@ class StreamDiffusionWrapper:
                     device=pipe.device, dtype=self.dtype
                 )
 
-        if acceleration and pipe is not None:
-
-            print("Memory format conversion...")
-            stream.unet.to(memory_format=torch.channels_last)
-            stream.vae.to(memory_format=torch.channels_last)
-            stream.text_encoder.to(memory_format=torch.channels_last)
-            if self.is_controlnet_enabled:
-                stream.controlnet.to(memory_format=torch.channels_last)
-            
-            print("Apply torch compile optimization...")
-            stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
-            stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
-            stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
-            stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
-            if self.is_controlnet_enabled:
-                stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
+        print("Memory format conversion...")
+        stream.unet.to(memory_format=torch.channels_last)
+        stream.vae.to(memory_format=torch.channels_last)
+        stream.text_encoder.to(memory_format=torch.channels_last)
+        if self.is_controlnet_enabled:
+            stream.controlnet.to(memory_format=torch.channels_last)
+        
+        print("Apply torch compile optimization...")
+        stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
+        stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
+        stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
+        stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
+        if self.is_controlnet_enabled:
+            stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
