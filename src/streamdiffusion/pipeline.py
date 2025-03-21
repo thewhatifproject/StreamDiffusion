@@ -258,6 +258,19 @@ class StreamDiffusion:
             self.negative_prompt_embeds = encoder_output[1]
         self.prompt_embeds = encoder_output[0].repeat(self.batch_size, 1, 1)
 
+        self.add_text_embeds = encoder_output[2]
+        original_size = (self.height, self.width)
+        crops_coords_top_left = (0, 0)
+        target_size = (self.height, self.width)
+        text_encoder_projection_dim = int(self.add_text_embeds.shape[-1])
+        self.add_time_ids = self._get_add_time_ids(
+            original_size,
+            crops_coords_top_left,
+            target_size,
+            dtype=encoder_output[0].dtype,
+            text_encoder_projection_dim=text_encoder_projection_dim,
+        )
+
         if self.use_denoising_batch and self.cfg_type == "full":
             uncond_prompt_embeds = self.negative_prompt_embeds.repeat(self.batch_size, 1, 1)
         elif self.cfg_type == "initialize":
@@ -581,3 +594,10 @@ class StreamDiffusion:
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
         return x_output
+
+    def _get_add_time_ids(
+        self, original_size, crops_coords_top_left, target_size, dtype, text_encoder_projection_dim=None
+    ):
+        add_time_ids = list(original_size + crops_coords_top_left + target_size)
+        add_time_ids = torch.tensor([add_time_ids], dtype=dtype)
+        return add_time_ids

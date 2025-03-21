@@ -267,7 +267,7 @@ class StreamDiffusionWrapper:
         print("Apply torch compile optimization...")
         stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
         stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
-        stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
+        #stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
