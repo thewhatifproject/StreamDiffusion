@@ -415,7 +415,7 @@ class StreamDiffusion:
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO: Re-implement R-CFG according to the equation in the paper
-        #torch.compiler.cudagraph_mark_step_begin()
+        torch.compiler.cudagraph_mark_step_begin()
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
             t_list = torch.concat([t_list[0:1], t_list], dim=0)
@@ -426,6 +426,7 @@ class StreamDiffusion:
             x_t_latent_plus_uc = x_t_latent
 
         if controlnet_images is not None and self.controlnet_enabled and self.controlnet_conditioning_scales is not None:
+            
             down_block_res_samples, mid_block_res_sample = self.controlnet (
                 x_t_latent_plus_uc,
                 t_list,
@@ -436,8 +437,8 @@ class StreamDiffusion:
                 guess_mode=False,
                 return_dict=False,
             )
-            down_block_res_samples = [res.detach().clone() for res in down_block_res_samples]
-            mid_block_res_sample = mid_block_res_sample.detach().clone()
+            torch.cuda.synchronize()
+
             model_pred = self.unet(
                 sample=x_t_latent_plus_uc,
                 timestep=t_list,
@@ -446,7 +447,8 @@ class StreamDiffusion:
                 down_block_additional_residuals=down_block_res_samples,
                 mid_block_additional_residual=mid_block_res_sample,
                 return_dict=False
-            )[0].detach().clone()
+            )[0]
+            torch.cuda.synchronize()
         else:
             model_pred = self.unet(
                 x_t_latent_plus_uc,
@@ -455,8 +457,8 @@ class StreamDiffusion:
                 added_cond_kwargs=added_cond_kwargs,
                 return_dict=False,
             )[0]
-            
-        #torch.cuda.synchronize()
+            torch.cuda.synchronize()
+
         if self.cfg_type == "initialize":
             noise_pred_text = model_pred[1:]
             self.stock_noise = torch.concat([model_pred[0:1], self.stock_noise[1:]], dim=0)
