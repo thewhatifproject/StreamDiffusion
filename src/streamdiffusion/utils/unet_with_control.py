@@ -15,6 +15,7 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
                 sample,
                 timestep,
                 encoder_hidden_states=encoder_hidden_states,
+                added_cond_kwargs=added_cond_kwargs,
                 controlnet_cond=controlnet_images[i],
                 guess_mode=False,
                 return_dict=False,
