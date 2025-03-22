@@ -366,6 +366,7 @@ class StreamDiffusion:
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs,
                 return_dict=False,
             )[0]
             
