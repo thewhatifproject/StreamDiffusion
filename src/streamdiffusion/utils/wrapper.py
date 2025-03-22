@@ -1,12 +1,9 @@
-import gc
-import os
-from pathlib import Path
 import traceback
 from typing import List, Literal, Optional, Union, Dict
 
 import numpy as np
 import torch
-from diffusers import AutoencoderTiny, StableDiffusionPipeline, StableDiffusionXLPipeline
+from diffusers import AutoencoderTiny, StableDiffusionXLPipeline
 from PIL import Image
 from streamdiffusion import StreamDiffusion
 
