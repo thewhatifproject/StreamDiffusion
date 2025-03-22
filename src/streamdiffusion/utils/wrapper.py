@@ -51,10 +51,7 @@ class StreamDiffusionWrapper:
         self.height = height
         self.output_type = output_type
         self.frame_buffer_size = frame_buffer_size
-        self.batch_size = (
-            len(t_index_list) * frame_buffer_size
-
-        )
+        self.batch_size = (len(t_index_list) * frame_buffer_size)
         self.use_denoising_batch = use_denoising_batch
         self.use_safety_checker = use_safety_checker
 
