@@ -171,10 +171,9 @@ class StreamDiffusion:
             C = 3
             H = self.height
             W = self.width   
-            if self.denoising_steps_num > 1:
-                self.controlnet_images_buffer = torch.zeros((B, C, H, W), device=self.device, dtype=self.dtype)
-            else:
-                self.x_t_latent_buffer = None 
+            self.controlnet_images_buffer = torch.zeros((B, C, H, W), device=self.device, dtype=self.dtype)
+        else:
+            self.x_t_latent_buffer = None 
 
         if self.cfg_type == "none":
             self.guidance_scale = 1.0
