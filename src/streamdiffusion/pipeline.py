@@ -4,18 +4,19 @@ from typing import List, Optional, Union, Any, Dict, Tuple, Literal
 import numpy as np
 import PIL.Image
 import torch
-from diffusers import LCMScheduler, StableDiffusionPipeline, StableDiffusionXLPipeline, DiffusionPipeline
+from diffusers import LCMScheduler, StableDiffusionXLPipeline,
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
     retrieve_latents,
 )
 
 from streamdiffusion.image_filter import SimilarImageFilter
+from streamdiffusion.utils.unet_with_control import UNet2DConditionControlNetModel
 
 class StreamDiffusion:
     def __init__(
         self,
-        pipe: DiffusionPipeline,
+        pipe: StableDiffusionXLPipeline,
         t_index_list: List[int],
         torch_dtype: torch.dtype = torch.float16,
         width: int = 512,

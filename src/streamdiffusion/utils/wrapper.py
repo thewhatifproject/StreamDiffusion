@@ -22,6 +22,7 @@ class StreamDiffusionWrapper:
         lcm_lora_id: Optional[str] = None,
         vae_id: Optional[str] = None,
         device: Literal["cpu", "cuda"] = "cuda",
+        controlnet_dicts: Optional[List[Dict[str, float]]] = None,
         dtype: torch.dtype = torch.float16,
         frame_buffer_size: int = 1,
         width: int = 512,
@@ -50,6 +51,7 @@ class StreamDiffusionWrapper:
         self.batch_size = (len(t_index_list) * frame_buffer_size)
         self.use_denoising_batch = use_denoising_batch
         self.use_safety_checker = use_safety_checker
+        self.is_controlnet_enabled = controlnet_dicts is not None
 
         self.stream: StreamDiffusion = self._load_model(
             model_id_or_path=model_id_or_path,
@@ -57,6 +59,7 @@ class StreamDiffusionWrapper:
             lcm_lora_id=lcm_lora_id,
             vae_id=vae_id,
             t_index_list=t_index_list,
+            controlnet_dicts=controlnet_dicts,
             acceleration=acceleration,
             do_add_noise=do_add_noise,
             use_lcm_lora=use_lcm_lora,
@@ -97,12 +100,20 @@ class StreamDiffusionWrapper:
         self,
         image: Optional[Union[str, Image.Image, torch.Tensor]] = None,
         prompt: Optional[str] = None,
+        controlnet_images: Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]] = None,
     ) -> Union[Image.Image, List[Image.Image]]:
              
-        return self.img2img(image, prompt)            
+        assert (self.is_controlnet_enabled and controlnet_images is not None) or (
+            not self.is_controlnet_enabled and controlnet_images is None
+        ), "If ControlNet is disabled, please do not provide controlnet_images, vice versa."
+
+        return self.img2img(image, prompt, controlnet_images)        
 
     def img2img(
-        self, image: Union[str, Image.Image, torch.Tensor], prompt: Optional[str] = None
+        self,
+        image: Union[str, Image.Image, torch.Tensor],
+        prompt: Optional[str] = None,
+        controlnet_images: Optional[Union[str, Image.Image, list[str], list[Image.Image], torch.Tensor]] = None,
     ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
 
         if prompt is not None:
@@ -111,7 +122,14 @@ class StreamDiffusionWrapper:
         if isinstance(image, str) or isinstance(image, Image.Image):
             image = self.preprocess_image(image)
 
-        image_tensor = self.stream(image)
+        if isinstance(controlnet_images, str) or isinstance(controlnet_images, Image.Image):
+            controlnet_images = self.preprocess_image(controlnet_images, is_controlnet_image=True)
+
+        if isinstance(controlnet_images, list):
+            controlnet_images = [self.preprocess_image(img, is_controlnet_image=True) for img in controlnet_images]
+            controlnet_images = torch.stack(controlnet_images)
+
+        image_tensor = self.stream(image, controlnet_images=controlnet_images)
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
 
         if self.use_safety_checker:
@@ -126,15 +144,21 @@ class StreamDiffusionWrapper:
 
         return image
 
-    def preprocess_image(self, image: Union[str, Image.Image]) -> torch.Tensor:
+    def preprocess_image(self, image: Union[str, Image.Image], is_controlnet_image: bool = False) -> torch.Tensor:
         if isinstance(image, str):
             image = Image.open(image).convert("RGB").resize((self.width, self.height))
         if isinstance(image, Image.Image):
             image = image.convert("RGB").resize((self.width, self.height))
 
-        return self.stream.image_processor.preprocess(
-            image, self.height, self.width
-        ).to(device=self.device, dtype=self.dtype)
+        return (
+            self.stream.image_processor.preprocess(image, self.height, self.width).to(
+                device=self.device, dtype=self.dtype
+            )
+            if not is_controlnet_image
+            else self.stream.controlnet_image_processor.preprocess(image, self.height, self.width).to(
+                device=self.device, dtype=self.dtype
+            )
+        )
 
     def postprocess_image(
         self, image_tensor: torch.Tensor, output_type: str = "pil"
@@ -151,6 +175,7 @@ class StreamDiffusionWrapper:
         lora_dict: Optional[Dict[str, float]] = None,
         lcm_lora_id: Optional[str] = None,
         vae_id: Optional[str] = None,
+        controlnet_dicts: Optional[Dict[str, float]] = None,
         acceleration: Literal["none", "xformers", "tensorrt"] = "tensorrt",
         do_add_noise: bool = True,
         use_lcm_lora: bool = True,
@@ -198,7 +223,11 @@ class StreamDiffusionWrapper:
                     stream.load_lora(lora_name)
                     stream.fuse_lora(lora_scale=lora_scale)
                     print(f"Use LoRA: {lora_name} in weights {lora_scale}")
-
+        
+        if controlnet_dicts is not None:
+                stream.load_controlnet(controlnet_dicts)
+                print(f"Use controlnet: {controlnet_dicts}")
+                
         if use_tiny_vae:
             if vae_id is not None:
                 stream.vae = AutoencoderTiny.from_pretrained(vae_id).to(
