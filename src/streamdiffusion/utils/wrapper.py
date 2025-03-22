@@ -21,7 +21,6 @@ class StreamDiffusionWrapper:
         model_id_or_path: str,
         t_index_list: List[int],
         lora_dict: Optional[Dict[str, float]] = None,
-        mode: Literal["img2img", "txt2img"] = "img2img",
         output_type: Literal["pil", "pt", "np", "latent"] = "pil",
         lcm_lora_id: Optional[str] = None,
         vae_id: Optional[str] = None,
@@ -50,7 +49,6 @@ class StreamDiffusionWrapper:
         self.dtype = dtype
         self.width = width
         self.height = height
-        self.mode = mode
         self.output_type = output_type
         self.frame_buffer_size = frame_buffer_size
         self.batch_size = (
@@ -108,9 +106,8 @@ class StreamDiffusionWrapper:
         image: Optional[Union[str, Image.Image, torch.Tensor]] = None,
         prompt: Optional[str] = None,
     ) -> Union[Image.Image, List[Image.Image]]:
-        
-        if self.mode == "img2img":         
-            return self.img2img(image, prompt)            
+             
+        return self.img2img(image, prompt)            
 
     def img2img(
         self, image: Union[str, Image.Image, torch.Tensor], prompt: Optional[str] = None
@@ -151,10 +148,10 @@ class StreamDiffusionWrapper:
         self, image_tensor: torch.Tensor, output_type: str = "pil"
     ) -> Union[Image.Image, List[Image.Image], torch.Tensor, np.ndarray]:
         if self.frame_buffer_size > 1:
-            return postprocess_image(image_tensor.cpu(), output_type=output_type)
+            return self.stream.image_processor.postprocess(image_tensor.cpu(), output_type=output_type)
         else:
-            return postprocess_image(image_tensor.cpu(), output_type=output_type)[0]
-
+            return self.stream.image_processor.postprocess(image_tensor.cpu(), output_type=output_type)[0]
+        
     def _load_model(
         self,
         model_id_or_path: str,
