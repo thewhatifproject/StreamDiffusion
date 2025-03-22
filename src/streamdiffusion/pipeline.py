@@ -173,7 +173,7 @@ class StreamDiffusion:
             W = self.width   
             self.controlnet_images_buffer = torch.zeros((B, C, H, W), device=self.device, dtype=self.dtype)
         else:
-            self.x_t_latent_buffer = None 
+            self.controlnet_images_buffer = None 
 
         if self.cfg_type == "none":
             self.guidance_scale = 1.0
