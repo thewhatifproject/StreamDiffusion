@@ -151,8 +151,8 @@ class StreamDiffusion:
         if self.denoising_steps_num > 1:
             B = (self.denoising_steps_num - 1) * self.frame_bff_size
             C = 4
-            H = self.latent_height
-            W = self.latent_width
+            H = self.height
+            W = self.width
             self.x_t_latent_buffer = torch.zeros(
                 (
                     B,
