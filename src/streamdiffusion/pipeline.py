@@ -47,6 +47,7 @@ class StreamDiffusion:
         self.alpha_prod_t_sqrt = None
         self.beta_prod_t_sqrt = None
         self.CM_lora_type = CM_lora_type
+        self.sdxl = sdxl
 
         self.frame_bff_size = frame_buffer_size
         # Set time step index list and denoising steps number
