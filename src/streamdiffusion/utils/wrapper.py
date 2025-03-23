@@ -178,7 +178,8 @@ class StreamDiffusionWrapper:
         CM_lora_type: Literal["lcm", "Hyper_SD", "none"] = "none",
         use_tiny_vae: bool = True,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
-        seed: int = 2
+        seed: int = 2,
+        sdxl: bool = False
     ) -> StreamDiffusion:
         
         if acceleration:
@@ -233,6 +234,7 @@ class StreamDiffusionWrapper:
             frame_buffer_size=self.frame_buffer_size,
             use_denoising_batch=True,
             cfg_type=cfg_type,
+            sdxl=sdxl
         )
         if not self.sd_turbo:
             if CM_lora_type == "lcm":
