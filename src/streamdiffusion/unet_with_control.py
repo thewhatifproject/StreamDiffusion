@@ -9,13 +9,12 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
         self.controlnets = [controlnet.to(unet.device, dtype=unet.dtype) for controlnet in controlnets]
         self.controlnet_scales = controlnet_scales
 
-    def forward(self, sample, timestep, encoder_hidden_states, controlnet_images, added_cond_kwargs=None) -> torch.Tensor:
+    def forward(self, sample, timestep, encoder_hidden_states, controlnet_images) -> torch.Tensor:
         for i in range(len(self.controlnets)):
             down_samples, mid_sample = self.controlnets[i](
                 sample,
                 timestep,
                 encoder_hidden_states=encoder_hidden_states,
-                added_cond_kwargs=added_cond_kwargs,
                 controlnet_cond=controlnet_images[i],
                 guess_mode=False,
                 return_dict=False,
@@ -38,7 +37,6 @@ class UNet2DConditionControlNetModel(torch.nn.Module):
             sample,
             timestep,
             encoder_hidden_states=encoder_hidden_states,
-            added_cond_kwargs=added_cond_kwargs,
             down_block_additional_residuals=down_block_res_samples,
             mid_block_additional_residual=mid_block_res_sample,
             return_dict=False,
