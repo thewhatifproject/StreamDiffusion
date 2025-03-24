@@ -143,7 +143,7 @@ class StreamDiffusionWrapper:
             controlnet_images = torch.stack(controlnet_images)
 
         if self.sd_turbo:
-            image_tensor = self.stream.txt2img_sd_turbo(self.batch_size)
+            image_tensor = self.stream.txt2img_sd_turbo(self.batch_size, controlnet_images)
         else:
             image_tensor = self.stream.txt2img(self.frame_buffer_size, controlnet_images)
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
