@@ -186,7 +186,7 @@ class StreamDiffusionWrapper:
         
         if acceleration:
             print ("Init acceleration inductor...")
-            self.dtype = torch.bfloat16
+            #self.dtype = torch.bfloat16
             torch._inductor.config.conv_1x1_as_mm = True
             torch._inductor.config.coordinate_descent_tuning = True
             torch._inductor.config.epilogue_fusion = False
@@ -288,15 +288,15 @@ class StreamDiffusionWrapper:
             print("Memory format conversion...")
             stream.unet.to(memory_format=torch.channels_last)
             stream.vae.to(memory_format=torch.channels_last)
-            stream.text_encoder.to(memory_format=torch.channels_last)
+            #stream.text_encoder.to(memory_format=torch.channels_last)
             if self.is_controlnet_enabled:
                 stream.controlnet.to(memory_format=torch.channels_last)
             
             print("Apply torch compile optimization...")
             stream.unet = torch.compile(stream.unet, mode="reduce-overhead", fullgraph=True)
             stream.vae.decode = torch.compile(stream.vae.decode, mode="reduce-overhead", fullgraph=True)
-            stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
-            stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
+            #stream.vae.encode = torch.compile(stream.vae.encode, mode="reduce-overhead", fullgraph=True)
+            #stream.text_encoder = torch.compile(stream.text_encoder, mode="reduce-overhead", fullgraph=True)
             if self.is_controlnet_enabled:
                 stream.controlnet = torch.compile(stream.controlnet, mode="reduce-overhead", fullgraph=True)
 
