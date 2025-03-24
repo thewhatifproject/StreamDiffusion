@@ -654,17 +654,42 @@ class StreamDiffusion:
         return x_output
 
     @torch.inference_mode()
-    def txt2img_sd_turbo(self, batch_size: int = 1) -> torch.Tensor:
+    def txt2img_sd_turbo(self, batch_size: int = 1, controlnet_images: Optional[torch.Tensor] = None) -> torch.Tensor:
         x_t_latent = torch.randn(
             (batch_size, 4, self.latent_height, self.latent_width),
             device=self.device,
             dtype=self.dtype,
         )
-        model_pred = self.unet(
-            x_t_latent,
-            self.sub_timesteps_tensor,
-            encoder_hidden_states=self.prompt_embeds,
-            return_dict=False,
-        )[0]
+        if controlnet_images is not None and self.controlnet_enabled:
+            t_list = self.sub_timesteps_tensor
+            # Se si sta usando SDXL, prepara gli added_cond_kwargs
+            added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device),
+                                "time_ids": self.add_time_ids.to(self.device)} if self.sdxl else {}
+            down_block_res_samples, mid_block_res_sample = self.controlnet(
+                x_t_latent,
+                t_list,
+                encoder_hidden_states=self.prompt_embeds,
+                controlnet_cond=controlnet_images,
+                added_cond_kwargs=added_cond_kwargs,
+                conditioning_scale=self.controlnet_conditioning_scales,
+                guess_mode=False,
+                return_dict=False,
+            )
+            model_pred = self.unet(
+                x_t_latent,
+                t_list,
+                encoder_hidden_states=self.prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs,
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+                return_dict=False,
+            )[0]
+        else:
+            model_pred = self.unet(
+                x_t_latent,
+                self.sub_timesteps_tensor,
+                encoder_hidden_states=self.prompt_embeds,
+                return_dict=False,
+            )[0]
         x_0_pred_out = (x_t_latent - self.beta_prod_t_sqrt * model_pred) / self.alpha_prod_t_sqrt
         return self.decode_image(x_0_pred_out)
