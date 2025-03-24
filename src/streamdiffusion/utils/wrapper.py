@@ -122,8 +122,10 @@ class StreamDiffusionWrapper:
             not self.is_controlnet_enabled and controlnet_images is None
         ), "If ControlNet is disabled, please do not provide controlnet_images, vice versa."
         if self.mode == "img2img":
+            print("In img2img mode...")
             return self.img2img(image, prompt, controlnet_images)
         else:
+            print("In txt2img mode...")
             return self.txt2img(prompt, controlnet_images)
 
     def txt2img(
