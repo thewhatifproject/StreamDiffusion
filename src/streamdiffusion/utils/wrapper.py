@@ -225,8 +225,6 @@ class StreamDiffusionWrapper:
         if acceleration and pipe is not None:
             print ("Fuse QKV Projections...")
             pipe.fuse_qkv_projections()
-
-        pipe.enable_vae_slicing()
         
         stream = StreamDiffusion(
             pipe=pipe,
