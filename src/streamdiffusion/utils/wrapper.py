@@ -226,6 +226,8 @@ class StreamDiffusionWrapper:
             print ("Fuse QKV Projections...")
             pipe.fuse_qkv_projections()
 
+        pipe.enable_vae_slicing()
+        
         stream = StreamDiffusion(
             pipe=pipe,
             t_index_list=t_index_list,
