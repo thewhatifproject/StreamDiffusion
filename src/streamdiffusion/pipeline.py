@@ -532,6 +532,7 @@ class StreamDiffusion:
     def predict_x0_batch(
         self, x_t_latent: torch.Tensor, controlnet_images: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
+        added_cond_kwargs = {}
         prev_latent_batch = self.x_t_latent_buffer
 
         if controlnet_images is not None:
