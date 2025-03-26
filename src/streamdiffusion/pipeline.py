@@ -45,9 +45,7 @@ class StreamDiffusion:
         self.CM_lora_type = CM_lora_type
 
         self.frame_bff_size = frame_buffer_size
-        
-        self.sdxl = type(self.pipe) is StableDiffusionXLPipeline
-
+    
         # Set time step index list and denoising steps number
         if t_index_list is None and denoising_steps_num is None:
             raise ValueError("Please provide either t_index_list or num_denosing_steps")
@@ -92,6 +90,7 @@ class StreamDiffusion:
         self.vae = pipe.vae
 
         self.inference_time_ema = 0
+        self.sdxl = type(self.pipe) is StableDiffusionXLPipeline
 
     def load_lcm_lora(
         self,
