@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import PIL.Image
 import torch
-from diffusers import ControlNetModel, LCMScheduler, StableDiffusionPipeline, StableDiffusionXLPipeline
+from diffusers import ControlNetModel, LCMScheduler, DiffusionPipeline, StableDiffusionXLPipeline
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
     retrieve_latents,
@@ -18,7 +18,7 @@ from streamdiffusion.utils.unet_with_control import UNet2DConditionControlNetMod
 class StreamDiffusion:
     def __init__(
         self,
-        pipe: StableDiffusionPipeline,
+        pipe: DiffusionPipeline,
         t_index_list: Union[None, List[int]] = None,
         torch_dtype: torch.dtype = torch.float16,
         width: int = 512,
