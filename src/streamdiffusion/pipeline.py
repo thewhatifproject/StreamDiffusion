@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import PIL.Image
 import torch
-from diffusers import ControlNetModel, LCMScheduler, StableDiffusionPipeline
+from diffusers import ControlNetModel, LCMScheduler, StableDiffusionPipeline, StableDiffusionXLPipeline
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
     retrieve_latents,
@@ -45,6 +45,8 @@ class StreamDiffusion:
         self.CM_lora_type = CM_lora_type
 
         self.frame_bff_size = frame_buffer_size
+        
+        self.sdxl = type(self.pipe) is StableDiffusionXLPipeline
 
         # Set time step index list and denoising steps number
         if t_index_list is None and denoising_steps_num is None:
@@ -275,6 +277,20 @@ class StreamDiffusion:
             self.negative_prompt_embeds = encoder_output[1]
         self.prompt_embeds = encoder_output[0].repeat(self.batch_size, 1, 1)
 
+        if self.sdxl:
+            self.add_text_embeds = encoder_output[2]
+            original_size = (self.height, self.width)
+            crops_coords_top_left = (0, 0)
+            target_size = (self.height, self.width)
+            text_encoder_projection_dim = int(self.add_text_embeds.shape[-1])
+            self.add_time_ids = self._get_add_time_ids(
+                original_size,
+                crops_coords_top_left,
+                target_size,
+                dtype=encoder_output[0].dtype,
+                text_encoder_projection_dim=text_encoder_projection_dim,
+            )
+
         if self.use_denoising_batch and self.cfg_type == "full":
             uncond_prompt_embeds = self.negative_prompt_embeds.repeat(self.batch_size, 1, 1)
         elif self.cfg_type == "initialize":
@@ -413,10 +429,12 @@ class StreamDiffusion:
         self,
         x_t_latent: torch.Tensor,
         t_list: Union[torch.Tensor, list[int]],
+        added_cond_kwargs,
         idx: Optional[int] = None,
         controlnet_images: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # TODO: Re-implement R-CFG according to the equation in the paper
+        added_cond_kwargs = {}
         if self.cfg_type == "initialize":
             x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
             t_list = torch.concat([t_list[0:1], t_list], dim=0)
@@ -431,6 +449,7 @@ class StreamDiffusion:
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs,
                 controlnet_images=controlnet_images,
             )[0]
         else:
@@ -438,6 +457,7 @@ class StreamDiffusion:
                 x_t_latent_plus_uc,
                 t_list,
                 encoder_hidden_states=self.prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs,
                 return_dict=False,
             )[0]
 
@@ -522,7 +542,10 @@ class StreamDiffusion:
             if controlnet_images is not None:
                 controlnet_images = torch.cat((controlnet_images, prev_controlnet_images), dim=0)
 
-            x_0_pred_batch, model_pred = self.unet_step(x_t_latent, t_list, controlnet_images=controlnet_images)
+            if self.sdxl:
+                added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
+
+            x_0_pred_batch, model_pred = self.unet_step(x_t_latent, t_list, controlnet_images=controlnet_images, added_cond_kwargs=added_cond_kwargs)
 
             if self.denoising_steps_num > 1:
                 x_0_pred_out = x_0_pred_batch[-1].unsqueeze(0)
@@ -545,7 +568,9 @@ class StreamDiffusion:
             self.init_noise = x_t_latent
             for idx, t in enumerate(self.sub_timesteps_tensor):
                 t = t.view(1).repeat(self.frame_bff_size)
-                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx, controlnet_images=controlnet_images)
+                if self.sdxl:
+                    added_cond_kwargs = {"text_embeds": self.add_text_embeds.to(self.device), "time_ids": self.add_time_ids.to(self.device)}
+                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx, controlnet_images=controlnet_images, added_cond_kwargs=added_cond_kwargs)
                 if idx < len(self.sub_timesteps_tensor) - 1:
                     if self.CM_lora_type == "Hyper_SD":
                         x_t_latent = (
