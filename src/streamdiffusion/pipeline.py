@@ -101,7 +101,11 @@ class StreamDiffusion:
         **kwargs,
     ) -> None:
         self.CM_lora_type = "lcm"
-        self.pipe.load_lora_weights(pretrained_model_name_or_path_or_dict, adapter_name, **kwargs)
+        if pretrained_model_name_or_path_or_dict is None:
+            lora_id = "latent-consistency/lcm-lora-sdxl" if self.sdxl else "latent-consistency/lcm-lora-sdv1-5" 
+        else:
+            lora_id = pretrained_model_name_or_path_or_dict
+        self.pipe.load_lora_weights(lora_id, adapter_name, **kwargs)
 
     def load_HyperSD_lora(
         self,

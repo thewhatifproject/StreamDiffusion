@@ -516,7 +516,7 @@ class StreamDiffusionWrapper:
                 elif HyperSD_lora_id is None and controlnet_dicts is not None:
                     stream.load_HyperSD_lora(
                         pretrained_model_name_or_path_or_dict="ByteDance/Hyper-SD",
-                        model_name="Hyper-SD15-4step-lora.safetensors",
+                        model_name="Hyper-SD15-4steps-lora.safetensors",
                     )
                     print("To generate better results with ControlNet, using 4-steps Hyper-SD instead of 1-step.")
                 else:
