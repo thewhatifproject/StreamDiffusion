@@ -12,7 +12,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img impo
 from huggingface_hub import hf_hub_download
 
 from streamdiffusion.image_filter import SimilarImageFilter
-from streamdiffusion.unet_with_control import UNet2DConditionControlNetModel
+from streamdiffusion.utils.unet_with_control import UNet2DConditionControlNetModel
 
 
 class StreamDiffusion:
