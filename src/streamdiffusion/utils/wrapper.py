@@ -171,8 +171,8 @@ class StreamDiffusionWrapper:
             seed=seed
         )
         
-        if hasattr(self.stream.unet, 'config'):
-            self.stream.unet.config.addition_embed_type = None
+        #if hasattr(self.stream.unet, 'config'):
+        #    self.stream.unet.config.addition_embed_type = None
 
         if device_ids is not None:
             self.stream.unet = torch.nn.DataParallel(self.stream.unet, device_ids=device_ids)
