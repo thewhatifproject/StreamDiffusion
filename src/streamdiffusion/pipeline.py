@@ -505,6 +505,13 @@ class StreamDiffusion:
             denoised_batch = self.scheduler_step_batch(model_pred, x_t_latent, idx)
 
         return denoised_batch, model_pred
+    
+    def _get_add_time_ids(
+        self, original_size, crops_coords_top_left, target_size, dtype, text_encoder_projection_dim=None
+    ):
+        add_time_ids = list(original_size + crops_coords_top_left + target_size)
+        add_time_ids = torch.tensor([add_time_ids], dtype=dtype)
+        return add_time_ids
 
     @torch.inference_mode()
     def encode_image(self, image_tensors: torch.Tensor) -> torch.Tensor:
