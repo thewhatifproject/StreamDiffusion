@@ -20,7 +20,7 @@ seed: 456
 
 # Lineart ControlNet configuration (SD 1.5 based)
 controlnets:
-  - model_id: "lllyasviel/control_v11p_sd15s2_lineart_anime"
+  - model_id: "lllyasviel/control_v11p_sd15_lineart"
     conditioning_scale: 1.0
     preprocessor: "lineart"
     preprocessor_params:
