@@ -189,3 +189,23 @@ controlnet_config = ControlNetConfig(
 ```
 
 
+## Some Models 
+
+```python 
+"lllyasviel/control_v11p_sd15_canny",         
+        "lllyasviel/control_v11f1p_sd15_depth",       
+        "lllyasviel/control_v11p_sd15_openpose",      
+        "lllyasviel/control_v11p_sd15_scribble",      
+        "lllyasviel/sd-controlnet-hed",               
+        "lllyasviel/control_v11p_sd15_mlsd",          
+        "lllyasviel/control_v11p_sd15_normalbae",     
+        "lllyasviel/control_v11p_sd15_seg",           
+        "lllyasviel/control_v11p_sd15_lineart",       
+        "lllyasviel/control_v11p_sd15s2_lineart_anime", 
+        "monster-labs/control_v1p_sd15_qrcode_monster", 
+        "monster-labs/control_v1p_sd15_qrcode_monster/v2",  # QR code model v2 (in v2 subfolder)
+        "lllyasviel/control_v11p_sd15_inpaint",       
+        "lllyasviel/control_v11e_sd15_shuffle",       
+        "lllyasviel/control_v11e_sd15_ip2p",          
+        "lllyasviel/control_v11f1e_sd15_tile"         
+        ```
