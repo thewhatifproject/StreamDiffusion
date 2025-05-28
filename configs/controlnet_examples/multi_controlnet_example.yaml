@@ -1,4 +1,4 @@
-model_id: "stabilityai/sd-turbo"
+model_id: "C:\\_dev\\comfy\\ComfyUI\\models\\checkpoints\\kohaku-v2.1.safetensors"
 t_index_list: [32, 45]
 width: 512
 height: 512
@@ -21,22 +21,22 @@ seed: 123
 # Multiple ControlNet configurations
 controlnets:
   # OpenPose for human pose
-  - model_id: "lllyasviel/control_v11p_sd15_openpose"
-    conditioning_scale: 0.8
-    preprocessor: "openpose"
+controlnets:
+
+controlnets:
+  - model_id: "lllyasviel/control_v11f1e_sd15_tile"
+    conditioning_scale: 0.3
+    preprocessor: "passthrough"
     preprocessor_params:
-      detect_resolution: 512
       image_resolution: 512
-      include_hands: false
-      include_face: false
-    enabled: true
-    
+    enabled: true 
+
   # Depth for spatial structure
   - model_id: "lllyasviel/control_v11f1p_sd15_depth"
-    conditioning_scale: 0.6
-    preprocessor: "depth"
+    conditioning_scale: 0.5
+    preprocessor: "depth_tensorrt"
     preprocessor_params:
-      model_name: "Intel/dpt-large"
-      detect_resolution: 512
+      engine_path: "C:\\_dev\\comfy\\ComfyUI\\models\\tensorrt\\depth-anything\\depth_anything_vits14-fp16.engine"
+      detect_resolution: 518
       image_resolution: 512
     enabled: true 
