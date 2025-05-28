@@ -241,12 +241,16 @@ class ControlNetPipeline:
         # Resize to match StreamDiffusion dimensions
         control_image = control_image.resize((self.stream.width, self.stream.height), Image.LANCZOS)
         
-        # Convert to tensor using StreamDiffusion's image processor
-        control_tensor = self.stream.image_processor.preprocess(
-            control_image, 
-            height=self.stream.height, 
-            width=self.stream.width
-        ).to(device=self.device, dtype=self.dtype)
+        # Convert to tensor properly for ControlNet (needs [0, 1] range, not [-1, 1])
+        import torchvision.transforms as transforms
+        
+        # Convert PIL to tensor in [0, 1] range
+        transform = transforms.Compose([
+            transforms.ToTensor(),  # Converts PIL to [0, 1] tensor
+        ])
+        
+        control_tensor = transform(control_image).unsqueeze(0)  # Add batch dimension
+        control_tensor = control_tensor.to(device=self.device, dtype=self.dtype)
         
         return control_tensor
     
