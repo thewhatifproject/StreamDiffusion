@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Lineart ControlNet Webcam Demo for StreamDiffusion
+General Purpose ControlNet Webcam Demo for StreamDiffusion
 
-This script demonstrates real-time anime-style line art generation using webcam input.
-It extracts line art from the webcam feed and uses it to condition the generation with anime-style ControlNet.
+This script demonstrates real-time image generation using webcam input with any ControlNet configuration.
+It loads a ControlNet config file and applies the specified preprocessing and conditioning to the webcam feed.
 """
 
 import cv2
@@ -27,31 +27,31 @@ from streamdiffusion.image_utils import postprocess_image
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Lineart ControlNet Webcam Demo")
+    parser = argparse.ArgumentParser(description="General Purpose ControlNet Webcam Demo")
     
     # Get the script directory to make paths relative to it
     script_dir = Path(__file__).parent
-    default_config = script_dir.parent / "configs" / "controlnet_examples" / "lineart_example.yaml"
-    default_model = r"C:\_dev\comfy\ComfyUI\models\checkpoints\kohaku-v2.1.safetensors"
+    default_config = script_dir.parent / "configs" / "controlnet_examples" / "depth_trt_example.yaml"
     
     parser.add_argument("--config", type=str, 
                        default=str(default_config),
-                       help="Path to lineart ControlNet configuration file")
+                       help="Path to ControlNet configuration file")
     parser.add_argument("--camera", type=int, default=0, 
                        help="Camera device index")
-    parser.add_argument("--model", type=str, 
-                       default=str(default_model),
-                       help="Path to base model file")
+    parser.add_argument("--model", type=str,
+                       help="Override base model path from config")
     parser.add_argument("--prompt", type=str,
                        help="Override prompt from config")
-    parser.add_argument("--controlnet-scale", type=float, default=1.0,
-                       help="ControlNet conditioning scale")
-    parser.add_argument("--show-lineart", action="store_true",
-                       help="Show the extracted line art in a separate window")
+    parser.add_argument("--controlnet-scale", type=float,
+                       help="Override ControlNet conditioning scale from config")
+    parser.add_argument("--show-preprocessed", action="store_true",
+                       help="Show the preprocessed control image in a separate window")
+    parser.add_argument("--resolution", type=int, default=512,
+                       help="Camera and output resolution")
     
     args = parser.parse_args()
     
-    print("🎨 Starting Lineart ControlNet Webcam Demo")
+    print("🎨 Starting ControlNet Webcam Demo")
     
     # Load configuration
     config = load_controlnet_config(args.config)
@@ -62,12 +62,13 @@ def main():
         config.model_id = args.model
     if args.prompt:
         config.prompt = args.prompt
-    if args.controlnet_scale != 1.0:
+    if args.controlnet_scale is not None:
         config.controlnets[0].conditioning_scale = args.controlnet_scale
     
     # Create ControlNet pipeline
-    print("🔄 Creating Lineart ControlNet pipeline...")
+    print("🔄 Creating ControlNet pipeline...")
     print(f"📝 Using ControlNet: {config.controlnets[0].model_id}")
+    print(f"🔧 Preprocessor: {config.controlnets[0].preprocessor}")
     pipeline = create_controlnet_pipeline(config)
     print("✓ Pipeline created successfully")
     
@@ -78,24 +79,28 @@ def main():
         return
     
     # Set camera resolution
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 512)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 512)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.resolution)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.resolution)
     
     print("✓ Camera opened successfully")
     print(f"📝 Prompt: {config.prompt}")
     print(f"🎛️  ControlNet Scale: {config.controlnets[0].conditioning_scale}")
+    print(f"📏 Resolution: {args.resolution}x{args.resolution}")
     
     print("\n🎮 Controls:")
     print("  - Press 'q' to quit")
     print("  - Press 's' to save current output")
-    print("  - Press 'l' to toggle line art preview")
+    print("  - Press 'c' to toggle control image preview")
     print("  - Press '+' to increase ControlNet scale")
     print("  - Press '-' to decrease ControlNet scale")
     print("  - Press 'p' to change prompt interactively")
     
     frame_count = 0
-    show_lineart = args.show_lineart
+    show_preprocessed = args.show_preprocessed
     fps_counter = []
+    
+    # Get preprocessor name for display
+    preprocessor_name = config.controlnets[0].preprocessor.replace("_", " ").title()
     
     try:
         while True:
@@ -120,26 +125,26 @@ def main():
             # Convert back to BGR for display
             output_cv = cv2.cvtColor(np.array(output_image), cv2.COLOR_RGB2BGR)
             
-            # Get line art if showing
-            lineart_cv = None
-            if show_lineart and len(pipeline.preprocessors) > 0:
+            # Get preprocessed control image if showing
+            control_cv = None
+            if show_preprocessed and len(pipeline.preprocessors) > 0:
                 preprocessor = pipeline.preprocessors[0]
                 if preprocessor is not None:
-                    lineart_pil = preprocessor.process(frame_pil)
-                    lineart_cv = cv2.cvtColor(np.array(lineart_pil), cv2.COLOR_RGB2BGR)
+                    control_pil = preprocessor.process(frame_pil)
+                    control_cv = cv2.cvtColor(np.array(control_pil), cv2.COLOR_RGB2BGR)
             
             # Create display layout
-            display_frame = cv2.resize(frame, (512, 512))
-            output_display = cv2.resize(output_cv, (512, 512))
+            display_frame = cv2.resize(frame, (args.resolution, args.resolution))
+            output_display = cv2.resize(output_cv, (args.resolution, args.resolution))
             
-            if show_lineart and lineart_cv is not None:
-                lineart_display = cv2.resize(lineart_cv, (256, 256))
-                # Create 3-panel layout: Input | Lineart | Output
+            if show_preprocessed and control_cv is not None:
+                control_display = cv2.resize(control_cv, (args.resolution//2, args.resolution//2))
+                # Create 3-panel layout: Input | Control | Output
                 top_row = np.hstack([
-                    cv2.resize(display_frame, (256, 256)), 
-                    lineart_display
+                    cv2.resize(display_frame, (args.resolution//2, args.resolution//2)), 
+                    control_display
                 ])
-                bottom_row = cv2.resize(output_display, (512, 256))
+                bottom_row = cv2.resize(output_display, (args.resolution, args.resolution//2))
                 combined = np.vstack([top_row, bottom_row])
             else:
                 # Simple side-by-side layout
@@ -160,21 +165,26 @@ def main():
             cv2.putText(combined, info_text, (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             
+            # Add preprocessor info
+            preprocessor_text = f"Preprocessor: {preprocessor_name}"
+            cv2.putText(combined, preprocessor_text, (10, 60), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            
             # Add labels
-            if show_lineart and lineart_cv is not None:
+            if show_preprocessed and control_cv is not None:
                 cv2.putText(combined, "Input", (10, combined.shape[0] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                cv2.putText(combined, "Line Art", (266, combined.shape[0] - 10), 
+                cv2.putText(combined, f"{preprocessor_name}", (args.resolution//2 + 10, combined.shape[0] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                cv2.putText(combined, "Generated", (10, combined.shape[0] - 270), 
+                cv2.putText(combined, "Generated", (10, combined.shape[0] - args.resolution//2 - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             else:
                 cv2.putText(combined, "Input", (10, combined.shape[0] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                cv2.putText(combined, "Generated", (522, combined.shape[0] - 10), 
+                cv2.putText(combined, "Generated", (args.resolution + 10, combined.shape[0] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
-            cv2.imshow('Lineart ControlNet StreamDiffusion', combined)
+            cv2.imshow(f'ControlNet StreamDiffusion - {preprocessor_name}', combined)
             frame_count += 1
             
             # Handle key presses
@@ -185,21 +195,22 @@ def main():
                 # Save current output
                 try:
                     timestamp = int(time.time())
-                    output_path = f"lineart_output_{timestamp}.png"
+                    preprocessor_safe = config.controlnets[0].preprocessor.replace("/", "_").replace("\\", "_")
+                    output_path = f"controlnet_{preprocessor_safe}_output_{timestamp}.png"
                     output_image.save(output_path)
                     print(f"💾 Saved output to {output_path}")
                     
-                    if show_lineart and lineart_cv is not None:
-                        lineart_path = f"lineart_control_{timestamp}.png"
-                        lineart_pil.save(lineart_path)
-                        print(f"💾 Saved line art to {lineart_path}")
+                    if show_preprocessed and control_cv is not None:
+                        control_path = f"controlnet_{preprocessor_safe}_control_{timestamp}.png"
+                        control_pil.save(control_path)
+                        print(f"💾 Saved control image to {control_path}")
                         
                 except Exception as save_error:
                     print(f"❌ Failed to save: {save_error}")
-            elif key == ord('l'):
-                # Toggle line art preview
-                show_lineart = not show_lineart
-                print(f"🖼️  Line art preview: {'ON' if show_lineart else 'OFF'}")
+            elif key == ord('c'):
+                # Toggle control image preview
+                show_preprocessed = not show_preprocessed
+                print(f"🖼️  Control image preview: {'ON' if show_preprocessed else 'OFF'}")
             elif key == ord('+'):
                 new_scale = min(2.0, pipeline.controlnet_scales[0] + 0.1)
                 pipeline.update_controlnet_scale(0, new_scale)
@@ -210,7 +221,7 @@ def main():
                 print(f"📉 ControlNet scale: {new_scale:.2f}")
             elif key == ord('p'):
                 # Interactive prompt change
-                print("\n🎨 Enter new prompt (or press Enter to keep current):")
+                print(f"\n🎨 Enter new prompt (or press Enter to keep current):")
                 try:
                     new_prompt = input(f"Current: {config.prompt}\nNew: ").strip()
                     if new_prompt:
@@ -226,7 +237,7 @@ def main():
     finally:
         cap.release()
         cv2.destroyAllWindows()
-        print("🏁 Lineart demo finished")
+        print("🏁 ControlNet demo finished")
         if fps_counter:
             avg_fps = len(fps_counter) / sum(fps_counter)
             print(f"📊 Average FPS: {avg_fps:.2f}")

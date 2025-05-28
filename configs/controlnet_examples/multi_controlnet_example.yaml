@@ -1,0 +1,42 @@
+model_id: "stabilityai/sd-turbo"
+t_index_list: [32, 45]
+width: 512
+height: 512
+device: "cuda"
+dtype: "float16"
+
+# Generation parameters
+prompt: "a person standing in a modern room, photorealistic, detailed"
+negative_prompt: "blurry, low quality, distorted, cartoon"
+guidance_scale: 1.3
+num_inference_steps: 50
+
+# Advanced parameters
+use_lcm_lora: true
+use_tiny_vae: true
+acceleration: "xformers"
+cfg_type: "self"
+seed: 123
+
+# Multiple ControlNet configurations
+controlnets:
+  # OpenPose for human pose
+  - model_id: "lllyasviel/control_v11p_sd15_openpose"
+    conditioning_scale: 0.8
+    preprocessor: "openpose"
+    preprocessor_params:
+      detect_resolution: 512
+      image_resolution: 512
+      include_hands: false
+      include_face: false
+    enabled: true
+    
+  # Depth for spatial structure
+  - model_id: "lllyasviel/control_v11f1p_sd15_depth"
+    conditioning_scale: 0.6
+    preprocessor: "depth"
+    preprocessor_params:
+      model_name: "Intel/dpt-large"
+      detect_resolution: 512
+      image_resolution: 512
+    enabled: true 
