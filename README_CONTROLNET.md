@@ -107,22 +107,22 @@ controlnets:
 
 ```bash
 # Basic webcam test with ControlNet
-python ./examples/controlnet_webcam_demo.py --config ./configs/controlnet_examples/lineart_example.yaml
+python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/lineart_example.yaml
 
 ### Configuration Demo
 
 ```bash
 # Test with a single image
-python examples/controlnet_config_demo.py --config configs/controlnet_examples/depth_example.yaml --input test_image.jpg
+python ./examples/controlnet_config_demo.py --config configs/controlnet_examples/depth_example.yaml --input test_image.jpg
 
 # Batch processing
-python examples/controlnet_config_demo.py --config configs/controlnet_examples/canny_example.yaml --input image_folder/
+python ./examples/controlnet_config_demo.py --config configs/controlnet_examples/canny_example.yaml --input image_folder/
 
 # Interactive mode
-python examples/controlnet_config_demo.py --config configs/controlnet_examples/multi_controlnet_example.yaml --interactive
+python ./examples/controlnet_config_demo.py --config configs/controlnet_examples/multi_controlnet_example.yaml --interactive
 
 # Create example configurations
-python examples/controlnet_config_demo.py --create-examples
+python ./examples/controlnet_config_demo.py --create-examples
 ```
 
 ## 🔧 Supported ControlNets
