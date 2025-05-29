@@ -39,13 +39,14 @@ else:
 
 
 class TensorRTEngine:
-    """Simplified TensorRT engine wrapper for depth estimation inference"""
+    """Simplified TensorRT engine wrapper for depth estimation inference (optimized)"""
     
     def __init__(self, engine_path):
         self.engine_path = engine_path
         self.engine = None
         self.context = None
         self.tensors = OrderedDict()
+        self._cuda_stream = None  # Cache CUDA stream
 
     def load(self):
         """Load TensorRT engine from file"""
@@ -55,6 +56,8 @@ class TensorRTEngine:
     def activate(self):
         """Create execution context"""
         self.context = self.engine.create_execution_context()
+        # Cache CUDA stream for reuse
+        self._cuda_stream = torch.cuda.current_stream().cuda_stream
 
     def allocate_buffers(self, device="cuda"):
         """Allocate input/output buffers"""
@@ -71,8 +74,12 @@ class TensorRTEngine:
             ).to(device=device)
             self.tensors[name] = tensor
 
-    def infer(self, feed_dict, stream):
-        """Run inference"""
+    def infer(self, feed_dict, stream=None):
+        """Run inference with optional stream parameter"""
+        # Use cached stream if none provided
+        if stream is None:
+            stream = self._cuda_stream
+            
         # Copy input data to tensors
         for name, buf in feed_dict.items():
             self.tensors[name].copy_(buf)

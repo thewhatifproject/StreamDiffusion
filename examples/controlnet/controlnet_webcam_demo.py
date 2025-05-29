@@ -115,8 +115,8 @@ def main():
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_pil = Image.fromarray(frame_rgb)
             
-            # Update ControlNet with current frame
-            pipeline.update_control_image(0, frame_pil)
+            # Update ControlNet with current frame efficiently 
+            pipeline.update_control_image_efficient(frame_pil)
             
             # Generate image
             x_output = pipeline(frame_pil)
@@ -125,13 +125,15 @@ def main():
             # Convert back to BGR for display
             output_cv = cv2.cvtColor(np.array(output_image), cv2.COLOR_RGB2BGR)
             
-            # Get preprocessed control image if showing
+            # Get preprocessed control image from cache (avoid reprocessing)
             control_cv = None
+            control_pil = None
             if show_preprocessed and len(pipeline.preprocessors) > 0:
                 preprocessor = pipeline.preprocessors[0]
                 if preprocessor is not None:
-                    control_pil = preprocessor.process(frame_pil)
-                    control_cv = cv2.cvtColor(np.array(control_pil), cv2.COLOR_RGB2BGR)
+                    control_pil = pipeline.get_last_processed_image(0)
+                    if control_pil is not None:
+                        control_cv = cv2.cvtColor(np.array(control_pil), cv2.COLOR_RGB2BGR)
             
             # Create display layout
             display_frame = cv2.resize(frame, (args.resolution, args.resolution))

@@ -116,9 +116,8 @@ def main():
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_pil = Image.fromarray(frame_rgb)
             
-            # Update all ControlNets with current frame
-            for i in range(len(pipeline.controlnets)):
-                pipeline.update_control_image(i, frame_pil)
+            # Update all ControlNets with current frame efficiently (process each preprocessor type only once)
+            pipeline.update_control_image_efficient(frame_pil)
             
             # Generate image
             x_output = pipeline(frame_pil)
@@ -132,13 +131,14 @@ def main():
             output_display = cv2.resize(output_cv, (args.resolution, args.resolution))
             
             if show_preprocessed and len(pipeline.preprocessors) > 0:
-                # Get preprocessed images
+                # Get preprocessed images from cache (avoid reprocessing)
                 control_images = []
                 for i, preprocessor in enumerate(pipeline.preprocessors):
                     if preprocessor is not None:
-                        control_pil = preprocessor.process(frame_pil)
-                        control_cv = cv2.cvtColor(np.array(control_pil), cv2.COLOR_RGB2BGR)
-                        control_images.append(control_cv)
+                        control_pil = pipeline.get_last_processed_image(i)
+                        if control_pil is not None:
+                            control_cv = cv2.cvtColor(np.array(control_pil), cv2.COLOR_RGB2BGR)
+                            control_images.append(control_cv)
                 
                 if control_images:
                     # Create grid layout: Input | Controls | Output

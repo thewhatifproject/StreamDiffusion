@@ -45,6 +45,15 @@ class ControlNetPipeline:
         # Store original unet_step method for patching
         self._original_unet_step = None
         self._is_patched = False
+        
+        # Optimization: Cache transforms and reusable tensors
+        import torchvision.transforms as transforms
+        self._cached_transform = transforms.ToTensor()
+        self._temp_tensor_cache = {}  # For reusing tensors
+        
+        # Optimization: Cache preprocessed images to eliminate redundant processing
+        self._preprocessed_cache = {}  # Maps preprocessor_type -> processed_image
+        self._last_input_frame = None  # Track if we need to reprocess
     
     def add_controlnet(self, 
                       controlnet_config: ControlNetConfig,
@@ -132,18 +141,98 @@ class ControlNetPipeline:
                            index: int, 
                            control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> None:
         """
-        Update the control image for a specific ControlNet
+        Update the control image for a specific ControlNet (optimized version)
         
         Args:
             index: Index of the ControlNet
             control_image: New control image
         """
-        if 0 <= index < len(self.controlnets):
-            preprocessor = self.preprocessors[index]
-            processed_image = self._prepare_control_image(control_image, preprocessor)
-            self.controlnet_images[index] = processed_image
-        else:
+        if not (0 <= index < len(self.controlnets)):
             raise IndexError(f"ControlNet index {index} out of range")
+        
+        # Skip processing if scale is 0 (optimization)
+        if self.controlnet_scales[index] == 0:
+            return
+            
+        preprocessor = self.preprocessors[index]
+        processed_image = self._prepare_control_image(control_image, preprocessor)
+        self.controlnet_images[index] = processed_image
+    
+    def update_control_image_batch(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> None:
+        """
+        Update all ControlNets with the same control image (optimized for webcam use)
+        
+        Args:
+            control_image: New control image to apply to all ControlNets
+        """
+        # Process once, reuse for all active ControlNets
+        for i in range(len(self.controlnets)):
+            if self.controlnet_scales[i] > 0:  # Only update active ones
+                preprocessor = self.preprocessors[i]
+                processed_image = self._prepare_control_image(control_image, preprocessor)
+                self.controlnet_images[i] = processed_image
+    
+    def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
+        """
+        Get the last processed control image for display purposes (avoids reprocessing)
+        
+        Args:
+            index: Index of the ControlNet
+            
+        Returns:
+            Last processed PIL Image, or None if not available
+        """
+        if not (0 <= index < len(self.controlnets)):
+            return None
+        
+        preprocessor = self.preprocessors[index]
+        if preprocessor is None:
+            return None
+            
+        preprocessor_type = type(preprocessor).__name__
+        return self._preprocessed_cache.get(preprocessor_type)
+    
+    def update_control_image_efficient(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> None:
+        """
+        Efficiently update all ControlNets with cache-aware preprocessing
+        
+        Args:
+            control_image: New control image to apply to all ControlNets
+        """
+        # Check if we need to reprocess (simple frame comparison)
+        if self._last_input_frame is control_image:
+            return  # No change, use cached results
+        
+        self._last_input_frame = control_image
+        
+        # Clear cache for new frame
+        self._preprocessed_cache.clear()
+        
+        # Group ControlNets by preprocessor type to avoid duplicate processing
+        preprocessor_groups = {}
+        for i in range(len(self.controlnets)):
+            if self.controlnet_scales[i] > 0:  # Only process active ones
+                preprocessor = self.preprocessors[i]
+                if preprocessor is not None:
+                    preprocessor_type = type(preprocessor).__name__
+                    if preprocessor_type not in preprocessor_groups:
+                        preprocessor_groups[preprocessor_type] = {
+                            'preprocessor': preprocessor,
+                            'indices': []
+                        }
+                    preprocessor_groups[preprocessor_type]['indices'].append(i)
+        
+        # Process once per preprocessor type
+        for preprocessor_type, group in preprocessor_groups.items():
+            preprocessor = group['preprocessor']
+            processed_image = self._prepare_control_image(control_image, preprocessor)
+            
+            # Cache the result
+            self._preprocessed_cache[preprocessor_type] = processed_image
+            
+            # Apply to all ControlNets using this preprocessor
+            for index in group['indices']:
+                self.controlnet_images[index] = processed_image
     
     def update_controlnet_scale(self, index: int, scale: float) -> None:
         """
@@ -205,7 +294,7 @@ class ControlNetPipeline:
                               control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
                               preprocessor: Optional[Any] = None) -> torch.Tensor:
         """
-        Prepare a control image for ControlNet input
+        Prepare a control image for ControlNet input (optimized version)
         
         Args:
             control_image: Input control image
@@ -222,37 +311,40 @@ class ControlNetPipeline:
         if preprocessor is not None:
             control_image = preprocessor.process(control_image)
         
-        # Ensure PIL Image
-        if not isinstance(control_image, Image.Image):
-            if isinstance(control_image, np.ndarray):
-                control_image = Image.fromarray(control_image)
-            elif isinstance(control_image, torch.Tensor):
-                # Convert tensor to PIL
-                if control_image.dim() == 4:
-                    control_image = control_image[0]
-                if control_image.dim() == 3 and control_image.shape[0] in [1, 3]:
-                    control_image = control_image.permute(1, 2, 0)
-                
-                control_image = control_image.cpu().numpy()
-                if control_image.max() <= 1.0:
-                    control_image = (control_image * 255).astype(np.uint8)
-                control_image = Image.fromarray(control_image.astype(np.uint8))
+        # Fast path for PIL Images (most common case)
+        if isinstance(control_image, Image.Image):
+            # Resize first if needed
+            target_size = (self.stream.width, self.stream.height)
+            if control_image.size != target_size:
+                control_image = control_image.resize(target_size, Image.LANCZOS)
+            
+            # Use cached transform
+            control_tensor = self._cached_transform(control_image).unsqueeze(0)
+            control_tensor = control_tensor.to(device=self.device, dtype=self.dtype)
+            return control_tensor
         
-        # Resize to match StreamDiffusion dimensions
-        control_image = control_image.resize((self.stream.width, self.stream.height), Image.LANCZOS)
+        # Handle other types (less common, keep existing logic but optimize)
+        if isinstance(control_image, np.ndarray):
+            if control_image.max() <= 1.0:
+                control_image = (control_image * 255).astype(np.uint8)
+            control_image = Image.fromarray(control_image)
+        elif isinstance(control_image, torch.Tensor):
+            # Optimize tensor to PIL conversion
+            if control_image.dim() == 4:
+                control_image = control_image[0]
+            if control_image.dim() == 3 and control_image.shape[0] in [1, 3]:
+                control_image = control_image.permute(1, 2, 0)
+            
+            # Keep on GPU if possible, convert to numpy only when needed
+            if control_image.is_cuda:
+                control_image = control_image.cpu()
+            control_image = control_image.numpy()
+            if control_image.max() <= 1.0:
+                control_image = (control_image * 255).astype(np.uint8)
+            control_image = Image.fromarray(control_image.astype(np.uint8))
         
-        # Convert to tensor properly for ControlNet (needs [0, 1] range, not [-1, 1])
-        import torchvision.transforms as transforms
-        
-        # Convert PIL to tensor in [0, 1] range
-        transform = transforms.Compose([
-            transforms.ToTensor(),  # Converts PIL to [0, 1] tensor
-        ])
-        
-        control_tensor = transform(control_image).unsqueeze(0)  # Add batch dimension
-        control_tensor = control_tensor.to(device=self.device, dtype=self.dtype)
-        
-        return control_tensor
+        # Resize and convert (recursive call will hit fast path)
+        return self._prepare_control_image(control_image, None)
     
     def _get_controlnet_conditioning(self, 
                                    x_t_latent: torch.Tensor,
@@ -269,17 +361,27 @@ class ControlNetPipeline:
         Returns:
             Tuple of (down_block_res_samples, mid_block_res_sample)
         """
-        if not self.controlnets or not any(img is not None for img in self.controlnet_images):
+        if not self.controlnets:
+            return None, None
+        
+        # Quick check: any active ControlNets?
+        active_indices = [
+            i for i, (controlnet, control_image, scale) in enumerate(
+                zip(self.controlnets, self.controlnet_images, self.controlnet_scales)
+            ) if controlnet is not None and control_image is not None and scale > 0
+        ]
+        
+        if not active_indices:
             return None, None
         
         down_block_res_samples = None
         mid_block_res_sample = None
         
-        for i, (controlnet, control_image, scale) in enumerate(
-            zip(self.controlnets, self.controlnet_images, self.controlnet_scales)
-        ):
-            if controlnet is None or control_image is None or scale == 0:
-                continue
+        # Only process active ControlNets
+        for i in active_indices:
+            controlnet = self.controlnets[i]
+            control_image = self.controlnet_images[i]
+            scale = self.controlnet_scales[i]
             
             # Forward pass through ControlNet
             try:
