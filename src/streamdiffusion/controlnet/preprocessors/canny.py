@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from PIL import Image
+import torch
 from typing import Union
 from .base import BasePreprocessor
 
@@ -26,6 +27,49 @@ class CannyPreprocessor(BasePreprocessor):
             high_threshold=high_threshold,
             **kwargs
         )
+    
+    def process_tensor(self, image_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Process tensor directly on GPU for Canny edge detection (minimize CPU transfers)
+        
+        Args:
+            image_tensor: Input image tensor on GPU
+            
+        Returns:
+            Edge map tensor suitable for ControlNet conditioning
+        """
+        # Validate and normalize input tensor
+        image_tensor = self.validate_tensor_input(image_tensor)
+        
+        # Convert to grayscale if needed (stay on GPU)
+        if image_tensor.shape[0] == 3:  # RGB
+            # Convert RGB to grayscale using standard weights
+            gray_tensor = 0.299 * image_tensor[0] + 0.587 * image_tensor[1] + 0.114 * image_tensor[2]
+        else:
+            gray_tensor = image_tensor[0] if image_tensor.shape[0] == 1 else image_tensor
+        
+        # For Canny edge detection, we need to use OpenCV which requires CPU
+        # This is unavoidable as there's no good GPU Canny implementation in PyTorch
+        # But we minimize transfers by doing other operations on GPU
+        
+        # Convert to CPU only for Canny processing
+        gray_cpu = gray_tensor.cpu()
+        gray_np = (gray_cpu * 255).clamp(0, 255).to(torch.uint8).numpy()
+        
+        # Apply Canny edge detection
+        low_threshold = self.params.get('low_threshold', 100)
+        high_threshold = self.params.get('high_threshold', 200)
+        
+        edges = cv2.Canny(gray_np, low_threshold, high_threshold)
+        
+        # Convert back to tensor and move to GPU immediately
+        edges_tensor = torch.from_numpy(edges).float() / 255.0
+        edges_tensor = edges_tensor.to(device=self.device, dtype=self.dtype)
+        
+        # Convert to RGB format (stack 3 times for compatibility)
+        edges_rgb = edges_tensor.unsqueeze(0).repeat(3, 1, 1)
+        
+        return edges_rgb
     
     def process(self, image: Union[Image.Image, np.ndarray]) -> Image.Image:
         """

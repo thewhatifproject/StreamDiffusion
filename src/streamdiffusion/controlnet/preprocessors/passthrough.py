@@ -1,5 +1,6 @@
 import numpy as np
 from PIL import Image
+import torch
 from typing import Union, Optional
 from .base import BasePreprocessor
 
@@ -29,6 +30,43 @@ class PassthroughPreprocessor(BasePreprocessor):
             image_resolution=image_resolution,
             **kwargs
         )
+    
+    def process_tensor(self, image_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Process tensor directly on GPU for passthrough (no CPU transfers needed)
+        
+        Args:
+            image_tensor: Input image tensor
+            
+        Returns:
+            Resized tensor suitable for ControlNet conditioning
+        """
+        # Validate and normalize input tensor
+        image_tensor = self.validate_tensor_input(image_tensor)
+        
+        # Resize if needed using torch operations
+        image_resolution = self.params.get('image_resolution', 512)
+        current_size = image_tensor.shape[-2:]  # Get H, W
+        
+        if current_size != (image_resolution, image_resolution):
+            # Use torch resize (stay on GPU)
+            import torch.nn.functional as F
+            # Add batch dim if not present
+            if image_tensor.dim() == 3:
+                image_tensor = image_tensor.unsqueeze(0)
+            
+            image_tensor = F.interpolate(
+                image_tensor, 
+                size=(image_resolution, image_resolution),
+                mode='bilinear',
+                align_corners=False
+            )
+            
+            # Remove batch dim if we added it
+            if image_tensor.shape[0] == 1:
+                image_tensor = image_tensor.squeeze(0)
+        
+        return image_tensor
     
     def process(self, image: Union[Image.Image, np.ndarray]) -> Image.Image:
         """
