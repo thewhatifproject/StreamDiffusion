@@ -1,3 +1,4 @@
+from .base_controlnet_pipeline import BaseControlNetPipeline
 from .controlnet_pipeline import ControlNetPipeline, create_controlnet_pipeline
 from .controlnet_sdturbo_pipeline import SDTurboControlNetPipeline, create_sdturbo_controlnet_pipeline
 from .controlnet_sdxlturbo_pipeline import SDXLTurboControlNetPipeline, create_sdxlturbo_controlnet_pipeline
@@ -38,6 +39,9 @@ def create_controlnet_pipeline_auto(config: StreamDiffusionControlNetConfig):
 
 
 __all__ = [
+    # Base pipeline class  
+    "BaseControlNetPipeline",
+    
     # Pipeline classes
     "ControlNetPipeline",
     "SDTurboControlNetPipeline",

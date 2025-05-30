@@ -106,20 +106,38 @@ controlnets:
 ### Webcam Demo
 
 ```bash
-# Basic webcam test with ControlNet
+
+# the depth trt examples assume you have a tensorrt engine for depthanything as seen in this repo
+# https://github.com/yuvraj108c/ComfyUI-Depth-Anything-Tensorrt
+# additionally, for all of the demo configs, they must be updated to suite your environment. 
+
+
+# Basic webcam test with ControlNet (SD1.5 config)
+python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/depth_trt_example.yaml
+
+# Basic webcam test with ControlNet (SDTurbo config)
+python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/sdturbo_depth_trt_example.yaml
+
+# Basic webcam test with ControlNet (SDXL config)
+python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/sdxlturbo_depth_trt_example.yaml
+
+# Basic optimized webcam demo, lacking keyboard controls but slightly more performant 
+python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/depth_trt_example.yaml
+
+# Basic webcam test with ControlNet (SD1.5 config)
 python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/lineart_example.yaml
 
 ### Configuration Demo
 
 ```bash
 # Test with a single image
-python ./examples/controlnet_config_demo.py --config configs/controlnet_examples/depth_example.yaml --input test_image.jpg
+python ./examples/controlnet_config_demo.py --config ./configs/controlnet_examples/depth_example.yaml --input test_image.jpg
 
 # Batch processing
-python ./examples/controlnet_config_demo.py --config configs/controlnet_examples/canny_example.yaml --input image_folder/
+python ./examples/controlnet_config_demo.py --config ./configs/controlnet_examples/canny_example.yaml --input image_folder/
 
 # Interactive mode
-python ./examples/controlnet_config_demo.py --config configs/controlnet_examples/multi_controlnet_example.yaml --interactive
+python ./examples/controlnet_config_demo.py --config ./configs/controlnet_examples/multi_controlnet_example.yaml --interactive
 
 # Create example configurations
 python ./examples/controlnet_config_demo.py --create-examples
