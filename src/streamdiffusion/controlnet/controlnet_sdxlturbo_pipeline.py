@@ -6,8 +6,7 @@ from pathlib import Path
 
 from diffusers.models import ControlNetModel
 from diffusers.utils import load_image
-from diffusers import StableDiffusionXLControlNetImg2ImgPipeline, AutoencoderKL, AutoencoderTiny
-from diffusers.image_processor import VaeImageProcessor
+from diffusers import StableDiffusionXLPipeline, AutoencoderKL, AutoencoderTiny
 
 from ..pipeline import StreamDiffusion
 from .config import ControlNetConfig, StreamDiffusionControlNetConfig
@@ -16,53 +15,46 @@ from .preprocessors import get_preprocessor
 
 class SDXLTurboControlNetPipeline:
     """
-    SD-XL Turbo ControlNet pipeline for real-time image-to-image generation
+    SDXL Turbo ControlNet pipeline using StreamDiffusion
     
-    This class implements SD-XL Turbo with ControlNet support, optimized for 
-    real-time img2img generation with minimal latency and high resolution.
+    This class extends StreamDiffusion with ControlNet support for SDXL Turbo,
+    using t_index_list for efficient real-time generation at high resolution.
     """
     
     def __init__(self, 
-                 base_model: str = "stabilityai/sdxl-turbo",
+                 stream_diffusion: StreamDiffusion,
                  device: str = "cuda",
-                 dtype: torch.dtype = torch.float16,
-                 use_taesd: bool = True,
-                 safety_checker: bool = False):
+                 dtype: torch.dtype = torch.float16):
         """
-        Initialize SD-XL Turbo ControlNet pipeline
+        Initialize SDXL Turbo ControlNet pipeline
         
         Args:
-            base_model: SD-XL Turbo model ID or path
-            device: Device to run on
-            dtype: Data type for models
-            use_taesd: Use Tiny AutoEncoder for faster decoding
-            safety_checker: Enable safety checker
+            stream_diffusion: Base StreamDiffusion instance
+            device: Device to run ControlNets on
+            dtype: Data type for ControlNet models
         """
+        self.stream = stream_diffusion
         self.device = device
         self.dtype = dtype
-        self.base_model = base_model
         
         # ControlNet storage
         self.controlnets: List[ControlNetModel] = []
-        self.controlnet_configs: List[Dict] = []
+        self.controlnet_images: List[Optional[torch.Tensor]] = []
+        self.controlnet_scales: List[float] = []
         self.preprocessors: List[Optional[Any]] = []
         
-        # Pipeline will be created when first ControlNet is added
-        self.pipe = None
-        self.is_prepared = False
+        # Store original unet_step method for patching
+        self._original_unet_step = None
+        self._is_patched = False
         
-        # SD-XL Turbo specific parameters
-        self.default_steps = 2  # SD-XL Turbo typically uses 2-4 steps
-        self.default_guidance_scale = 0.0  # SD-XL Turbo typically uses no guidance
-        self.default_strength = 0.5  # SD-XL Turbo default strength is lower
+        # Optimization: Cache transforms and reusable tensors
+        import torchvision.transforms as transforms
+        self._cached_transform = transforms.ToTensor()
+        self._temp_tensor_cache = {}
         
-        # Cache for preprocessed images and optimization
+        # Cache for preprocessed images to eliminate redundant processing
         self._preprocessed_cache = {}
         self._last_input_frame = None
-        
-        # Store initialization parameters
-        self._use_taesd = use_taesd
-        self._safety_checker = safety_checker
     
     def add_controlnet(self, 
                       controlnet_config: ControlNetConfig,
@@ -82,7 +74,7 @@ class SDXLTurboControlNetPipeline:
             return -1
         
         # Load ControlNet model
-        print(f"Loading SD-XL ControlNet: {controlnet_config.model_id}")
+        print(f"Loading SDXL Turbo ControlNet: {controlnet_config.model_id}")
         controlnet = self._load_controlnet_model(controlnet_config.model_id)
         
         # Load preprocessor if specified
@@ -103,244 +95,31 @@ class SDXLTurboControlNetPipeline:
             if hasattr(preprocessor, 'dtype'):
                 preprocessor.dtype = self.dtype
         
-        # Store configuration for pipeline creation
-        controlnet_info = {
-            'model': controlnet,
-            'conditioning_scale': controlnet_config.conditioning_scale,
-            'control_guidance_start': getattr(controlnet_config, 'control_guidance_start', 0.0),
-            'control_guidance_end': getattr(controlnet_config, 'control_guidance_end', 1.0),
-            'preprocessor_params': controlnet_config.preprocessor_params or {}
-        }
+        # Process control image if provided
+        processed_image = None
+        if control_image is not None:
+            processed_image = self._prepare_control_image(control_image, preprocessor)
+        elif controlnet_config.control_image_path:
+            # Load from configured path
+            control_image = load_image(controlnet_config.control_image_path)
+            processed_image = self._prepare_control_image(control_image, preprocessor)
         
+        # Add to collections
         self.controlnets.append(controlnet)
-        self.controlnet_configs.append(controlnet_info)
+        self.controlnet_images.append(processed_image)
+        self.controlnet_scales.append(controlnet_config.conditioning_scale)
         self.preprocessors.append(preprocessor)
         
-        # Create or recreate pipeline with new ControlNet
-        self._create_pipeline()
-        
-        print(f"Added SD-XL ControlNet {len(self.controlnets) - 1}: {controlnet_config.model_id}")
-        return len(self.controlnets) - 1
-    
-    def _create_pipeline(self) -> None:
-        """Create or recreate the SD-XL Turbo ControlNet pipeline"""
-        if not self.controlnets:
-            return
-        
-        # Use the first ControlNet for single ControlNet pipeline
-        # For multiple ControlNets, we'll use MultiControlNet
+        # Patch the StreamDiffusion pipeline if this is the first ControlNet
         if len(self.controlnets) == 1:
-            controlnet = self.controlnets[0]
-        else:
-            from diffusers import MultiControlNetModel
-            controlnet = MultiControlNetModel(self.controlnets)
+            self._patch_stream_diffusion()
         
-        # Load improved VAE for SD-XL
-        vae = AutoencoderKL.from_pretrained(
-            "madebyollin/sdxl-vae-fp16-fix", 
-            torch_dtype=self.dtype
-        )
-        
-        # Check if base model is a local file path
-        model_path = Path(self.base_model)
-        is_local_file = model_path.exists() and model_path.is_file()
-        is_local_dir = model_path.exists() and model_path.is_dir()
-        
-        # Create SD-XL Turbo ControlNet Img2Img pipeline
-        if is_local_file:
-            # Local model file (e.g., .safetensors)
-            print(f"Loading from local file: {model_path}")
-            if self._safety_checker:
-                self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_single_file(
-                    str(model_path),
-                    controlnet=controlnet,
-                    vae=vae,
-                    torch_dtype=self.dtype
-                )
-            else:
-                self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_single_file(
-                    str(model_path),
-                    controlnet=controlnet,
-                    vae=vae,
-                    safety_checker=None,
-                    torch_dtype=self.dtype
-                )
-        elif is_local_dir:
-            # Local model directory
-            print(f"Loading from local directory: {model_path}")
-            if self._safety_checker:
-                self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
-                    str(model_path),
-                    controlnet=controlnet,
-                    vae=vae,
-                    torch_dtype=self.dtype,
-                    local_files_only=True
-                )
-            else:
-                self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
-                    str(model_path),
-                    controlnet=controlnet,
-                    vae=vae,
-                    safety_checker=None,
-                    torch_dtype=self.dtype,
-                    local_files_only=True
-                )
-        else:
-            # HuggingFace model ID
-            print(f"Loading from HuggingFace: {self.base_model}")
-            if self._safety_checker:
-                self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
-                    self.base_model,
-                    controlnet=controlnet,
-                    vae=vae,
-                    torch_dtype=self.dtype
-                )
-            else:
-                self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
-                    self.base_model,
-                    controlnet=controlnet,
-                    vae=vae,
-                    safety_checker=None,
-                    torch_dtype=self.dtype
-                )
-        
-        # Use Tiny AutoEncoder XL for faster decoding
-        if self._use_taesd:
-            taesd_model = "madebyollin/taesdxl"
-            self.pipe.vae = AutoencoderTiny.from_pretrained(
-                taesd_model, 
-                torch_dtype=self.dtype, 
-                use_safetensors=True
-            )
-        
-        # Configure scheduler and progress bar
-        self.pipe.set_progress_bar_config(disable=True)
-        
-        # Move to device
-        self.pipe = self.pipe.to(device=self.device, dtype=self.dtype)
-        
-        # Optimize for inference
-        if self.device != "mps":
-            self.pipe.unet.to(memory_format=torch.channels_last)
-        
-        # Create image processor
-        self.image_processor = VaeImageProcessor(self.pipe.vae_scale_factor)
-        
-        # Setup Compel for better prompt processing if available
-        try:
-            from compel import Compel, ReturnedEmbeddingsType
-            self.pipe.compel_proc = Compel(
-                tokenizer=[self.pipe.tokenizer, self.pipe.tokenizer_2],
-                text_encoder=[self.pipe.text_encoder, self.pipe.text_encoder_2],
-                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                requires_pooled=[False, True],
-            )
-            print("✓ Compel prompt processing enabled")
-        except ImportError:
-            print("⚠️  Compel not available, using standard prompt processing")
-            self.pipe.compel_proc = None
-        
-        print(f"Created SD-XL Turbo ControlNet pipeline with {len(self.controlnets)} ControlNet(s)")
-    
-    def prepare(self,
-                prompt: str,
-                negative_prompt: str = "",
-                width: int = 1024,
-                height: int = 1024) -> None:
-        """
-        Prepare the pipeline for generation
-        
-        Args:
-            prompt: Text prompt
-            negative_prompt: Negative prompt
-            width: Output width (typically 1024 for SD-XL)
-            height: Output height (typically 1024 for SD-XL)
-        """
-        if not self.pipe:
-            raise RuntimeError("No ControlNets added. Add at least one ControlNet before preparing.")
-        
-        self.prompt = prompt
-        self.negative_prompt = negative_prompt
-        self.width = width
-        self.height = height
-        self.is_prepared = True
-        
-        print(f"Prepared SD-XL Turbo ControlNet pipeline")
-        print(f"Prompt: {prompt}")
-        print(f"Resolution: {width}x{height}")
-    
-    def _load_controlnet_model(self, model_id: str) -> ControlNetModel:
-        """Load a ControlNet model from HuggingFace or local path"""
-        try:
-            if Path(model_id).exists():
-                controlnet = ControlNetModel.from_pretrained(
-                    model_id,
-                    torch_dtype=self.dtype,
-                    local_files_only=True
-                )
-            else:
-                controlnet = ControlNetModel.from_pretrained(
-                    model_id,
-                    torch_dtype=self.dtype
-                )
-            
-            controlnet = controlnet.to(device=self.device, dtype=self.dtype)
-            return controlnet
-            
-        except Exception as e:
-            raise ValueError(f"Failed to load SD-XL ControlNet model '{model_id}': {e}")
-    
-    def _prepare_control_image(self, 
-                              control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
-                              preprocessor: Optional[Any] = None) -> Union[Image.Image, List[Image.Image]]:
-        """
-        Prepare control image(s) for ControlNet input
-        
-        Args:
-            control_image: Input control image
-            preprocessor: Optional preprocessor to apply
-            
-        Returns:
-            Processed control image(s)
-        """
-        # Load image if path
-        if isinstance(control_image, str):
-            control_image = load_image(control_image)
-        
-        # Convert to PIL if needed
-        if isinstance(control_image, np.ndarray):
-            if control_image.max() <= 1.0:
-                control_image = (control_image * 255).astype(np.uint8)
-            control_image = Image.fromarray(control_image)
-        elif isinstance(control_image, torch.Tensor):
-            # Convert tensor to PIL
-            if control_image.dim() == 4:
-                control_image = control_image[0]
-            if control_image.dim() == 3 and control_image.shape[0] in [1, 3]:
-                control_image = control_image.permute(1, 2, 0)
-            
-            if control_image.is_cuda:
-                control_image = control_image.cpu()
-            control_image = control_image.numpy()
-            if control_image.max() <= 1.0:
-                control_image = (control_image * 255).astype(np.uint8)
-            control_image = Image.fromarray(control_image.astype(np.uint8))
-        
-        # Apply preprocessor if available
-        if preprocessor is not None:
-            control_image = preprocessor.process(control_image)
-        
-        # Resize to target size (SD-XL typically uses 1024x1024)
-        if hasattr(self, 'width') and hasattr(self, 'height'):
-            target_size = (self.width, self.height)
-            if control_image.size != target_size:
-                control_image = control_image.resize(target_size, Image.LANCZOS)
-        
-        return control_image
+        print(f"Added SDXL Turbo ControlNet {len(self.controlnets) - 1}: {controlnet_config.model_id}")
+        return len(self.controlnets) - 1
     
     def update_control_image_efficient(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> None:
         """
-        Efficiently update control images for all ControlNets
+        Efficiently update all ControlNets with cache-aware preprocessing
         
         Args:
             control_image: New control image to apply to all ControlNets
@@ -357,166 +136,626 @@ class SDXLTurboControlNetPipeline:
         self._last_input_frame = control_image
         self._preprocessed_cache.clear()
         
-        # Process for each ControlNet
-        self.processed_control_images = []
-        for i, preprocessor in enumerate(self.preprocessors):
-            processed_image = self._prepare_control_image(control_image, preprocessor)
-            self.processed_control_images.append(processed_image)
+        # Convert to tensor early for GPU processing
+        try:
+            control_tensor = self._convert_to_tensor_early(control_image)
+            use_tensor_processing = True
+        except Exception as e:
+            use_tensor_processing = False
+            print(f"⚠️  Tensor conversion failed: {e}, falling back to PIL processing")
+        
+        # Group ControlNets by preprocessor type to avoid duplicate processing
+        preprocessor_groups = {}
+        for i in range(len(self.controlnets)):
+            if self.controlnet_scales[i] > 0:  # Only process active ones
+                preprocessor = self.preprocessors[i]
+                if preprocessor is not None:
+                    preprocessor_type = type(preprocessor).__name__
+                    if preprocessor_type not in preprocessor_groups:
+                        preprocessor_groups[preprocessor_type] = {
+                            'preprocessor': preprocessor,
+                            'indices': []
+                        }
+                    preprocessor_groups[preprocessor_type]['indices'].append(i)
+        
+        # Process once per preprocessor type
+        for preprocessor_type, group in preprocessor_groups.items():
+            preprocessor = group['preprocessor']
+            
+            # Use tensor processing if available and input is tensor
+            has_tensor_processing = hasattr(preprocessor, 'process_tensor')
+            using_tensor = use_tensor_processing and has_tensor_processing
+            
+            if using_tensor:
+                processed_image = self._prepare_control_image(control_tensor, preprocessor)
+            else:
+                processed_image = self._prepare_control_image(control_image, preprocessor)
+            
+            # Cache the result
+            self._preprocessed_cache[preprocessor_type] = processed_image
+            
+            # Apply to all ControlNets using this preprocessor
+            for index in group['indices']:
+                self.controlnet_images[index] = processed_image
     
-    def __call__(self,
-                 image: Union[str, Image.Image, np.ndarray, torch.Tensor],
-                 control_image: Optional[Union[str, Image.Image, np.ndarray, torch.Tensor]] = None,
+    def update_controlnet_scale(self, index: int, scale: float) -> None:
+        """Update the conditioning scale for a specific ControlNet"""
+        if 0 <= index < len(self.controlnets):
+            self.controlnet_scales[index] = scale
+        else:
+            raise IndexError(f"ControlNet index {index} out of range")
+    
+    @property
+    def controlnet_configs(self) -> List[Dict[str, Any]]:
+        """
+        Get ControlNet configurations for compatibility with demos
+        
+        Returns:
+            List of dictionaries containing ControlNet configuration info
+        """
+        configs = []
+        for i in range(len(self.controlnets)):
+            configs.append({
+                'conditioning_scale': self.controlnet_scales[i] if i < len(self.controlnet_scales) else 1.0,
+                'enabled': self.controlnet_scales[i] > 0 if i < len(self.controlnet_scales) else False,
+                'preprocessor': type(self.preprocessors[i]).__name__ if i < len(self.preprocessors) and self.preprocessors[i] is not None else None
+            })
+        return configs
+    
+    def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
+        """Get the last processed control image for display purposes"""
+        if not (0 <= index < len(self.controlnets)):
+            return None
+        
+        preprocessor = self.preprocessors[index]
+        if preprocessor is None:
+            return None
+            
+        preprocessor_type = type(preprocessor).__name__
+        cached_result = self._preprocessed_cache.get(preprocessor_type)
+        
+        if cached_result is None:
+            return None
+        
+        # Handle tensor results from GPU processing
+        if isinstance(cached_result, torch.Tensor):
+            if hasattr(preprocessor, 'tensor_to_pil'):
+                return preprocessor.tensor_to_pil(cached_result)
+            else:
+                return self._tensor_to_pil_fallback(cached_result)
+        
+        return cached_result
+    
+    def _load_controlnet_model(self, model_id: str) -> ControlNetModel:
+        """Load a ControlNet model from HuggingFace or local path"""
+        try:
+            if Path(model_id).exists():
+                controlnet = ControlNetModel.from_pretrained(
+                    model_id,
+                    torch_dtype=self.dtype,
+                    local_files_only=True
+                )
+            else:
+                if "/" in model_id and model_id.count("/") > 1:
+                    # Handle subfolder case
+                    parts = model_id.split("/")
+                    repo_id = "/".join(parts[:2])
+                    subfolder = "/".join(parts[2:])
+                    controlnet = ControlNetModel.from_pretrained(
+                        repo_id,
+                        subfolder=subfolder,
+                        torch_dtype=self.dtype
+                    )
+                else:
+                    controlnet = ControlNetModel.from_pretrained(
+                        model_id,
+                        torch_dtype=self.dtype
+                    )
+            
+            controlnet = controlnet.to(device=self.device, dtype=self.dtype)
+            return controlnet
+            
+        except Exception as e:
+            raise ValueError(f"Failed to load SDXL Turbo ControlNet model '{model_id}': {e}")
+    
+    def _prepare_control_image(self, 
+                              control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
+                              preprocessor: Optional[Any] = None) -> torch.Tensor:
+        """Prepare a control image for ControlNet input"""
+        # Load image if path
+        if isinstance(control_image, str):
+            control_image = load_image(control_image)
+        
+        # Check if we can use tensor processing
+        if preprocessor is not None and isinstance(control_image, torch.Tensor) and hasattr(preprocessor, 'process_tensor'):
+            try:
+                processed_tensor = preprocessor.process_tensor(control_image)
+                if processed_tensor.dim() == 3:
+                    processed_tensor = processed_tensor.unsqueeze(0)
+                processed_tensor = processed_tensor.to(device=self.device, dtype=self.dtype)
+                
+                # SDXL: Ensure control image matches pipeline resolution
+                target_size = (self.stream.height, self.stream.width)  # (H, W)
+                current_size = processed_tensor.shape[-2:]  # (H, W)
+                if current_size != target_size:
+                    import torch.nn.functional as F
+                    processed_tensor = F.interpolate(
+                        processed_tensor,
+                        size=target_size,
+                        mode='bilinear',
+                        align_corners=False
+                    )
+                    print(f"SDXL ControlNet: Resized control image from {current_size} to {target_size}")
+                
+                return processed_tensor
+            except Exception as e:
+                print(f"⚠️  Tensor processing failed for {type(preprocessor).__name__}: {e}")
+        
+        # Direct tensor path for passthrough
+        if isinstance(control_image, torch.Tensor) and preprocessor is None:
+            target_size = (self.stream.width, self.stream.height)
+            
+            if control_image.dim() == 4:
+                control_image = control_image[0]
+            if control_image.dim() == 3 and control_image.shape[0] not in [1, 3]:
+                control_image = control_image.permute(2, 0, 1)
+            
+            current_size = control_image.shape[-2:]
+            if current_size != target_size:
+                import torch.nn.functional as F
+                if control_image.dim() == 3:
+                    control_image = control_image.unsqueeze(0)
+                
+                control_image = F.interpolate(
+                    control_image,
+                    size=target_size,
+                    mode='bilinear',
+                    align_corners=False
+                )
+                
+                if control_image.shape[0] == 1:
+                    control_image = control_image.squeeze(0)
+            
+            if control_image.dim() == 3:
+                control_image = control_image.unsqueeze(0)
+            
+            control_image = control_image.to(device=self.device, dtype=self.dtype)
+            return control_image
+        
+        # Apply preprocessor if available
+        if preprocessor is not None:
+            control_image = preprocessor.process(control_image)
+        
+        # Fast path for PIL Images
+        if isinstance(control_image, Image.Image):
+            target_size = (self.stream.width, self.stream.height)
+            if control_image.size != target_size:
+                control_image = control_image.resize(target_size, Image.LANCZOS)
+                print(f"SDXL ControlNet: Resized PIL control image to {target_size}")
+            
+            control_tensor = self._cached_transform(control_image).unsqueeze(0)
+            control_tensor = control_tensor.to(device=self.device, dtype=self.dtype)
+            return control_tensor
+        
+        # Handle other types
+        if isinstance(control_image, np.ndarray):
+            if control_image.max() <= 1.0:
+                control_image = (control_image * 255).astype(np.uint8)
+            control_image = Image.fromarray(control_image)
+        elif isinstance(control_image, torch.Tensor):
+            if control_image.dim() == 4:
+                control_image = control_image[0]
+            if control_image.dim() == 3 and control_image.shape[0] in [1, 3]:
+                control_image = control_image.permute(1, 2, 0)
+            
+            if control_image.is_cuda:
+                control_image = control_image.cpu()
+            control_image = control_image.numpy()
+            if control_image.max() <= 1.0:
+                control_image = (control_image * 255).astype(np.uint8)
+            control_image = Image.fromarray(control_image.astype(np.uint8))
+        
+        # Ensure final control image matches SDXL resolution
+        final_result = self._prepare_control_image(control_image, None)
+        
+        # Final safety check for SDXL dimensions
+        target_size = (self.stream.height, self.stream.width)  # (H, W)
+        if final_result.shape[-2:] != target_size:
+            import torch.nn.functional as F
+            final_result = F.interpolate(
+                final_result,
+                size=target_size,
+                mode='bilinear',
+                align_corners=False
+            )
+            print(f"SDXL ControlNet: Final resize from {final_result.shape[-2:]} to {target_size}")
+        
+        return final_result
+    
+    def _get_controlnet_conditioning(self, 
+                                   x_t_latent: torch.Tensor,
+                                   timestep: torch.Tensor,
+                                   encoder_hidden_states: torch.Tensor,
+                                   added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None) -> Tuple[Optional[List[torch.Tensor]], Optional[torch.Tensor]]:
+        """Get combined conditioning from all active ControlNets"""
+        if not self.controlnets:
+            return None, None
+        
+        active_indices = [
+            i for i, (controlnet, control_image, scale) in enumerate(
+                zip(self.controlnets, self.controlnet_images, self.controlnet_scales)
+            ) if controlnet is not None and control_image is not None and scale > 0
+        ]
+        
+        if not active_indices:
+            return None, None
+        
+        down_block_res_samples = None
+        mid_block_res_sample = None
+        
+        for i in active_indices:
+            controlnet = self.controlnets[i]
+            control_image = self.controlnet_images[i]
+            scale = self.controlnet_scales[i]
+            
+            try:
+                # SDXL ControlNet call with added_cond_kwargs for time embeddings
+                controlnet_kwargs = {
+                    'sample': x_t_latent,
+                    'timestep': timestep,
+                    'encoder_hidden_states': encoder_hidden_states,
+                    'controlnet_cond': control_image,
+                    'conditioning_scale': scale,
+                    'return_dict': False,
+                }
+                
+                # Add SDXL-specific conditioning through added_cond_kwargs parameter
+                if added_cond_kwargs and ('text_embeds' in added_cond_kwargs or 'time_ids' in added_cond_kwargs):
+                    controlnet_kwargs['added_cond_kwargs'] = added_cond_kwargs
+                
+                down_samples, mid_sample = controlnet(**controlnet_kwargs)
+                
+                if down_block_res_samples is None:
+                    down_block_res_samples = down_samples
+                    mid_block_res_sample = mid_sample
+                else:
+                    for j in range(len(down_block_res_samples)):
+                        down_block_res_samples[j] += down_samples[j]
+                    mid_block_res_sample += mid_sample
+                    
+            except Exception as e:
+                print(f"Warning: SDXL Turbo ControlNet {i} failed: {e}")
+                continue
+        
+        return down_block_res_samples, mid_block_res_sample
+    
+    def _patch_stream_diffusion(self) -> None:
+        """Patch StreamDiffusion's unet_step method to include ControlNet conditioning"""
+        if self._is_patched:
+            return
+        
+        self._original_unet_step = self.stream.unet_step
+        
+        def patched_unet_step(x_t_latent, t_list, idx=None):
+            # Handle CFG expansion
+            if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
+                x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
+                t_list_expanded = torch.concat([t_list[0:1], t_list], dim=0)
+            elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
+                x_t_latent_plus_uc = torch.concat([x_t_latent, x_t_latent], dim=0)
+                t_list_expanded = torch.concat([t_list, t_list], dim=0)
+            else:
+                x_t_latent_plus_uc = x_t_latent
+                t_list_expanded = t_list
+            
+            # Always initialize added_cond_kwargs for SDXL compatibility
+            added_cond_kwargs = {}
+            
+            # Try to get SDXL-specific conditioning from the StreamDiffusion instance
+            if hasattr(self.stream, 'add_text_embeds') and hasattr(self.stream, 'add_time_ids'):
+                # Handle text embeds expansion for CFG
+                if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
+                    add_text_embeds = torch.concat([self.stream.add_text_embeds[0:1], self.stream.add_text_embeds], dim=0)
+                    add_time_ids = torch.concat([self.stream.add_time_ids[0:1], self.stream.add_time_ids], dim=0)
+                elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
+                    add_text_embeds = torch.concat([self.stream.add_text_embeds, self.stream.add_text_embeds], dim=0)
+                    add_time_ids = torch.concat([self.stream.add_time_ids, self.stream.add_time_ids], dim=0)
+                else:
+                    add_text_embeds = self.stream.add_text_embeds
+                    add_time_ids = self.stream.add_time_ids
+                
+                added_cond_kwargs = {
+                    'text_embeds': add_text_embeds,
+                    'time_ids': add_time_ids
+                }
+            elif hasattr(self.stream.pipe, 'text_encoder_2'):
+                # SDXL pipeline detected but embeddings not extracted yet
+                # Create default SDXL conditioning
+                batch_size = x_t_latent_plus_uc.shape[0]
+                
+                # Create default pooled embeddings (will be overridden by proper prompt preparation)
+                device = self.stream.device
+                dtype = self.stream.dtype
+                
+                # Default time_ids for SDXL (original_size, crops_coords_top_left, target_size)
+                time_ids = torch.tensor([
+                    [self.stream.height, self.stream.width, 0, 0, self.stream.height, self.stream.width]
+                ], dtype=dtype, device=device)
+                time_ids = time_ids.repeat(batch_size, 1)
+                
+                # Use dummy text embeds if not available
+                text_embeds = torch.zeros((batch_size, 1280), dtype=dtype, device=device)
+                
+                added_cond_kwargs = {
+                    'text_embeds': text_embeds,
+                    'time_ids': time_ids
+                }
+            
+            # Get ControlNet conditioning
+            down_block_res_samples, mid_block_res_sample = self._get_controlnet_conditioning(
+                x_t_latent_plus_uc, t_list_expanded, self.stream.prompt_embeds, added_cond_kwargs
+            )
+            
+            # Prepare UNet kwargs
+            unet_kwargs = {
+                'sample': x_t_latent_plus_uc,
+                'timestep': t_list_expanded,
+                'encoder_hidden_states': self.stream.prompt_embeds,
+                'return_dict': False,
+            }
+            
+            # Add ControlNet conditioning
+            if down_block_res_samples is not None:
+                unet_kwargs['down_block_additional_residuals'] = down_block_res_samples
+            if mid_block_res_sample is not None:
+                unet_kwargs['mid_block_additional_residual'] = mid_block_res_sample
+            
+            # Add SDXL-specific conditioning through added_cond_kwargs parameter
+            if added_cond_kwargs:
+                unet_kwargs['added_cond_kwargs'] = added_cond_kwargs
+            
+            # Call UNet
+            model_pred = self.stream.unet(**unet_kwargs)[0]
+            
+            # Continue with original CFG logic
+            if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
+                noise_pred_text = model_pred[1:]
+                self.stream.stock_noise = torch.concat(
+                    [model_pred[0:1], self.stream.stock_noise[1:]], dim=0
+                )
+            elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
+                noise_pred_uncond, noise_pred_text = model_pred.chunk(2)
+            else:
+                noise_pred_text = model_pred
+            
+            if self.stream.guidance_scale > 1.0 and (
+                self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize"
+            ):
+                noise_pred_uncond = self.stream.stock_noise * self.stream.delta
+            
+            if self.stream.guidance_scale > 1.0 and self.stream.cfg_type != "none":
+                model_pred = noise_pred_uncond + self.stream.guidance_scale * (
+                    noise_pred_text - noise_pred_uncond
+                )
+            else:
+                model_pred = noise_pred_text
+            
+            # Compute the previous noisy sample x_t -> x_t-1
+            if self.stream.use_denoising_batch:
+                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
+                if self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize":
+                    scaled_noise = self.stream.beta_prod_t_sqrt * self.stream.stock_noise
+                    delta_x = self.stream.scheduler_step_batch(model_pred, scaled_noise, idx)
+                    alpha_next = torch.concat(
+                        [
+                            self.stream.alpha_prod_t_sqrt[1:],
+                            torch.ones_like(self.stream.alpha_prod_t_sqrt[0:1]),
+                        ],
+                        dim=0,
+                    )
+                    delta_x = alpha_next * delta_x
+                    beta_next = torch.concat(
+                        [
+                            self.stream.beta_prod_t_sqrt[1:],
+                            torch.ones_like(self.stream.beta_prod_t_sqrt[0:1]),
+                        ],
+                        dim=0,
+                    )
+                    delta_x = delta_x / beta_next
+                    init_noise = torch.concat(
+                        [self.stream.init_noise[1:], self.stream.init_noise[0:1]], dim=0
+                    )
+                    self.stream.stock_noise = init_noise + delta_x
+            else:
+                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
+            
+            return denoised_batch, model_pred
+        
+        self.stream.unet_step = patched_unet_step
+        self._is_patched = True
+        print("Patched StreamDiffusion with SDXL Turbo ControlNet support")
+    
+    def _unpatch_stream_diffusion(self) -> None:
+        """Restore original StreamDiffusion unet_step method"""
+        if self._is_patched and self._original_unet_step is not None:
+            self.stream.unet_step = self._original_unet_step
+            self._is_patched = False
+            print("Unpatched StreamDiffusion")
+    
+    def _convert_to_tensor_early(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> torch.Tensor:
+        """Convert input to tensor as early as possible"""
+        if isinstance(control_image, str):
+            control_image = load_image(control_image)
+        
+        if isinstance(control_image, Image.Image):
+            import torchvision.transforms as transforms
+            to_tensor = transforms.ToTensor()
+            tensor = to_tensor(control_image)
+            return tensor.to(device=self.device, dtype=self.dtype)
+        
+        elif isinstance(control_image, np.ndarray):
+            if control_image.max() <= 1.0:
+                tensor = torch.from_numpy(control_image).float()
+            else:
+                tensor = torch.from_numpy(control_image).float() / 255.0
+            
+            if len(tensor.shape) == 3 and tensor.shape[-1] in [1, 3]:
+                tensor = tensor.permute(2, 0, 1)
+            elif len(tensor.shape) == 2:
+                tensor = tensor.unsqueeze(0)
+                
+            return tensor.to(device=self.device, dtype=self.dtype)
+        
+        elif isinstance(control_image, torch.Tensor):
+            return control_image.to(device=self.device, dtype=self.dtype)
+        
+        else:
+            raise ValueError(f"Unsupported control image type: {type(control_image)}")
+    
+    def _tensor_to_pil_fallback(self, tensor: torch.Tensor) -> Image.Image:
+        """Fallback method to convert tensor to PIL"""
+        if tensor.dim() == 4:
+            tensor = tensor[0]
+        
+        if tensor.dim() == 3 and tensor.shape[0] in [1, 3]:
+            tensor = tensor.permute(1, 2, 0)
+        
+        if tensor.is_cuda:
+            tensor = tensor.cpu()
+        
+        if tensor.max() <= 1.0:
+            tensor = (tensor * 255).clamp(0, 255).to(torch.uint8)
+        else:
+            tensor = tensor.clamp(0, 255).to(torch.uint8)
+        
+        array = tensor.numpy()
+        
+        if array.shape[-1] == 3:
+            return Image.fromarray(array, 'RGB')
+        elif array.shape[-1] == 1:
+            return Image.fromarray(array.squeeze(-1), 'L')
+        else:
+            return Image.fromarray(array)
+    
+    def _setup_sdxl_embeddings(self) -> None:
+        """Extract and store SDXL-specific embeddings if using SDXL pipeline"""
+        if not hasattr(self.stream.pipe, 'text_encoder_2'):
+            return  # Not an SDXL pipeline
+        
+        # Check if embeddings are already set up
+        if hasattr(self.stream, 'add_text_embeds') and hasattr(self.stream, 'add_time_ids'):
+            return
+        
+        try:
+            # Get the current prompt from the stream
+            prompt = getattr(self.stream, '_current_prompt', "")
+            negative_prompt = getattr(self.stream, '_current_negative_prompt', "")
+            
+            # Use a simple prompt if we don't have one
+            if not prompt:
+                prompt = "a photo"
+            
+            # Get SDXL embeddings using the pipeline's encode_prompt method
+            do_classifier_free_guidance = self.stream.guidance_scale > 1.0
+            
+            # Call the SDXL pipeline's encode_prompt method which returns all necessary embeddings
+            encoder_output = self.stream.pipe.encode_prompt(
+                prompt=prompt,
+                device=self.stream.device,
+                num_images_per_prompt=1,
+                do_classifier_free_guidance=do_classifier_free_guidance,
+                negative_prompt=negative_prompt,
+                prompt_embeds=None,
+                negative_prompt_embeds=None,
+                pooled_prompt_embeds=None,
+                negative_pooled_prompt_embeds=None,
+                lora_scale=None,
+                clip_skip=None,
+            )
+            
+            # Extract embeddings from the output
+            if len(encoder_output) >= 4:
+                prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = encoder_output[:4]
+                
+                # Store the pooled embeddings as add_text_embeds
+                if do_classifier_free_guidance:
+                    # For CFG, we need both negative and positive pooled embeddings
+                    self.stream.add_text_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
+                else:
+                    self.stream.add_text_embeds = pooled_prompt_embeds
+                
+                # Create default time_ids for SDXL
+                original_size = (self.stream.height, self.stream.width)
+                target_size = (self.stream.height, self.stream.width)
+                crops_coords_top_left = (0, 0)
+                
+                add_time_ids = list(original_size + crops_coords_top_left + target_size)
+                add_time_ids = torch.tensor([add_time_ids], dtype=self.stream.dtype, device=self.stream.device)
+                
+                if do_classifier_free_guidance:
+                    # For CFG, we need time_ids for both uncond and cond
+                    self.stream.add_time_ids = torch.cat([add_time_ids, add_time_ids], dim=0)
+                else:
+                    self.stream.add_time_ids = add_time_ids
+                
+                print("Set up SDXL embeddings for ControlNet pipeline")
+                
+        except Exception as e:
+            print(f"Warning: Failed to set up SDXL embeddings: {e}")
+            # Create minimal fallback embeddings
+            batch_size = 2 if self.stream.guidance_scale > 1.0 else 1
+            self.stream.add_text_embeds = torch.zeros((batch_size, 1280), dtype=self.stream.dtype, device=self.stream.device)
+            
+            add_time_ids = torch.tensor([
+                [self.stream.height, self.stream.width, 0, 0, self.stream.height, self.stream.width]
+            ], dtype=self.stream.dtype, device=self.stream.device)
+            self.stream.add_time_ids = add_time_ids.repeat(batch_size, 1)
+    
+    def __call__(self, 
+                 image: Union[str, Image.Image, np.ndarray, torch.Tensor] = None,
                  strength: float = None,
                  num_inference_steps: int = None,
                  guidance_scale: float = None,
-                 controlnet_conditioning_scale: Union[float, List[float]] = None,
-                 control_guidance_start: float = None,
-                 control_guidance_end: float = None,
-                 generator: Optional[torch.Generator] = None,
                  **kwargs) -> Image.Image:
         """
-        Generate image using SD-XL Turbo with ControlNet
+        Generate image using SDXL Turbo with ControlNet
         
         Args:
             image: Input image for img2img
-            control_image: Control image (if None, uses input image)
-            strength: Denoising strength (0.1-1.0)
-            num_inference_steps: Number of inference steps
-            guidance_scale: Guidance scale
-            controlnet_conditioning_scale: ControlNet conditioning scale(s)
-            control_guidance_start: Control guidance start
-            control_guidance_end: Control guidance end
-            generator: Random generator
+            strength: Ignored (StreamDiffusion doesn't use this)
+            num_inference_steps: Ignored (StreamDiffusion doesn't use this)
+            guidance_scale: Ignored (StreamDiffusion doesn't use this)
+            **kwargs: Additional arguments
             
         Returns:
             Generated PIL Image
         """
-        if not self.is_prepared:
-            raise RuntimeError("Pipeline not prepared. Call prepare() first.")
+        # Ensure SDXL embeddings are set up
+        self._setup_sdxl_embeddings()
         
-        # Use input image as control image if not provided
-        if control_image is None:
-            control_image = image
-        
-        # Update control images
-        self.update_control_image_efficient(control_image)
-        
-        # Use defaults for SD-XL Turbo if not specified
-        strength = strength or self.default_strength
-        num_inference_steps = num_inference_steps or self.default_steps
-        guidance_scale = guidance_scale or self.default_guidance_scale
-        
-        # Set ControlNet parameters
-        if controlnet_conditioning_scale is None:
-            controlnet_conditioning_scale = [config['conditioning_scale'] for config in self.controlnet_configs]
-        
-        if control_guidance_start is None:
-            control_guidance_start = [config['control_guidance_start'] for config in self.controlnet_configs]
-        
-        if control_guidance_end is None:
-            control_guidance_end = [config['control_guidance_end'] for config in self.controlnet_configs]
-        
-        # Handle single vs multiple ControlNets
-        if len(self.processed_control_images) == 1:
-            control_images = self.processed_control_images[0]
-            if isinstance(controlnet_conditioning_scale, list):
-                controlnet_conditioning_scale = controlnet_conditioning_scale[0]
-            if isinstance(control_guidance_start, list):
-                control_guidance_start = control_guidance_start[0]
-            if isinstance(control_guidance_end, list):
-                control_guidance_end = control_guidance_end[0]
+        if image is not None:
+            # Update control image for ControlNet
+            self.update_control_image_efficient(image)
+            
+            # Call StreamDiffusion with the image as positional argument 'x'
+            x_output = self.stream(image)  # StreamDiffusion expects 'image' as positional 'x'
         else:
-            control_images = self.processed_control_images
+            # Text-to-image generation
+            x_output = self.stream()
         
-        # Prepare input image
-        if isinstance(image, str):
-            image = load_image(image)
-        elif isinstance(image, (np.ndarray, torch.Tensor)):
-            image = self._prepare_control_image(image, None)
-        
-        # Ensure input image is correct size
-        if hasattr(self, 'width') and hasattr(self, 'height'):
-            target_size = (self.width, self.height)
-            if image.size != target_size:
-                image = image.resize(target_size, Image.LANCZOS)
-        
-        # Prepare prompts with Compel if available
-        prompt = self.prompt
-        negative_prompt = self.negative_prompt
-        prompt_embeds = None
-        pooled_prompt_embeds = None
-        negative_prompt_embeds = None
-        negative_pooled_prompt_embeds = None
-        
-        if hasattr(self.pipe, "compel_proc") and self.pipe.compel_proc is not None:
-            try:
-                _prompt_embeds, pooled_prompt_embeds = self.pipe.compel_proc(
-                    [self.prompt, self.negative_prompt]
-                )
-                prompt = None
-                negative_prompt = None
-                prompt_embeds = _prompt_embeds[0:1]
-                pooled_prompt_embeds = pooled_prompt_embeds[0:1]
-                negative_prompt_embeds = _prompt_embeds[1:2]
-                negative_pooled_prompt_embeds = pooled_prompt_embeds[1:2]
-            except Exception as e:
-                print(f"⚠️  Compel processing failed: {e}, using standard prompts")
-        
-        # Generate image
-        try:
-            result = self.pipe(
-                image=image,
-                control_image=control_images,
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                prompt_embeds=prompt_embeds,
-                pooled_prompt_embeds=pooled_prompt_embeds,
-                negative_prompt_embeds=negative_prompt_embeds,
-                negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
-                strength=strength,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                controlnet_conditioning_scale=controlnet_conditioning_scale,
-                control_guidance_start=control_guidance_start,
-                control_guidance_end=control_guidance_end,
-                generator=generator,
-                output_type="pil",
-                **kwargs
-            )
-            
-            # Handle NSFW detection
-            if hasattr(result, 'nsfw_content_detected') and result.nsfw_content_detected[0]:
-                print("NSFW content detected, returning black image")
-                return Image.new('RGB', (self.width, self.height), (0, 0, 0))
-            
-            return result.images[0]
-            
-        except Exception as e:
-            print(f"SD-XL Turbo generation failed: {e}")
-            # Return black image as fallback
-            return Image.new('RGB', (self.width, self.height), (0, 0, 0))
+        # Convert tensor output to PIL Image
+        from ..image_utils import postprocess_image
+        output_image = postprocess_image(x_output, output_type="pil")[0]
+        return output_image
     
-    def update_controlnet_scale(self, index: int, scale: float) -> None:
-        """Update the conditioning scale for a specific ControlNet"""
-        if 0 <= index < len(self.controlnet_configs):
-            self.controlnet_configs[index]['conditioning_scale'] = scale
-        else:
-            raise IndexError(f"ControlNet index {index} out of range")
-    
-    def update_prompt(self, prompt: str) -> None:
-        """Update the generation prompt"""
-        self.prompt = prompt
-    
-    def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
-        """Get the last processed control image for display purposes"""
-        if 0 <= index < len(self.processed_control_images):
-            return self.processed_control_images[index]
-        return None
+    def __getattr__(self, name):
+        """Forward attribute access to the underlying StreamDiffusion instance"""
+        return getattr(self.stream, name)
 
 
 def create_sdxlturbo_controlnet_pipeline(config: StreamDiffusionControlNetConfig) -> SDXLTurboControlNetPipeline:
     """
-    Create an SD-XL Turbo ControlNet pipeline from configuration
+    Create an SDXL Turbo ControlNet pipeline from configuration using StreamDiffusion
     
     Args:
         config: Configuration object
@@ -532,26 +771,89 @@ def create_sdxlturbo_controlnet_pipeline(config: StreamDiffusionControlNetConfig
     }
     dtype = dtype_map.get(config.dtype, torch.float16)
     
-    # Create SD-XL Turbo ControlNet pipeline
-    pipeline = SDXLTurboControlNetPipeline(
-        base_model=config.model_id,
-        device=config.device,
-        dtype=dtype,
-        use_taesd=getattr(config, 'use_taesd', True),
-        safety_checker=getattr(config, 'safety_checker', False)
+    # Load base pipeline
+    print(f"Loading SDXL Turbo base model: {config.model_id}")
+    
+    # Check if it's a local file path
+    model_path = Path(config.model_id)
+    if model_path.exists() and model_path.is_file():
+        print(f"Loading from local file: {model_path}")
+        pipe = StableDiffusionXLPipeline.from_single_file(
+            str(model_path),
+            torch_dtype=dtype
+        )
+    elif model_path.exists() and model_path.is_dir():
+        print(f"Loading from local directory: {model_path}")
+        pipe = StableDiffusionXLPipeline.from_pretrained(
+            str(model_path),
+            torch_dtype=dtype,
+            local_files_only=True
+        )
+    elif "/" in config.model_id:
+        print(f"Loading from HuggingFace: {config.model_id}")
+        pipe = StableDiffusionXLPipeline.from_pretrained(
+            config.model_id, 
+            torch_dtype=dtype
+        )
+    else:
+        raise ValueError(f"Invalid model path or ID: {config.model_id}")
+    
+    pipe = pipe.to(device=config.device, dtype=dtype)
+    
+    # Load improved VAE for SDXL
+    vae = AutoencoderKL.from_pretrained(
+        "madebyollin/sdxl-vae-fp16-fix", 
+        torch_dtype=dtype
+    ).to(config.device)
+    pipe.vae = vae
+    
+    # Use Tiny AutoEncoder XL if requested
+    if getattr(config, 'use_taesd', True):
+        taesd_model = "madebyollin/taesdxl"
+        pipe.vae = AutoencoderTiny.from_pretrained(
+            taesd_model, 
+            torch_dtype=dtype, 
+            use_safetensors=True
+        ).to(config.device)
+    
+    # SDXL Turbo uses its default scheduler - don't override it
+    
+    # Create StreamDiffusion instance
+    stream = StreamDiffusion(
+        pipe,
+        t_index_list=config.t_index_list,
+        torch_dtype=dtype,
+        width=config.width,
+        height=config.height,
+        cfg_type=config.cfg_type,
     )
+    
+    # Enable optimizations
+    if config.acceleration == "xformers":
+        pipe.enable_xformers_memory_efficient_attention()
+    
+    # Create ControlNet pipeline
+    controlnet_pipeline = SDXLTurboControlNetPipeline(stream, config.device, dtype)
     
     # Add ControlNets
     for cn_config in config.controlnets:
-        pipeline.add_controlnet(cn_config)
+        controlnet_pipeline.add_controlnet(cn_config)
     
     # Prepare with prompt
     if config.prompt:
-        pipeline.prepare(
+        # Store prompt info for SDXL embeddings setup
+        stream._current_prompt = config.prompt
+        stream._current_negative_prompt = config.negative_prompt or ""
+        
+        stream.prepare(
             prompt=config.prompt,
             negative_prompt=config.negative_prompt,
-            width=config.width,
-            height=config.height
+            guidance_scale=config.guidance_scale,
+            num_inference_steps=config.num_inference_steps,
+            seed=config.seed,
         )
+        
+        # Set up SDXL embeddings after prepare
+        controlnet_pipeline._setup_sdxl_embeddings()
     
-    return pipeline 
+    return controlnet_pipeline 

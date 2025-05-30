@@ -9,9 +9,8 @@ dtype: "float16"
 # Generation parameters
 prompt: "a beautiful anime girl with purple hair, masterpiece"
 negative_prompt: "blurry, low quality, distorted, render, cartoon, oversaturated, noise"
-guidance_scale: 0.0  # SD-XL Turbo typically uses no guidance
-num_inference_steps: 3  # Slightly more steps for depth precision
-strength: 0.4  # Lower strength to preserve architectural structure
+guidance_scale: 1.0 
+num_inference_steps: 50
 
 # SD-XL Turbo optimizations
 use_taesd: true  # Use Tiny AutoEncoder XL for faster decoding
