@@ -1,0 +1,38 @@
+model_id: "stabilityai/sd-turbo"
+pipeline_type: "sdturbo"
+t_index_list: [32]
+width: 512
+height: 512
+device: "cuda"
+dtype: "float16"
+
+# Generation parameters
+prompt: "a beautiful artwork, highly detailed, masterpiece"
+negative_prompt: "blurry, low quality, distorted"
+guidance_scale: 0.0  # SD Turbo typically uses no guidance
+num_inference_steps: 1  # SD Turbo single-step inference
+strength: 0.8  # img2img denoising strength
+
+# SD Turbo optimizations
+use_taesd: true  # Use Tiny AutoEncoder for faster decoding
+safety_checker: false
+
+# Advanced parameters
+use_lcm_lora: false  # SD Turbo already has LCM built-in
+use_tiny_vae: true
+acceleration: "none"  # Can be "tensorrt" for additional speed
+cfg_type: "none"
+seed: 42
+
+# ControlNet configurations
+controlnets:
+  - model_id: "lllyasviel/control_v11p_sd15_canny"
+    conditioning_scale: 0.8
+    preprocessor: "canny"
+    preprocessor_params:
+      low_threshold: 50
+      high_threshold: 100
+    control_image_path: null
+    enabled: true
+    control_guidance_start: 0.0
+    control_guidance_end: 1.0 

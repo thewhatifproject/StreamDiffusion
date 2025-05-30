@@ -4,6 +4,7 @@ General Purpose ControlNet Webcam Demo for StreamDiffusion
 
 This script demonstrates real-time image generation using webcam input with any ControlNet configuration.
 It loads a ControlNet config file and applies the specified preprocessing and conditioning to the webcam feed.
+Supports SD 1.5, SD Turbo, and SD-XL Turbo pipelines based on configuration.
 """
 
 import cv2
@@ -20,8 +21,9 @@ sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from streamdiffusion.controlnet import (
     load_controlnet_config, 
-    create_controlnet_pipeline,
-    ControlNetConfig
+    create_controlnet_pipeline_auto,
+    ControlNetConfig,
+    StreamDiffusionControlNetConfig
 )
 from streamdiffusion.image_utils import postprocess_image
 
@@ -44,10 +46,12 @@ def main():
                        help="Override prompt from config")
     parser.add_argument("--controlnet-scale", type=float,
                        help="Override ControlNet conditioning scale from config")
+    parser.add_argument("--strength", type=float,
+                       help="Override img2img strength from config (SD Turbo/SD-XL Turbo)")
     parser.add_argument("--show-preprocessed", action="store_true",
                        help="Show the preprocessed control image in a separate window")
-    parser.add_argument("--resolution", type=int, default=512,
-                       help="Camera and output resolution")
+    parser.add_argument("--resolution", type=int, default=None,
+                       help="Camera and output resolution (auto-detects from pipeline type if not specified)")
     
     args = parser.parse_args()
     
@@ -57,6 +61,17 @@ def main():
     config = load_controlnet_config(args.config)
     print(f"✓ Loaded configuration from {args.config}")
     
+    # Detect pipeline type
+    pipeline_type = getattr(config, 'pipeline_type', 'sd1.5')
+    print(f"🔧 Pipeline type: {pipeline_type}")
+    
+    # Set default resolution based on pipeline type if not specified
+    if args.resolution is None:
+        if pipeline_type == 'sdxlturbo':
+            args.resolution = 1024  # SD-XL Turbo default
+        else:
+            args.resolution = 512   # SD 1.5 and SD Turbo default
+    
     # Override parameters if provided
     if args.model:
         config.model_id = args.model
@@ -64,12 +79,18 @@ def main():
         config.prompt = args.prompt
     if args.controlnet_scale is not None:
         config.controlnets[0].conditioning_scale = args.controlnet_scale
+    if args.strength is not None and hasattr(config, 'strength'):
+        config.strength = args.strength
     
-    # Create ControlNet pipeline
+    # Update resolution in config
+    config.width = args.resolution
+    config.height = args.resolution
+    
+    # Create ControlNet pipeline (auto-selects SD 1.5, SD Turbo, or SD-XL Turbo)
     print("🔄 Creating ControlNet pipeline...")
     print(f"📝 Using ControlNet: {config.controlnets[0].model_id}")
     print(f"🔧 Preprocessor: {config.controlnets[0].preprocessor}")
-    pipeline = create_controlnet_pipeline(config)
+    pipeline = create_controlnet_pipeline_auto(config)
     print("✓ Pipeline created successfully")
     
     # Setup webcam
@@ -85,6 +106,10 @@ def main():
     print("✓ Camera opened successfully")
     print(f"📝 Prompt: {config.prompt}")
     print(f"🎛️  ControlNet Scale: {config.controlnets[0].conditioning_scale}")
+    if hasattr(config, 'strength'):
+        print(f"💪 Strength: {config.strength} (img2img)")
+    if hasattr(config, 'num_inference_steps'):
+        print(f"⚡ Steps: {config.num_inference_steps}")
     print(f"📏 Resolution: {args.resolution}x{args.resolution}")
     
     print("\n🎮 Controls:")
@@ -93,6 +118,9 @@ def main():
     print("  - Press 'c' to toggle control image preview")
     print("  - Press '+' to increase ControlNet scale")
     print("  - Press '-' to decrease ControlNet scale")
+    if pipeline_type in ['sdturbo', 'sdxlturbo']:
+        print("  - Press '>' to increase strength")
+        print("  - Press '<' to decrease strength")
     print("  - Press 'p' to change prompt interactively")
     
     frame_count = 0
@@ -101,6 +129,14 @@ def main():
     
     # Get preprocessor name for display
     preprocessor_name = config.controlnets[0].preprocessor.replace("_", " ").title()
+    
+    # Profiling variables
+    profile_times = {
+        'preprocessing': [],
+        'generation': [],
+        'display': [],
+        'total': []
+    }
     
     try:
         while True:
@@ -115,13 +151,32 @@ def main():
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_pil = Image.fromarray(frame_rgb)
             
-            # Update ControlNet with current frame efficiently 
+            # Profile preprocessing
+            prep_start = time.time()
             pipeline.update_control_image_efficient(frame_pil)
+            prep_time = time.time() - prep_start
+            profile_times['preprocessing'].append(prep_time)
             
-            # Generate image
-            x_output = pipeline(frame_pil)
-            output_image = postprocess_image(x_output, output_type="pil")[0]
+            # Profile generation
+            gen_start = time.time()
+            if pipeline_type in ['sdturbo', 'sdxlturbo']:
+                # SD Turbo/SD-XL Turbo img2img generation
+                x_output = pipeline(
+                    image=frame_pil,
+                    strength=getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5),
+                    num_inference_steps=getattr(config, 'num_inference_steps', 1 if pipeline_type == 'sdturbo' else 2),
+                    guidance_scale=getattr(config, 'guidance_scale', 0.0)
+                )
+                output_image = x_output
+            else:
+                # SD 1.5 StreamDiffusion generation
+                x_output = pipeline(frame_pil)
+                output_image = postprocess_image(x_output, output_type="pil")[0]
+            gen_time = time.time() - gen_start
+            profile_times['generation'].append(gen_time)
             
+            # Profile display processing
+            display_start = time.time()
             # Convert back to BGR for display
             output_cv = cv2.cvtColor(np.array(output_image), cv2.COLOR_RGB2BGR)
             
@@ -152,25 +207,75 @@ def main():
                 # Simple side-by-side layout
                 combined = np.hstack([display_frame, output_display])
             
+            display_time = time.time() - display_start
+            profile_times['display'].append(display_time)
+            
             # Calculate FPS
             end_time = time.time()
             frame_time = end_time - start_time
             fps_counter.append(frame_time)
+            profile_times['total'].append(frame_time)
+            
             if len(fps_counter) > 30:  # Keep last 30 frames
                 fps_counter.pop(0)
             avg_fps = len(fps_counter) / sum(fps_counter) if fps_counter else 0
             
+            # Show profiling info every 30 frames
+            if frame_count % 30 == 0 and frame_count > 0:
+                recent_prep = profile_times['preprocessing'][-30:]
+                recent_gen = profile_times['generation'][-30:]
+                recent_display = profile_times['display'][-30:]
+                recent_total = profile_times['total'][-30:]
+                
+                print(f"\n📊 Performance Profile (last 30 frames):")
+                print(f"  Preprocessing: {sum(recent_prep)/len(recent_prep)*1000:.1f}ms avg")
+                print(f"  Generation:    {sum(recent_gen)/len(recent_gen)*1000:.1f}ms avg")
+                print(f"  Display:       {sum(recent_display)/len(recent_display)*1000:.1f}ms avg")
+                print(f"  Total:         {sum(recent_total)/len(recent_total)*1000:.1f}ms avg")
+                print(f"  FPS:           {avg_fps:.1f}")
+                if pipeline_type == 'sdturbo':
+                    print(f"  ⚡ SD Turbo single-step inference: {gen_time*1000:.1f}ms")
+                elif pipeline_type == 'sdxlturbo':
+                    print(f"  ⚡ SD-XL Turbo multi-step inference: {gen_time*1000:.1f}ms")
+                
+                # Check if tensor processing is being used
+                preprocessor = pipeline.preprocessors[0]
+                if preprocessor and hasattr(preprocessor, 'process_tensor'):
+                    print(f"  ✓ Tensor processing available for {type(preprocessor).__name__}")
+                else:
+                    print(f"  ⚠️  No tensor processing for {type(preprocessor).__name__}")
+            
             # Add info overlay
-            current_scale = pipeline.controlnet_scales[0]
-            info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
+            if pipeline_type in ['sdturbo', 'sdxlturbo']:
+                current_scale = pipeline.controlnet_configs[0]['conditioning_scale']
+                current_strength = getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5)
+                info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f} | Strength: {current_strength:.2f}"
+            else:
+                current_scale = pipeline.controlnet_scales[0]
+                info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
             
             cv2.putText(combined, info_text, (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             
-            # Add preprocessor info
-            preprocessor_text = f"Preprocessor: {preprocessor_name}"
-            cv2.putText(combined, preprocessor_text, (10, 60), 
+            # Add pipeline type info
+            pipeline_display_name = {
+                'sd1.5': 'SD 1.5',
+                'sdturbo': 'SD TURBO',
+                'sdxlturbo': 'SD-XL TURBO'
+            }.get(pipeline_type, pipeline_type.upper())
+            
+            pipeline_text = f"{pipeline_display_name} | Preprocessor: {preprocessor_name}"
+            if pipeline_type in ['sdturbo', 'sdxlturbo']:
+                steps = getattr(config, 'num_inference_steps', 1 if pipeline_type == 'sdturbo' else 2)
+                pipeline_text += f" | Steps: {steps}"
+            cv2.putText(combined, pipeline_text, (10, 60), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            
+            # Add timing info
+            if frame_count > 0:
+                timing_text = f"Prep: {prep_time*1000:.1f}ms | Gen: {gen_time*1000:.1f}ms"
+                cv2.putText(combined, timing_text, (10, 90), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
             
             # Add labels
             if show_preprocessed and control_cv is not None:
@@ -178,12 +283,14 @@ def main():
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                 cv2.putText(combined, f"{preprocessor_name}", (args.resolution//2 + 10, combined.shape[0] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                cv2.putText(combined, "Generated", (10, combined.shape[0] - args.resolution//2 - 10), 
+                label_text = f"{pipeline_display_name} Generated"
+                cv2.putText(combined, label_text, (10, combined.shape[0] - args.resolution//2 - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             else:
                 cv2.putText(combined, "Input", (10, combined.shape[0] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                cv2.putText(combined, "Generated", (args.resolution + 10, combined.shape[0] - 10), 
+                label_text = f"{pipeline_display_name} Generated"
+                cv2.putText(combined, label_text, (args.resolution + 10, combined.shape[0] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
             cv2.imshow(f'ControlNet StreamDiffusion - {preprocessor_name}', combined)
@@ -198,12 +305,12 @@ def main():
                 try:
                     timestamp = int(time.time())
                     preprocessor_safe = config.controlnets[0].preprocessor.replace("/", "_").replace("\\", "_")
-                    output_path = f"controlnet_{preprocessor_safe}_output_{timestamp}.png"
+                    output_path = f"controlnet_{pipeline_type}_{preprocessor_safe}_output_{timestamp}.png"
                     output_image.save(output_path)
                     print(f"💾 Saved output to {output_path}")
                     
                     if show_preprocessed and control_cv is not None:
-                        control_path = f"controlnet_{preprocessor_safe}_control_{timestamp}.png"
+                        control_path = f"controlnet_{pipeline_type}_{preprocessor_safe}_control_{timestamp}.png"
                         control_pil.save(control_path)
                         print(f"💾 Saved control image to {control_path}")
                         
@@ -214,20 +321,45 @@ def main():
                 show_preprocessed = not show_preprocessed
                 print(f"🖼️  Control image preview: {'ON' if show_preprocessed else 'OFF'}")
             elif key == ord('+'):
-                new_scale = min(2.0, pipeline.controlnet_scales[0] + 0.1)
-                pipeline.update_controlnet_scale(0, new_scale)
+                if pipeline_type in ['sdturbo', 'sdxlturbo']:
+                    current_scale = pipeline.controlnet_configs[0]['conditioning_scale']
+                    new_scale = min(2.0, current_scale + 0.1)
+                    pipeline.update_controlnet_scale(0, new_scale)
+                else:
+                    new_scale = min(2.0, pipeline.controlnet_scales[0] + 0.1)
+                    pipeline.update_controlnet_scale(0, new_scale)
                 print(f"📈 ControlNet scale: {new_scale:.2f}")
             elif key == ord('-'):
-                new_scale = max(0.0, pipeline.controlnet_scales[0] - 0.1)
-                pipeline.update_controlnet_scale(0, new_scale)
+                if pipeline_type in ['sdturbo', 'sdxlturbo']:
+                    current_scale = pipeline.controlnet_configs[0]['conditioning_scale']
+                    new_scale = max(0.0, current_scale - 0.1)
+                    pipeline.update_controlnet_scale(0, new_scale)
+                else:
+                    new_scale = max(0.0, pipeline.controlnet_scales[0] - 0.1)
+                    pipeline.update_controlnet_scale(0, new_scale)
                 print(f"📉 ControlNet scale: {new_scale:.2f}")
+            elif key == ord('>') and pipeline_type in ['sdturbo', 'sdxlturbo']:
+                # Increase strength (SD Turbo/SD-XL Turbo only)
+                current_strength = getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5)
+                new_strength = min(1.0, current_strength + 0.05)
+                config.strength = new_strength
+                print(f"💪⬆️ Strength: {new_strength:.2f}")
+            elif key == ord('<') and pipeline_type in ['sdturbo', 'sdxlturbo']:
+                # Decrease strength (SD Turbo/SD-XL Turbo only)
+                current_strength = getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5)
+                new_strength = max(0.1, current_strength - 0.05)
+                config.strength = new_strength
+                print(f"💪⬇️ Strength: {new_strength:.2f}")
             elif key == ord('p'):
                 # Interactive prompt change
                 print(f"\n🎨 Enter new prompt (or press Enter to keep current):")
                 try:
                     new_prompt = input(f"Current: {config.prompt}\nNew: ").strip()
                     if new_prompt:
-                        pipeline.stream.update_prompt(new_prompt)
+                        if pipeline_type in ['sdturbo', 'sdxlturbo']:
+                            pipeline.update_prompt(new_prompt)
+                        else:
+                            pipeline.stream.update_prompt(new_prompt)
                         config.prompt = new_prompt
                         print(f"✓ Updated prompt: {new_prompt}")
                 except:
@@ -243,6 +375,10 @@ def main():
         if fps_counter:
             avg_fps = len(fps_counter) / sum(fps_counter)
             print(f"📊 Average FPS: {avg_fps:.2f}")
+            if pipeline_type == 'sdturbo':
+                print(f"⚡ SD Turbo achieved real-time performance with single-step inference")
+            elif pipeline_type == 'sdxlturbo':
+                print(f"⚡ SD-XL Turbo achieved high-quality performance with multi-step inference")
 
 
 if __name__ == "__main__":

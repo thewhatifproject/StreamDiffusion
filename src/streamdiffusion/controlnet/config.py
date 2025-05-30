@@ -27,6 +27,13 @@ class ControlNetConfig:
     
     enabled: bool = True
     """Whether this ControlNet is enabled"""
+    
+    # SD Turbo specific parameters
+    control_guidance_start: float = 0.0
+    """Start of control guidance (0.0 to 1.0)"""
+    
+    control_guidance_end: float = 1.0
+    """End of control guidance (0.0 to 1.0)"""
 
 
 @dataclass
@@ -46,6 +53,10 @@ class StreamDiffusionControlNetConfig:
     device: str = "cuda"
     dtype: str = "float16"
     
+    # Pipeline type - determines which pipeline implementation to use
+    pipeline_type: str = "sd1.5"  # "sd1.5", "sdturbo", "sdxl"
+    """Pipeline type: 'sd1.5' for standard, 'sdturbo' for SD Turbo img2img"""
+    
     # ControlNet configurations
     controlnets: List[ControlNetConfig] = field(default_factory=list)
     """List of ControlNet configurations"""
@@ -55,6 +66,16 @@ class StreamDiffusionControlNetConfig:
     negative_prompt: str = ""
     guidance_scale: float = 1.2
     num_inference_steps: int = 50
+    
+    # SD Turbo specific parameters
+    strength: float = 0.8
+    """Denoising strength for img2img (0.1 to 1.0)"""
+    
+    use_taesd: bool = True
+    """Use Tiny AutoEncoder for faster decoding"""
+    
+    safety_checker: bool = False
+    """Enable safety checker"""
     
     # Advanced parameters
     use_lcm_lora: bool = True
@@ -116,10 +137,14 @@ def save_controlnet_config(config: StreamDiffusionControlNetConfig,
         'height': config.height,
         'device': config.device,
         'dtype': config.dtype,
+        'pipeline_type': config.pipeline_type,
         'prompt': config.prompt,
         'negative_prompt': config.negative_prompt,
         'guidance_scale': config.guidance_scale,
         'num_inference_steps': config.num_inference_steps,
+        'strength': config.strength,
+        'use_taesd': config.use_taesd,
+        'safety_checker': config.safety_checker,
         'use_lcm_lora': config.use_lcm_lora,
         'use_tiny_vae': config.use_tiny_vae,
         'acceleration': config.acceleration,
@@ -133,6 +158,8 @@ def save_controlnet_config(config: StreamDiffusionControlNetConfig,
                 'preprocessor_params': cn.preprocessor_params,
                 'control_image_path': cn.control_image_path,
                 'enabled': cn.enabled,
+                'control_guidance_start': cn.control_guidance_start,
+                'control_guidance_end': cn.control_guidance_end,
             }
             for cn in config.controlnets
         ]
@@ -160,9 +187,10 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Single Canny ControlNet example
+    # Single Canny ControlNet example (SD 1.5)
     canny_config = StreamDiffusionControlNetConfig(
-        model_id="stabilityai/sd-turbo",
+        model_id="runwayml/stable-diffusion-v1-5",
+        pipeline_type="sd1.5",
         prompt="a beautiful landscape, highly detailed",
         controlnets=[
             ControlNetConfig(
@@ -173,11 +201,55 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
             )
         ]
     )
-    save_controlnet_config(canny_config, output_dir / "canny_example.yaml")
+    save_controlnet_config(canny_config, output_dir / "canny_sd15_example.yaml")
     
-    # Multi-ControlNet example
-    multi_config = StreamDiffusionControlNetConfig(
+    # SD Turbo Canny ControlNet example
+    sdturbo_canny_config = StreamDiffusionControlNetConfig(
         model_id="stabilityai/sd-turbo",
+        pipeline_type="sdturbo",
+        prompt="a futuristic robot, highly detailed, cyberpunk style",
+        guidance_scale=0.0,  # SD Turbo typically uses no guidance
+        num_inference_steps=1,  # SD Turbo uses single step
+        strength=0.8,
+        controlnets=[
+            ControlNetConfig(
+                model_id="lllyasviel/control_v11p_sd15_canny",
+                conditioning_scale=0.8,
+                preprocessor="canny",
+                preprocessor_params={"low_threshold": 50, "high_threshold": 100},
+                control_guidance_start=0.0,
+                control_guidance_end=1.0
+            )
+        ]
+    )
+    save_controlnet_config(sdturbo_canny_config, output_dir / "sdturbo_canny_example.yaml")
+    
+    # SD Turbo Depth ControlNet example
+    sdturbo_depth_config = StreamDiffusionControlNetConfig(
+        model_id="stabilityai/sd-turbo",
+        pipeline_type="sdturbo",
+        prompt="a modern living room with sleek furniture",
+        guidance_scale=0.0,
+        num_inference_steps=1,
+        strength=0.75,
+        use_taesd=True,
+        controlnets=[
+            ControlNetConfig(
+                model_id="lllyasviel/control_v11f1p_sd15_depth",
+                conditioning_scale=0.9,
+                preprocessor="depth",
+                preprocessor_params={"detect_resolution": 384, "image_resolution": 512},
+                control_guidance_start=0.0,
+                control_guidance_end=0.8  # End guidance early for more artistic freedom
+            )
+        ]
+    )
+    save_controlnet_config(sdturbo_depth_config, output_dir / "sdturbo_depth_example.yaml")
+    
+    # Multi-ControlNet example (SD 1.5)
+    multi_config = StreamDiffusionControlNetConfig(
+        model_id="runwayml/stable-diffusion-v1-5",
+        pipeline_type="sd1.5",
         prompt="a person standing in a room, photorealistic",
         controlnets=[
             ControlNetConfig(
@@ -192,22 +264,11 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
             )
         ]
     )
-    save_controlnet_config(multi_config, output_dir / "multi_controlnet_example.yaml")
+    save_controlnet_config(multi_config, output_dir / "multi_controlnet_sd15_example.yaml")
     
-    # Depth-based ControlNet example
-    depth_config = StreamDiffusionControlNetConfig(
-        model_id="stabilityai/sd-turbo",
-        prompt="a futuristic cityscape, cyberpunk style",
-        guidance_scale=1.5,
-        controlnets=[
-            ControlNetConfig(
-                model_id="lllyasviel/control_v11f1p_sd15_depth",
-                conditioning_scale=1.2,
-                preprocessor="depth",
-                preprocessor_params={"detect_resolution": 512, "image_resolution": 512}
-            )
-        ]
-    )
-    save_controlnet_config(depth_config, output_dir / "depth_example.yaml")
-    
-    print(f"Example configurations saved to {output_dir}") 
+    print(f"Example configurations saved to {output_dir}")
+    print("Available configurations:")
+    print("  - canny_sd15_example.yaml: SD 1.5 with Canny ControlNet")
+    print("  - sdturbo_canny_example.yaml: SD Turbo with Canny ControlNet")
+    print("  - sdturbo_depth_example.yaml: SD Turbo with Depth ControlNet")
+    print("  - multi_controlnet_sd15_example.yaml: SD 1.5 with multiple ControlNets") 
