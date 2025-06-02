@@ -1,6 +1,6 @@
 model_id: "stabilityai/sd-turbo"
 pipeline_type: "sdturbo"
-t_index_list: [32]
+t_index_list: [32]  # Controls denoising strength - lower values = less denoising, higher = more denoising
 width: 512
 height: 512
 device: "cuda"
@@ -11,13 +11,14 @@ prompt: "a beautiful artwork, highly detailed, masterpiece"
 negative_prompt: "blurry, low quality, distorted"
 guidance_scale: 0.0  # SD Turbo typically uses no guidance
 num_inference_steps: 1  # SD Turbo single-step inference
-strength: 0.8  # img2img denoising strength
+# Note: strength parameter removed - use t_index_list above to control denoising amount
 
 # SD Turbo optimizations
 use_taesd: true  # Use Tiny AutoEncoder for faster decoding
 safety_checker: false
 
 # Advanced parameters
+pipeline_type: "sdturbo"
 use_lcm_lora: false  # SD Turbo already has LCM built-in
 use_tiny_vae: true
 acceleration: "none"  # Can be "tensorrt" for additional speed

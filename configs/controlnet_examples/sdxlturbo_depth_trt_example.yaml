@@ -1,6 +1,6 @@
 model_id: "C:\\_dev\\comfy\\ComfyUI\\models\\checkpoints\\sd_xl_turbo_1.0_fp16.safetensors"
 pipeline_type: "sdxlturbo"
-t_index_list: [0,16,32]
+t_index_list: [0]
 width: 1024
 height: 1024
 device: "cuda"
