@@ -219,6 +219,7 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
         model_id="stabilityai/sd-turbo",
         pipeline_type="sdturbo",
         model_type="SD Turbo",
+        t_index_list=[32, 45],  # Controls denoising strength - lower values = less denoising
         prompt="a futuristic robot, highly detailed, cyberpunk style",
         guidance_scale=0.0,  # SD Turbo typically uses no guidance
         num_inference_steps=1,  # SD Turbo uses single step
@@ -240,6 +241,7 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
         model_id="stabilityai/sd-turbo",
         pipeline_type="sdturbo",
         model_type="SD Turbo",
+        t_index_list=[32, 45],  # Controls denoising strength - lower values = less denoising
         prompt="a modern living room with sleek furniture",
         guidance_scale=0.0,
         num_inference_steps=1,

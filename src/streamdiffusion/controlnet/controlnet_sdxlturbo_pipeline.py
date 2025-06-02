@@ -234,7 +234,6 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
 
     def __call__(self, 
                  image: Union[str, Image.Image, np.ndarray, torch.Tensor] = None,
-                 strength: float = None,
                  num_inference_steps: int = None,
                  guidance_scale: float = None,
                  **kwargs) -> Image.Image:
@@ -243,7 +242,6 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
         
         Args:
             image: Input image for img2img
-            strength: Ignored (StreamDiffusion doesn't use this)
             num_inference_steps: Ignored (StreamDiffusion doesn't use this)
             guidance_scale: Ignored (StreamDiffusion doesn't use this)
             **kwargs: Additional arguments
