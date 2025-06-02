@@ -152,19 +152,10 @@ def main():
             gen_start = time.time()
             
             # Generate image - consistent calling for all pipeline types
-            # Control image was already updated via update_control_image_efficient above
-            if hasattr(config, 'strength') and config.strength < 1.0:
-                # Use img2img mode (pass input image for blending)
-                x_output = pipeline(frame_pil)
-            else:
-                # Use txt2img mode (pure ControlNet conditioning)
-                x_output = pipeline()
+            x_output = pipeline(frame_pil)
             
-            # Handle output format consistently
-            if hasattr(x_output, 'shape'):  # Tensor output (SD 1.5)
-                output_image = postprocess_image(x_output, output_type="pil")[0]
-            else:  # PIL Image output (SD Turbo/SDXL - if they had custom __call__)
-                output_image = x_output
+           
+            output_image = postprocess_image(x_output, output_type="pil")[0]
                 
             gen_time = time.time() - gen_start
             profile_times['generation'].append(gen_time)
