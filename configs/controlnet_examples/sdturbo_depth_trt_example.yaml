@@ -12,6 +12,7 @@ guidance_scale: 1.1
 num_inference_steps: 50
 
 # Advanced parameters
+pipeline_type: "sdturbo"
 use_lcm_lora: false
 use_tiny_vae: true
 acceleration: "xformers"

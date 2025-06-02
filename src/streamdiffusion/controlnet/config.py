@@ -54,8 +54,12 @@ class StreamDiffusionControlNetConfig:
     dtype: str = "float16"
     
     # Pipeline type - determines which pipeline implementation to use
-    pipeline_type: str = "sd1.5"  # "sd1.5", "sdturbo", "sdxl"
-    """Pipeline type: 'sd1.5' for standard, 'sdturbo' for SD Turbo img2img"""
+    pipeline_type: str = "sd1.5"  # "sd1.5", "sdturbo", "sdxlturbo"
+    """Pipeline type: 'sd1.5' for SD1.5, 'sdturbo' for SD Turbo, 'sdxlturbo' for SD-XL Turbo"""
+    
+    # Model type - display name passed to pipeline classes for logging
+    model_type: Optional[str] = None
+    """Model type for logging (e.g., 'SD1.5', 'SD Turbo', 'SDXL Turbo'). Auto-determined from pipeline_type if not set."""
     
     # ControlNet configurations
     controlnets: List[ControlNetConfig] = field(default_factory=list)
@@ -66,10 +70,6 @@ class StreamDiffusionControlNetConfig:
     negative_prompt: str = ""
     guidance_scale: float = 1.2
     num_inference_steps: int = 50
-    
-    # SD Turbo specific parameters
-    strength: float = 0.8
-    """Denoising strength for img2img (0.1 to 1.0)"""
     
     use_taesd: bool = True
     """Use Tiny AutoEncoder for faster decoding"""
@@ -83,6 +83,16 @@ class StreamDiffusionControlNetConfig:
     acceleration: str = "tensorrt"
     cfg_type: str = "self"
     seed: int = 2
+    
+    def __post_init__(self):
+        """Auto-determine model_type from pipeline_type if not explicitly set"""
+        if self.model_type is None:
+            pipeline_to_model_type = {
+                "sd1.5": "SD1.5",
+                "sdturbo": "SD Turbo", 
+                "sdxlturbo": "SDXL Turbo"
+            }
+            self.model_type = pipeline_to_model_type.get(self.pipeline_type, "Unknown")
 
 
 def load_controlnet_config(config_path: Union[str, Path]) -> StreamDiffusionControlNetConfig:
@@ -138,11 +148,11 @@ def save_controlnet_config(config: StreamDiffusionControlNetConfig,
         'device': config.device,
         'dtype': config.dtype,
         'pipeline_type': config.pipeline_type,
+        'model_type': config.model_type,
         'prompt': config.prompt,
         'negative_prompt': config.negative_prompt,
         'guidance_scale': config.guidance_scale,
         'num_inference_steps': config.num_inference_steps,
-        'strength': config.strength,
         'use_taesd': config.use_taesd,
         'safety_checker': config.safety_checker,
         'use_lcm_lora': config.use_lcm_lora,
@@ -191,6 +201,7 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
     canny_config = StreamDiffusionControlNetConfig(
         model_id="runwayml/stable-diffusion-v1-5",
         pipeline_type="sd1.5",
+        model_type="SD1.5",
         prompt="a beautiful landscape, highly detailed",
         controlnets=[
             ControlNetConfig(
@@ -207,10 +218,10 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
     sdturbo_canny_config = StreamDiffusionControlNetConfig(
         model_id="stabilityai/sd-turbo",
         pipeline_type="sdturbo",
+        model_type="SD Turbo",
         prompt="a futuristic robot, highly detailed, cyberpunk style",
         guidance_scale=0.0,  # SD Turbo typically uses no guidance
         num_inference_steps=1,  # SD Turbo uses single step
-        strength=0.8,
         controlnets=[
             ControlNetConfig(
                 model_id="lllyasviel/control_v11p_sd15_canny",
@@ -228,10 +239,10 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
     sdturbo_depth_config = StreamDiffusionControlNetConfig(
         model_id="stabilityai/sd-turbo",
         pipeline_type="sdturbo",
+        model_type="SD Turbo",
         prompt="a modern living room with sleek furniture",
         guidance_scale=0.0,
         num_inference_steps=1,
-        strength=0.75,
         use_taesd=True,
         controlnets=[
             ControlNetConfig(
@@ -250,6 +261,7 @@ def create_example_configs(output_dir: Union[str, Path]) -> None:
     multi_config = StreamDiffusionControlNetConfig(
         model_id="runwayml/stable-diffusion-v1-5",
         pipeline_type="sd1.5",
+        model_type="SD1.5",
         prompt="a person standing in a room, photorealistic",
         controlnets=[
             ControlNetConfig(

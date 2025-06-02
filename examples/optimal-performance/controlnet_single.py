@@ -12,7 +12,7 @@ import fire
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from utils.viewer import receive_images
-from src.streamdiffusion.controlnet import SDTurboControlNetPipeline, ControlNetConfig, StreamDiffusionControlNetConfig, create_sdturbo_controlnet_pipeline
+from src.streamdiffusion.controlnet import ControlNetConfig, StreamDiffusionControlNetConfig, create_sdturbo_controlnet_pipeline
 
 
 def dummy_control_image_generator():

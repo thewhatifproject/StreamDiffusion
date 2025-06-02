@@ -46,8 +46,6 @@ def main():
                        help="Override prompt from config")
     parser.add_argument("--controlnet-scale", type=float,
                        help="Override ControlNet conditioning scale from config")
-    parser.add_argument("--strength", type=float,
-                       help="Override img2img strength from config (SD Turbo/SD-XL Turbo)")
     parser.add_argument("--show-preprocessed", action="store_true",
                        help="Show the preprocessed control image in a separate window")
     parser.add_argument("--resolution", type=int, default=None,
@@ -79,8 +77,6 @@ def main():
         config.prompt = args.prompt
     if args.controlnet_scale is not None:
         config.controlnets[0].conditioning_scale = args.controlnet_scale
-    if args.strength is not None and hasattr(config, 'strength'):
-        config.strength = args.strength
     
     # Update resolution in config
     config.width = args.resolution
@@ -106,8 +102,6 @@ def main():
     print("✓ Camera opened successfully")
     print(f"📝 Prompt: {config.prompt}")
     print(f"🎛️  ControlNet Scale: {config.controlnets[0].conditioning_scale}")
-    if hasattr(config, 'strength'):
-        print(f"💪 Strength: {config.strength} (img2img)")
     if hasattr(config, 'num_inference_steps'):
         print(f"⚡ Steps: {config.num_inference_steps}")
     print(f"📏 Resolution: {args.resolution}x{args.resolution}")
@@ -118,9 +112,6 @@ def main():
     print("  - Press 'c' to toggle control image preview")
     print("  - Press '+' to increase ControlNet scale")
     print("  - Press '-' to decrease ControlNet scale")
-    if pipeline_type in ['sdturbo', 'sdxlturbo']:
-        print("  - Press '>' to increase strength")
-        print("  - Press '<' to decrease strength")
     print("  - Press 'p' to change prompt interactively")
     
     frame_count = 0
@@ -159,19 +150,22 @@ def main():
             
             # Profile generation
             gen_start = time.time()
-            if pipeline_type in ['sdturbo', 'sdxlturbo']:
-                # SD Turbo/SD-XL Turbo img2img generation
-                x_output = pipeline(
-                    image=frame_pil,
-                    strength=getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5),
-                    num_inference_steps=getattr(config, 'num_inference_steps', 1 if pipeline_type == 'sdturbo' else 2),
-                    guidance_scale=getattr(config, 'guidance_scale', 0.0)
-                )
-                output_image = x_output
-            else:
-                # SD 1.5 StreamDiffusion generation
+            
+            # Generate image - consistent calling for all pipeline types
+            # Control image was already updated via update_control_image_efficient above
+            if hasattr(config, 'strength') and config.strength < 1.0:
+                # Use img2img mode (pass input image for blending)
                 x_output = pipeline(frame_pil)
+            else:
+                # Use txt2img mode (pure ControlNet conditioning)
+                x_output = pipeline()
+            
+            # Handle output format consistently
+            if hasattr(x_output, 'shape'):  # Tensor output (SD 1.5)
                 output_image = postprocess_image(x_output, output_type="pil")[0]
+            else:  # PIL Image output (SD Turbo/SDXL - if they had custom __call__)
+                output_image = x_output
+                
             gen_time = time.time() - gen_start
             profile_times['generation'].append(gen_time)
             
@@ -246,13 +240,8 @@ def main():
                     print(f"  ⚠️  No tensor processing for {type(preprocessor).__name__}")
             
             # Add info overlay
-            if pipeline_type in ['sdturbo', 'sdxlturbo']:
-                current_scale = pipeline.controlnet_configs[0]['conditioning_scale']
-                current_strength = getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5)
-                info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f} | Strength: {current_strength:.2f}"
-            else:
-                current_scale = pipeline.controlnet_scales[0]
-                info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
+            current_scale = pipeline.controlnet_scales[0]
+            info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
             
             cv2.putText(combined, info_text, (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
@@ -321,45 +310,23 @@ def main():
                 show_preprocessed = not show_preprocessed
                 print(f"🖼️  Control image preview: {'ON' if show_preprocessed else 'OFF'}")
             elif key == ord('+'):
-                if pipeline_type in ['sdturbo', 'sdxlturbo']:
-                    current_scale = pipeline.controlnet_configs[0]['conditioning_scale']
-                    new_scale = min(2.0, current_scale + 0.1)
-                    pipeline.update_controlnet_scale(0, new_scale)
-                else:
-                    new_scale = min(2.0, pipeline.controlnet_scales[0] + 0.1)
-                    pipeline.update_controlnet_scale(0, new_scale)
+                # Increase ControlNet scale
+                new_scale = min(2.0, pipeline.controlnet_scales[0] + 0.1)
+                pipeline.update_controlnet_scale(0, new_scale)
                 print(f"📈 ControlNet scale: {new_scale:.2f}")
             elif key == ord('-'):
-                if pipeline_type in ['sdturbo', 'sdxlturbo']:
-                    current_scale = pipeline.controlnet_configs[0]['conditioning_scale']
-                    new_scale = max(0.0, current_scale - 0.1)
-                    pipeline.update_controlnet_scale(0, new_scale)
-                else:
-                    new_scale = max(0.0, pipeline.controlnet_scales[0] - 0.1)
-                    pipeline.update_controlnet_scale(0, new_scale)
+                # Decrease ControlNet scale
+                new_scale = max(0.0, pipeline.controlnet_scales[0] - 0.1)
+                pipeline.update_controlnet_scale(0, new_scale)
                 print(f"📉 ControlNet scale: {new_scale:.2f}")
-            elif key == ord('>') and pipeline_type in ['sdturbo', 'sdxlturbo']:
-                # Increase strength (SD Turbo/SD-XL Turbo only)
-                current_strength = getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5)
-                new_strength = min(1.0, current_strength + 0.05)
-                config.strength = new_strength
-                print(f"💪⬆️ Strength: {new_strength:.2f}")
-            elif key == ord('<') and pipeline_type in ['sdturbo', 'sdxlturbo']:
-                # Decrease strength (SD Turbo/SD-XL Turbo only)
-                current_strength = getattr(config, 'strength', 0.8 if pipeline_type == 'sdturbo' else 0.5)
-                new_strength = max(0.1, current_strength - 0.05)
-                config.strength = new_strength
-                print(f"💪⬇️ Strength: {new_strength:.2f}")
             elif key == ord('p'):
                 # Interactive prompt change
                 print(f"\n🎨 Enter new prompt (or press Enter to keep current):")
                 try:
                     new_prompt = input(f"Current: {config.prompt}\nNew: ").strip()
                     if new_prompt:
-                        if pipeline_type in ['sdturbo', 'sdxlturbo']:
-                            pipeline.update_prompt(new_prompt)
-                        else:
-                            pipeline.stream.update_prompt(new_prompt)
+                        # Update prompt via StreamDiffusion
+                        pipeline.stream.update_prompt(new_prompt)
                         config.prompt = new_prompt
                         print(f"✓ Updated prompt: {new_prompt}")
                 except:

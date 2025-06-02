@@ -35,6 +35,7 @@ class BaseControlNetPipeline:
         self.stream = stream_diffusion
         self.device = device
         self.dtype = dtype
+        self.model_type = getattr(self, 'model_type', 'ControlNet')  # Default fallback
         
         # ControlNet storage
         self.controlnets: List[ControlNetModel] = []
@@ -69,12 +70,11 @@ class BaseControlNetPipeline:
             Index of the added ControlNet
         """
         if not controlnet_config.enabled:
-            print(f"ControlNet {controlnet_config.model_id} is disabled, skipping")
+            print(f"{self.model_type} {controlnet_config.model_id} is disabled, skipping")
             return -1
         
         # Load ControlNet model
-        model_type = self._get_model_type()
-        print(f"Loading {model_type} ControlNet: {controlnet_config.model_id}")
+        print(f"Loading {self.model_type} ControlNet: {controlnet_config.model_id}")
         controlnet = self._load_controlnet_model(controlnet_config.model_id)
         
         # Load preprocessor if specified
@@ -114,7 +114,7 @@ class BaseControlNetPipeline:
         if len(self.controlnets) == 1:
             self._patch_stream_diffusion()
         
-        print(f"Added {model_type} ControlNet {len(self.controlnets) - 1}: {controlnet_config.model_id}")
+        print(f"Added {self.model_type} ControlNet {len(self.controlnets) - 1}: {controlnet_config.model_id}")
         return len(self.controlnets) - 1
     
     def remove_controlnet(self, index: int) -> None:
@@ -134,9 +134,9 @@ class BaseControlNetPipeline:
             if len(self.controlnets) == 0:
                 self._unpatch_stream_diffusion()
             
-            print(f"Removed ControlNet {index}")
+            print(f"Removed {self.model_type} ControlNet {index}")
         else:
-            raise IndexError(f"ControlNet index {index} out of range")
+            raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
     
     def clear_controlnets(self) -> None:
         """Remove all ControlNets"""
@@ -146,7 +146,7 @@ class BaseControlNetPipeline:
         self.preprocessors.clear()
         
         self._unpatch_stream_diffusion()
-        print("Cleared all ControlNets")
+        print(f"Cleared all {self.model_type} ControlNets")
     
     def update_control_image(self, 
                            index: int, 
@@ -159,7 +159,7 @@ class BaseControlNetPipeline:
             control_image: New control image
         """
         if not (0 <= index < len(self.controlnets)):
-            raise IndexError(f"ControlNet index {index} out of range")
+            raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
         
         # Skip processing if scale is 0 (optimization)
         if self.controlnet_scales[index] == 0:
@@ -261,7 +261,7 @@ class BaseControlNetPipeline:
         if 0 <= index < len(self.controlnets):
             self.controlnet_scales[index] = scale
         else:
-            raise IndexError(f"ControlNet index {index} out of range")
+            raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
     
     def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
         """
@@ -339,8 +339,7 @@ class BaseControlNetPipeline:
             return controlnet
             
         except Exception as e:
-            model_type = self._get_model_type()
-            raise ValueError(f"Failed to load {model_type} ControlNet model '{model_id}': {e}")
+            raise ValueError(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
     
     def _prepare_control_image(self, 
                               control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
@@ -516,7 +515,7 @@ class BaseControlNetPipeline:
                     mid_block_res_sample += mid_sample
                     
             except Exception as e:
-                print(f"Warning: ControlNet {i} failed: {e}")
+                print(f"Warning: {self.model_type} ControlNet {i} failed: {e}")
                 continue
         
         return down_block_res_samples, mid_block_res_sample
@@ -627,8 +626,7 @@ class BaseControlNetPipeline:
         # Replace the method
         self.stream.unet_step = patched_unet_step
         self._is_patched = True
-        model_type = self._get_model_type()
-        print(f"Patched StreamDiffusion with {model_type} ControlNet support")
+        print(f"Patched StreamDiffusion with {self.model_type} ControlNet support")
     
     def _unpatch_stream_diffusion(self) -> None:
         """Restore original StreamDiffusion unet_step method"""
@@ -727,10 +725,6 @@ class BaseControlNetPipeline:
         return getattr(self.stream, name)
 
     # Abstract/hook methods for subclasses to override
-    def _get_model_type(self) -> str:
-        """Return the model type string for logging purposes"""
-        return "ControlNet"
-
     def _post_process_control_image(self, control_tensor: torch.Tensor) -> torch.Tensor:
         """
         Post-process control image tensor (hook for subclasses to add specific handling)

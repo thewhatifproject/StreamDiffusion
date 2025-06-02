@@ -19,9 +19,22 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
     using t_index_list for efficient real-time generation at high resolution.
     """
     
-    def _get_model_type(self) -> str:
-        """Return the model type string for logging purposes"""
-        return "SDXL Turbo"
+    def __init__(self, 
+                 stream_diffusion: StreamDiffusion,
+                 device: str = "cuda",
+                 dtype: torch.dtype = torch.float16,
+                 model_type: str = "SDXL Turbo"):
+        """
+        Initialize SDXL Turbo ControlNet pipeline
+        
+        Args:
+            stream_diffusion: Base StreamDiffusion instance
+            device: Device to run ControlNets on
+            dtype: Data type for ControlNet models
+            model_type: Type of model being used (e.g., "SDXL Turbo")
+        """
+        super().__init__(stream_diffusion, device, dtype)
+        self.model_type = model_type
 
     @property
     def controlnet_configs(self) -> List[Dict[str, Any]]:
@@ -210,7 +223,7 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
                 
         except Exception as e:
             print(f"Warning: Failed to set up SDXL embeddings: {e}")
-            # Create minimal fallback embeddings
+            # Create minimal embeddings
             batch_size = 2 if self.stream.guidance_scale > 1.0 else 1
             self.stream.add_text_embeds = torch.zeros((batch_size, 1280), dtype=self.stream.dtype, device=self.stream.device)
             
@@ -275,8 +288,11 @@ def create_sdxlturbo_controlnet_pipeline(config: StreamDiffusionControlNetConfig
     }
     dtype = dtype_map.get(config.dtype, torch.float16)
     
+    # Use model_type from config
+    model_type = config.model_type
+    
     # Load base pipeline
-    print(f"Loading SDXL Turbo base model: {config.model_id}")
+    print(f"Loading {model_type} base model: {config.model_id}")
     
     # Check if it's a local file path
     model_path = Path(config.model_id)
@@ -336,8 +352,8 @@ def create_sdxlturbo_controlnet_pipeline(config: StreamDiffusionControlNetConfig
     if config.acceleration == "xformers":
         pipe.enable_xformers_memory_efficient_attention()
     
-    # Create ControlNet pipeline
-    controlnet_pipeline = SDXLTurboControlNetPipeline(stream, config.device, dtype)
+    # Create ControlNet pipeline with model type from config
+    controlnet_pipeline = SDXLTurboControlNetPipeline(stream, config.device, dtype, model_type)
     
     # Add ControlNets
     for cn_config in config.controlnets:
