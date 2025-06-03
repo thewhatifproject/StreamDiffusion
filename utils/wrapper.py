@@ -2,7 +2,7 @@ import gc
 import os
 from pathlib import Path
 import traceback
-from typing import List, Literal, Optional, Union, Dict
+from typing import List, Literal, Optional, Union, Dict, Any
 
 import numpy as np
 import torch
@@ -47,6 +47,9 @@ class StreamDiffusionWrapper:
         seed: int = 2,
         use_safety_checker: bool = False,
         engine_dir: Optional[Union[str, Path]] = "engines",
+        # ControlNet options
+        use_controlnet: bool = False,
+        controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
     ):
         """
         Initializes the StreamDiffusionWrapper.
@@ -113,8 +116,15 @@ class StreamDiffusionWrapper:
             The seed, by default 2.
         use_safety_checker : bool, optional
             Whether to use safety checker or not, by default False.
+        use_controlnet : bool, optional
+            Whether to enable ControlNet support, by default False.
+        controlnet_config : Optional[Union[Dict[str, Any], List[Dict[str, Any]]]], optional
+            ControlNet configuration(s), by default None.
+            Can be a single config dict or list of config dicts for multiple ControlNets.
+            Each config should contain: model_id, preprocessor (optional), conditioning_scale, etc.
         """
         self.sd_turbo = "turbo" in model_id_or_path
+        self.use_controlnet = use_controlnet
 
         if mode == "txt2img":
             if cfg_type != "none":
@@ -163,6 +173,8 @@ class StreamDiffusionWrapper:
             cfg_type=cfg_type,
             seed=seed,
             engine_dir=engine_dir,
+            use_controlnet=use_controlnet,
+            controlnet_config=controlnet_config,
         )
 
         if device_ids is not None:
@@ -196,6 +208,10 @@ class StreamDiffusionWrapper:
             The delta multiplier of virtual residual noise,
             by default 1.0.
         """
+        print(f"🎯 StreamDiffusionWrapper.prepare() called with prompt: '{prompt}'")
+        print(f"📊 Self.stream type: {type(self.stream)}")
+        print(f"📊 Has ControlNet: {self.use_controlnet}")
+        
         self.stream.prepare(
             prompt,
             negative_prompt,
@@ -362,6 +378,8 @@ class StreamDiffusionWrapper:
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         seed: int = 2,
         engine_dir: Optional[Union[str, Path]] = "engines",
+        use_controlnet: bool = False,
+        controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
     ) -> StreamDiffusion:
         """
         Loads the model.
@@ -374,6 +392,7 @@ class StreamDiffusionWrapper:
         4. Enables acceleration if needed.
         5. Prepares the model for inference.
         6. Load the safety checker if needed.
+        7. Apply ControlNet patch if needed.
 
         Parameters
         ----------
@@ -406,22 +425,47 @@ class StreamDiffusionWrapper:
             You cannot use anything other than "none" for txt2img mode.
         seed : int, optional
             The seed, by default 2.
+        use_controlnet : bool, optional
+            Whether to apply ControlNet patch, by default False.
+        controlnet_config : Optional[Union[Dict[str, Any], List[Dict[str, Any]]]], optional
+            ControlNet configuration(s), by default None.
 
         Returns
         -------
         StreamDiffusion
-            The loaded model.
+            The loaded model (potentially wrapped with ControlNet pipeline).
         """
 
+        # Determine if this should be an SDXL pipeline from controlnet config
+        pipeline_type = self._get_pipeline_type_from_config(controlnet_config)
+        is_sdxl = pipeline_type == "sdxlturbo"
+        print(f"🔍 Pipeline type from config: {pipeline_type} -> {'SDXL' if is_sdxl else 'SD 1.5'} pipeline will be loaded")
+        
         try:  # Load from local directory
-            pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
-                model_id_or_path,
-            ).to(device=self.device, dtype=self.dtype)
+            if is_sdxl:
+                from diffusers import StableDiffusionXLPipeline
+                pipe = StableDiffusionXLPipeline.from_pretrained(
+                    model_id_or_path,
+                ).to(device=self.device, dtype=self.dtype)
+                print(f"✅ Loaded SDXL pipeline from {model_id_or_path}")
+            else:
+                pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
+                    model_id_or_path,
+                ).to(device=self.device, dtype=self.dtype)
+                print(f"✅ Loaded SD 1.5 pipeline from {model_id_or_path}")
 
         except ValueError:  # Load from huggingface
-            pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_single_file(
-                model_id_or_path,
-            ).to(device=self.device, dtype=self.dtype)
+            if is_sdxl:
+                from diffusers import StableDiffusionXLPipeline
+                pipe = StableDiffusionXLPipeline.from_single_file(
+                    model_id_or_path,
+                ).to(device=self.device, dtype=self.dtype)
+                print(f"✅ Loaded SDXL pipeline from single file {model_id_or_path}")
+            else:
+                pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_single_file(
+                    model_id_or_path,
+                ).to(device=self.device, dtype=self.dtype)
+                print(f"✅ Loaded SD 1.5 pipeline from single file {model_id_or_path}")
         except Exception:  # No model found
             traceback.print_exc()
             print("Model load has failed. Doesn't exist.")
@@ -460,9 +504,12 @@ class StreamDiffusionWrapper:
                     device=pipe.device, dtype=pipe.dtype
                 )
             else:
-                stream.vae = AutoencoderTiny.from_pretrained("madebyollin/taesd").to(
+                # Use TAESD XL for SDXL models, regular TAESD for SD 1.5
+                taesd_model = "madebyollin/taesdxl" if is_sdxl else "madebyollin/taesd"
+                stream.vae = AutoencoderTiny.from_pretrained(taesd_model).to(
                     device=pipe.device, dtype=pipe.dtype
                 )
+                print(f"Using Tiny VAE: {taesd_model}")
 
         try:
             if acceleration == "xformers":
@@ -660,4 +707,139 @@ class StreamDiffusionWrapper:
             )
             self.nsfw_fallback_img = Image.new("RGB", (512, 512), (0, 0, 0))
 
+        # Apply ControlNet patch if needed
+        if use_controlnet and controlnet_config:
+            stream = self._apply_controlnet_patch(stream, controlnet_config)
+
         return stream
+
+    def _apply_controlnet_patch(self, stream: StreamDiffusion, controlnet_config: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Any:
+        """
+        Apply ControlNet patch to StreamDiffusion based on pipeline_type
+        
+        Args:
+            stream: Base StreamDiffusion instance
+            controlnet_config: ControlNet configuration(s)
+            
+        Returns:
+            ControlNet-enabled pipeline (ControlNetPipeline or SDXLTurboControlNetPipeline)
+        """
+        # Extract pipeline_type from controlnet_config if it's in there
+        if isinstance(controlnet_config, list):
+            config_dict = controlnet_config[0] if controlnet_config else {}
+        else:
+            config_dict = controlnet_config
+            
+        pipeline_type = config_dict.get('pipeline_type', 'sd1.5')
+        
+        print(f"Applying ControlNet patch for {pipeline_type}")
+        
+        if pipeline_type == "sdxlturbo":
+            from streamdiffusion.controlnet.controlnet_sdxlturbo_pipeline import SDXLTurboControlNetPipeline
+            controlnet_pipeline = SDXLTurboControlNetPipeline(stream, self.device, self.dtype)
+        elif pipeline_type in ["sd1.5", "sdturbo"]:
+            from streamdiffusion.controlnet.controlnet_pipeline import ControlNetPipeline
+            controlnet_pipeline = ControlNetPipeline(stream, self.device, self.dtype)
+        else:
+            raise ValueError(f"Unsupported pipeline_type: {pipeline_type}")
+        
+        # Setup ControlNets from config
+        if not isinstance(controlnet_config, list):
+            controlnet_config = [controlnet_config]
+        
+        for config in controlnet_config:
+            model_id = config.get('model_id')
+            if not model_id:
+                print("⚠️  Skipping ControlNet config without model_id")
+                continue
+                
+            preprocessor = config.get('preprocessor', None)
+            conditioning_scale = config.get('conditioning_scale', 1.0)
+            enabled = config.get('enabled', True)
+            preprocessor_params = config.get('preprocessor_params', None)
+            
+            try:
+                # Create ControlNetConfig object
+                from streamdiffusion.controlnet.config import ControlNetConfig
+                cn_config = ControlNetConfig(
+                    model_id=model_id,
+                    preprocessor=preprocessor,
+                    conditioning_scale=conditioning_scale,
+                    enabled=enabled,
+                    preprocessor_params=preprocessor_params or {}
+                )
+                
+                controlnet_pipeline.add_controlnet(cn_config)
+                print(f"✓ Added ControlNet: {model_id}")
+            except Exception as e:
+                print(f"❌ Failed to add ControlNet {model_id}: {e}")
+        
+        return controlnet_pipeline
+
+    # ControlNet convenience methods
+    def add_controlnet(self, 
+                      model_id: str,
+                      preprocessor: Optional[str] = None,
+                      conditioning_scale: float = 1.0,
+                      control_image: Optional[Union[str, Image.Image, np.ndarray, torch.Tensor]] = None,
+                      enabled: bool = True,
+                      preprocessor_params: Optional[Dict[str, Any]] = None) -> int:
+        """Forward add_controlnet call to the underlying ControlNet pipeline"""
+        if not self.use_controlnet:
+            raise RuntimeError("ControlNet support not enabled. Set use_controlnet=True in constructor.")
+        
+        if hasattr(self.stream, 'add_controlnet'):
+            from streamdiffusion.controlnet.config import ControlNetConfig
+            cn_config = ControlNetConfig(
+                model_id=model_id,
+                preprocessor=preprocessor,
+                conditioning_scale=conditioning_scale,
+                enabled=enabled,
+                preprocessor_params=preprocessor_params or {}
+            )
+            return self.stream.add_controlnet(cn_config, control_image)
+        else:
+            raise RuntimeError("ControlNet functionality not available on this pipeline")
+
+    def update_control_image(self, 
+                           index: int, 
+                           control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> None:
+        """Forward update_control_image call to the underlying ControlNet pipeline"""
+        if self.use_controlnet and hasattr(self.stream, 'update_control_image'):
+            self.stream.update_control_image(index, control_image)
+
+    def update_control_image_efficient(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> None:
+        """Forward update_control_image_efficient call to the underlying ControlNet pipeline"""
+        if self.use_controlnet and hasattr(self.stream, 'update_control_image_efficient'):
+            self.stream.update_control_image_efficient(control_image)
+
+    def update_controlnet_scale(self, index: int, scale: float) -> None:
+        """Forward update_controlnet_scale call to the underlying ControlNet pipeline"""
+        if self.use_controlnet and hasattr(self.stream, 'update_controlnet_scale'):
+            self.stream.update_controlnet_scale(index, scale)
+
+    def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
+        """Forward get_last_processed_image call to the underlying ControlNet pipeline"""
+        if self.use_controlnet and hasattr(self.stream, 'get_last_processed_image'):
+            return self.stream.get_last_processed_image(index)
+        return None
+
+    def _get_pipeline_type_from_config(self, controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]) -> str:
+        """
+        Extracts the pipeline_type from controlnet_config if it exists.
+        
+        Args:
+            controlnet_config: ControlNet configuration(s)
+            
+        Returns:
+            pipeline_type: Extracted pipeline_type or 'sd1.5' as default
+        """
+        if controlnet_config is None:
+            return 'sd1.5'  # Default to SD 1.5
+            
+        if isinstance(controlnet_config, list):
+            config_dict = controlnet_config[0] if controlnet_config else {}
+        else:
+            config_dict = controlnet_config
+            
+        return config_dict.get('pipeline_type', 'sd1.5')  # Default to SD 1.5 if not specified

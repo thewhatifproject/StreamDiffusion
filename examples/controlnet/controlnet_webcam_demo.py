@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-General Purpose ControlNet Webcam Demo for StreamDiffusion
+ControlNet Webcam Demo for StreamDiffusion
 
-This script demonstrates real-time image generation using webcam input with any ControlNet configuration.
-It loads a ControlNet config file and applies the specified preprocessing and conditioning to the webcam feed.
+This script demonstrates real-time image generation using webcam input with ControlNet.
+It uses the StreamDiffusionWrapper with ControlNet support for proper separation of concerns.
 Supports SD 1.5, SD Turbo, and SD-XL Turbo pipelines based on configuration.
 """
 
@@ -15,26 +15,35 @@ import argparse
 from pathlib import Path
 import sys
 import time
-
-# Add StreamDiffusion to path
-sys.path.append(str(Path(__file__).parent.parent / "src"))
-
-from streamdiffusion.controlnet import (
-    load_controlnet_config, 
-    create_controlnet_pipeline_auto,
-    ControlNetConfig,
-    StreamDiffusionControlNetConfig
-)
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+from utils.wrapper import StreamDiffusionWrapper
+from streamdiffusion.controlnet import load_controlnet_config
 from streamdiffusion.image_utils import postprocess_image
+# Add StreamDiffusion to path
+# sys.path.append(str(Path(__file__).parent.parent))
 
+
+def get_current_controlnet_scale(wrapper, index=0):
+    """Safely get current ControlNet scale"""
+    if not wrapper.use_controlnet:
+        return 0.0
+    if hasattr(wrapper.stream, 'controlnet_scales') and len(wrapper.stream.controlnet_scales) > index:
+        return wrapper.stream.controlnet_scales[index]
+    return 0.0
+
+def has_controlnets(wrapper):
+    """Check if wrapper has active ControlNets"""
+    if not wrapper.use_controlnet:
+        return False
+    return hasattr(wrapper.stream, 'controlnets') and len(getattr(wrapper.stream, 'controlnets', [])) > 0
 
 def main():
-    parser = argparse.ArgumentParser(description="General Purpose ControlNet Webcam Demo")
+    parser = argparse.ArgumentParser(description="ControlNet Webcam Demo")
     
     # Get the script directory to make paths relative to it
     script_dir = Path(__file__).parent
-    default_config = script_dir.parent / "configs" / "controlnet_examples" / "depth_trt_example.yaml"
-    
+    default_config = script_dir.parent.parent / "configs" / "controlnet_examples" / "sdturbo_depth_trt_example.yaml"
     parser.add_argument("--config", type=str, 
                        default=str(default_config),
                        help="Path to ControlNet configuration file")
@@ -71,10 +80,8 @@ def main():
             args.resolution = 512   # SD 1.5 and SD Turbo default
     
     # Override parameters if provided
-    if args.model:
-        config.model_id = args.model
-    if args.prompt:
-        config.prompt = args.prompt
+    model_id = args.model if args.model else config.model_id
+    prompt = args.prompt if args.prompt else config.prompt
     if args.controlnet_scale is not None:
         config.controlnets[0].conditioning_scale = args.controlnet_scale
     
@@ -82,12 +89,72 @@ def main():
     config.width = args.resolution
     config.height = args.resolution
     
-    # Create ControlNet pipeline (auto-selects SD 1.5, SD Turbo, or SD-XL Turbo)
-    print("🔄 Creating ControlNet pipeline...")
-    print(f"📝 Using ControlNet: {config.controlnets[0].model_id}")
-    print(f"🔧 Preprocessor: {config.controlnets[0].preprocessor}")
-    pipeline = create_controlnet_pipeline_auto(config)
+    # Determine t_index_list and other parameters based on pipeline type
+    if pipeline_type == 'sdturbo':
+        t_index_list = [0]  # Single step for SD Turbo
+        cfg_type = "none"
+        use_lcm_lora = False
+        use_tiny_vae = True
+    elif pipeline_type == 'sdxlturbo':
+        t_index_list = [0, 16]  # Two steps for SD-XL Turbo  
+        cfg_type = "none"
+        use_lcm_lora = False
+        use_tiny_vae = False
+    else:  # sd1.5
+        t_index_list = getattr(config, 't_index_list', [32, 45])
+        cfg_type = getattr(config, 'cfg_type', 'self')
+        use_lcm_lora = getattr(config, 'use_lcm_lora', True)
+        use_tiny_vae = getattr(config, 'use_tiny_vae', True)
+    
+    # Create ControlNet configuration for wrapper
+    controlnet_config = {
+        'model_id': config.controlnets[0].model_id,
+        'preprocessor': config.controlnets[0].preprocessor,
+        'conditioning_scale': config.controlnets[0].conditioning_scale,
+        'enabled': config.controlnets[0].enabled,
+        'preprocessor_params': getattr(config.controlnets[0], 'preprocessor_params', None),
+        'pipeline_type': pipeline_type,  # Add pipeline_type for patching
+    }
+    
+    print("🔄 Creating StreamDiffusion pipeline with ControlNet...")
+    print(f"📝 Using ControlNet: {controlnet_config['model_id']}")
+    print(f"🔧 Preprocessor: {controlnet_config['preprocessor']}")
+    
+    # Create StreamDiffusionWrapper with ControlNet support
+    wrapper = StreamDiffusionWrapper(
+        model_id_or_path=model_id,
+        t_index_list=t_index_list,
+        mode="img2img",
+        output_type="pil",
+        device="cuda",
+        dtype=torch.float16,
+        frame_buffer_size=1,
+        width=args.resolution,
+        height=args.resolution,
+        warmup=10,
+        acceleration=getattr(config, 'acceleration', 'none'),
+        do_add_noise=True,
+        use_lcm_lora=use_lcm_lora,
+        use_tiny_vae=use_tiny_vae,
+        use_denoising_batch=True,
+        cfg_type=cfg_type,
+        seed=getattr(config, 'seed', 2),
+        use_safety_checker=False,
+        # ControlNet options
+        use_controlnet=True,
+        controlnet_config=controlnet_config,
+    )
+    
     print("✓ Pipeline created successfully")
+    
+    # Prepare the model with prompt
+    wrapper.prepare(
+        prompt=prompt,
+        negative_prompt=getattr(config, 'negative_prompt', ''),
+        num_inference_steps=getattr(config, 'num_inference_steps', 50),
+        guidance_scale=getattr(config, 'guidance_scale', 1.2 if cfg_type != "none" else 1.0),
+        delta=getattr(config, 'delta', 1.0),
+    )
     
     # Setup webcam
     cap = cv2.VideoCapture(args.camera)
@@ -100,10 +167,9 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.resolution)
     
     print("✓ Camera opened successfully")
-    print(f"📝 Prompt: {config.prompt}")
-    print(f"🎛️  ControlNet Scale: {config.controlnets[0].conditioning_scale}")
-    if hasattr(config, 'num_inference_steps'):
-        print(f"⚡ Steps: {config.num_inference_steps}")
+    print(f"📝 Prompt: {prompt}")
+    print(f"🎛️  ControlNet Scale: {controlnet_config['conditioning_scale']}")
+    print(f"⚡ Steps: {len(t_index_list)}")
     print(f"📏 Resolution: {args.resolution}x{args.resolution}")
     
     print("\n🎮 Controls:")
@@ -119,7 +185,7 @@ def main():
     fps_counter = []
     
     # Get preprocessor name for display
-    preprocessor_name = config.controlnets[0].preprocessor.replace("_", " ").title()
+    preprocessor_name = controlnet_config['preprocessor'].replace("_", " ").title()
     
     # Profiling variables
     profile_times = {
@@ -144,19 +210,16 @@ def main():
             
             # Profile preprocessing
             prep_start = time.time()
-            pipeline.update_control_image_efficient(frame_pil)
+            wrapper.update_control_image_efficient(frame_pil)
             prep_time = time.time() - prep_start
             profile_times['preprocessing'].append(prep_time)
             
             # Profile generation
             gen_start = time.time()
             
-            # Generate image - consistent calling for all pipeline types
-            x_output = pipeline(frame_pil)
+            # Generate image using wrapper
+            output_image = wrapper(frame_pil)
             
-           
-            output_image = postprocess_image(x_output, output_type="pil")[0]
-                
             gen_time = time.time() - gen_start
             profile_times['generation'].append(gen_time)
             
@@ -168,12 +231,10 @@ def main():
             # Get preprocessed control image from cache (avoid reprocessing)
             control_cv = None
             control_pil = None
-            if show_preprocessed and len(pipeline.preprocessors) > 0:
-                preprocessor = pipeline.preprocessors[0]
-                if preprocessor is not None:
-                    control_pil = pipeline.get_last_processed_image(0)
-                    if control_pil is not None:
-                        control_cv = cv2.cvtColor(np.array(control_pil), cv2.COLOR_RGB2BGR)
+            if show_preprocessed:
+                control_pil = wrapper.get_last_processed_image(0)
+                if control_pil is not None:
+                    control_cv = cv2.cvtColor(np.array(control_pil), cv2.COLOR_RGB2BGR)
             
             # Create display layout
             display_frame = cv2.resize(frame, (args.resolution, args.resolution))
@@ -222,16 +283,9 @@ def main():
                     print(f"  ⚡ SD Turbo single-step inference: {gen_time*1000:.1f}ms")
                 elif pipeline_type == 'sdxlturbo':
                     print(f"  ⚡ SD-XL Turbo multi-step inference: {gen_time*1000:.1f}ms")
-                
-                # Check if tensor processing is being used
-                preprocessor = pipeline.preprocessors[0]
-                if preprocessor and hasattr(preprocessor, 'process_tensor'):
-                    print(f"  ✓ Tensor processing available for {type(preprocessor).__name__}")
-                else:
-                    print(f"  ⚠️  No tensor processing for {type(preprocessor).__name__}")
             
             # Add info overlay
-            current_scale = pipeline.controlnet_scales[0]
+            current_scale = get_current_controlnet_scale(wrapper)
             info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
             
             cv2.putText(combined, info_text, (10, 30), 
@@ -246,7 +300,7 @@ def main():
             
             pipeline_text = f"{pipeline_display_name} | Preprocessor: {preprocessor_name}"
             if pipeline_type in ['sdturbo', 'sdxlturbo']:
-                steps = getattr(config, 'num_inference_steps', 1 if pipeline_type == 'sdturbo' else 2)
+                steps = len(t_index_list)
                 pipeline_text += f" | Steps: {steps}"
             cv2.putText(combined, pipeline_text, (10, 60), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
@@ -284,7 +338,7 @@ def main():
                 # Save current output
                 try:
                     timestamp = int(time.time())
-                    preprocessor_safe = config.controlnets[0].preprocessor.replace("/", "_").replace("\\", "_")
+                    preprocessor_safe = controlnet_config['preprocessor'].replace("/", "_").replace("\\", "_")
                     output_path = f"controlnet_{pipeline_type}_{preprocessor_safe}_output_{timestamp}.png"
                     output_image.save(output_path)
                     print(f"💾 Saved output to {output_path}")
@@ -302,23 +356,27 @@ def main():
                 print(f"🖼️  Control image preview: {'ON' if show_preprocessed else 'OFF'}")
             elif key == ord('+'):
                 # Increase ControlNet scale
-                new_scale = min(2.0, pipeline.controlnet_scales[0] + 0.1)
-                pipeline.update_controlnet_scale(0, new_scale)
-                print(f"📈 ControlNet scale: {new_scale:.2f}")
+                if has_controlnets(wrapper):
+                    current_scale = get_current_controlnet_scale(wrapper)
+                    new_scale = min(2.0, current_scale + 0.1)
+                    wrapper.update_controlnet_scale(0, new_scale)
+                    print(f"📈 ControlNet scale: {new_scale:.2f}")
             elif key == ord('-'):
                 # Decrease ControlNet scale
-                new_scale = max(0.0, pipeline.controlnet_scales[0] - 0.1)
-                pipeline.update_controlnet_scale(0, new_scale)
-                print(f"📉 ControlNet scale: {new_scale:.2f}")
+                if has_controlnets(wrapper):
+                    current_scale = get_current_controlnet_scale(wrapper)
+                    new_scale = max(0.0, current_scale - 0.1)
+                    wrapper.update_controlnet_scale(0, new_scale)
+                    print(f"📉 ControlNet scale: {new_scale:.2f}")
             elif key == ord('p'):
                 # Interactive prompt change
                 print(f"\n🎨 Enter new prompt (or press Enter to keep current):")
                 try:
-                    new_prompt = input(f"Current: {config.prompt}\nNew: ").strip()
+                    new_prompt = input(f"Current: {prompt}\nNew: ").strip()
                     if new_prompt:
-                        # Update prompt via StreamDiffusion
-                        pipeline.stream.update_prompt(new_prompt)
-                        config.prompt = new_prompt
+                        # Update prompt via wrapper
+                        wrapper.stream.update_prompt(new_prompt)
+                        prompt = new_prompt
                         print(f"✓ Updated prompt: {new_prompt}")
                 except:
                     print("❌ Failed to update prompt")

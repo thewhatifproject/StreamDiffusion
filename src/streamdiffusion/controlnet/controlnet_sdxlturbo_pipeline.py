@@ -2,15 +2,11 @@ import torch
 from typing import List, Optional, Union, Dict, Any, Tuple
 from PIL import Image
 import numpy as np
-from pathlib import Path
-
-from diffusers import StableDiffusionXLPipeline, AutoencoderKL, AutoencoderTiny
 
 from ..pipeline import StreamDiffusion
-from .config import ControlNetConfig, StreamDiffusionControlNetConfig
 from .base_controlnet_pipeline import BaseControlNetPipeline
 
-
+# TODO: This broke during refactor. See commit 8c7aff1200e7eaa01a2c02c3e65680ed13c9275f for original implementation and see what went wrong. 
 class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
     """
     SDXL Turbo ControlNet pipeline using StreamDiffusion
@@ -74,7 +70,6 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
                 mode='bilinear',
                 align_corners=False
             )
-            print(f"SDXL ControlNet: Resized control image from {current_size} to {target_size}")
         
         return control_tensor
 
@@ -247,7 +242,7 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
             **kwargs: Additional arguments
             
         Returns:
-            Generated tensor (consistent with other pipeline types)
+            Generated tensor (raw output from StreamDiffusion)
         """
         # Ensure SDXL embeddings are set up
         self._setup_sdxl_embeddings()
@@ -257,119 +252,7 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
             self.update_control_image_efficient(image)
             
             # Call StreamDiffusion with the image as positional argument 'x'
-            x_output = self.stream(image)  # StreamDiffusion expects 'image' as positional 'x'
+            return self.stream(image)
         else:
             # Text-to-image generation
-            x_output = self.stream()
-        
-        # Return tensor directly (consistent with other pipeline types)
-        return x_output
-
-
-def create_sdxlturbo_controlnet_pipeline(config: StreamDiffusionControlNetConfig) -> SDXLTurboControlNetPipeline:
-    """
-    Create an SDXL Turbo ControlNet pipeline from configuration using StreamDiffusion
-    
-    Args:
-        config: Configuration object
-        
-    Returns:
-        SDXLTurboControlNetPipeline instance
-    """
-    # Convert dtype string to torch.dtype
-    dtype_map = {
-        "float16": torch.float16,
-        "float32": torch.float32,
-        "bfloat16": torch.bfloat16,
-    }
-    dtype = dtype_map.get(config.dtype, torch.float16)
-    
-    # Use model_type from config
-    model_type = config.model_type
-    
-    # Load base pipeline
-    print(f"Loading {model_type} base model: {config.model_id}")
-    
-    # Check if it's a local file path
-    model_path = Path(config.model_id)
-    if model_path.exists() and model_path.is_file():
-        print(f"Loading from local file: {model_path}")
-        pipe = StableDiffusionXLPipeline.from_single_file(
-            str(model_path),
-            torch_dtype=dtype
-        )
-    elif model_path.exists() and model_path.is_dir():
-        print(f"Loading from local directory: {model_path}")
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            str(model_path),
-            torch_dtype=dtype,
-            local_files_only=True
-        )
-    elif "/" in config.model_id:
-        print(f"Loading from HuggingFace: {config.model_id}")
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            config.model_id, 
-            torch_dtype=dtype
-        )
-    else:
-        raise ValueError(f"Invalid model path or ID: {config.model_id}")
-    
-    pipe = pipe.to(device=config.device, dtype=dtype)
-    
-    # Load improved VAE for SDXL
-    vae = AutoencoderKL.from_pretrained(
-        "madebyollin/sdxl-vae-fp16-fix", 
-        torch_dtype=dtype
-    ).to(config.device)
-    pipe.vae = vae
-    
-    # Use Tiny AutoEncoder XL if requested
-    if getattr(config, 'use_taesd', True):
-        taesd_model = "madebyollin/taesdxl"
-        pipe.vae = AutoencoderTiny.from_pretrained(
-            taesd_model, 
-            torch_dtype=dtype, 
-            use_safetensors=True
-        ).to(config.device)
-    
-    # SDXL Turbo uses its default scheduler - don't override it
-    
-    # Create StreamDiffusion instance
-    stream = StreamDiffusion(
-        pipe,
-        t_index_list=config.t_index_list,
-        torch_dtype=dtype,
-        width=config.width,
-        height=config.height,
-        cfg_type=config.cfg_type,
-    )
-    
-    # Enable optimizations
-    if config.acceleration == "xformers":
-        pipe.enable_xformers_memory_efficient_attention()
-    
-    # Create ControlNet pipeline with model type from config
-    controlnet_pipeline = SDXLTurboControlNetPipeline(stream, config.device, dtype, model_type)
-    
-    # Add ControlNets
-    for cn_config in config.controlnets:
-        controlnet_pipeline.add_controlnet(cn_config)
-    
-    # Prepare with prompt
-    if config.prompt:
-        # Store prompt info for SDXL embeddings setup
-        stream._current_prompt = config.prompt
-        stream._current_negative_prompt = config.negative_prompt or ""
-        
-        stream.prepare(
-            prompt=config.prompt,
-            negative_prompt=config.negative_prompt,
-            guidance_scale=config.guidance_scale,
-            num_inference_steps=config.num_inference_steps,
-            seed=config.seed,
-        )
-        
-        # Set up SDXL embeddings after prepare
-        controlnet_pipeline._setup_sdxl_embeddings()
-    
-    return controlnet_pipeline 
+            return self.stream() 
