@@ -236,7 +236,7 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
                  image: Union[str, Image.Image, np.ndarray, torch.Tensor] = None,
                  num_inference_steps: int = None,
                  guidance_scale: float = None,
-                 **kwargs) -> Image.Image:
+                 **kwargs) -> torch.Tensor:
         """
         Generate image using SDXL Turbo with ControlNet
         
@@ -247,7 +247,7 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
             **kwargs: Additional arguments
             
         Returns:
-            Generated PIL Image
+            Generated tensor (consistent with other pipeline types)
         """
         # Ensure SDXL embeddings are set up
         self._setup_sdxl_embeddings()
@@ -262,10 +262,8 @@ class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
             # Text-to-image generation
             x_output = self.stream()
         
-        # Convert tensor output to PIL Image
-        from ..image_utils import postprocess_image
-        output_image = postprocess_image(x_output, output_type="pil")[0]
-        return output_image
+        # Return tensor directly (consistent with other pipeline types)
+        return x_output
 
 
 def create_sdxlturbo_controlnet_pipeline(config: StreamDiffusionControlNetConfig) -> SDXLTurboControlNetPipeline:
