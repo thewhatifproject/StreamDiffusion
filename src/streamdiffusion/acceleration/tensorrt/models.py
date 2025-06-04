@@ -281,44 +281,35 @@ class UNet(BaseModel):
             control_inputs = {}
             base_latent_resolution = self.min_latent_shape
             
-            # CRITICAL FIX: Generate exactly one control input per down block
-            # This matches diffusers UNet's down_block_additional_residuals expectation
+            # CRITICAL FIX: All control tensors have the SAME spatial resolution
+            # This matches diffusers ControlNet expectations - control tensors are 
+            # not progressively downsampled, they all match the input latent resolution
+            print(f"🔧 Using uniform resolution {base_latent_resolution}x{base_latent_resolution} for all control tensors")
+            
+            # Generate exactly one control input per down block with SAME resolution
             for i, channels in enumerate(block_out_channels):
-                # Calculate spatial resolution for this down block
-                # Down blocks progressively reduce spatial resolution by 2x
-                downsample_factor = 2 ** i
-                control_height = base_latent_resolution // downsample_factor
-                control_width = base_latent_resolution // downsample_factor
-                
-                # Ensure minimum resolution of 1x1
-                control_height = max(1, control_height)
-                control_width = max(1, control_width)
-                
                 control_inputs[f"input_control_{i}"] = {
                     "batch": self.min_batch,
                     "channels": channels,
-                    "height": control_height,
-                    "width": control_width,
+                    "height": base_latent_resolution,
+                    "width": base_latent_resolution,
                 }
-                print(f"   input_control_{i}: {channels}ch @ {control_height}x{control_width} (down_block_{i})")
+                print(f"   input_control_{i}: {channels}ch @ {base_latent_resolution}x{base_latent_resolution} (down_block_{i})")
             
-            # Middle control tensor - use the deepest block's channels
-            # This matches the bottleneck of the UNet
+            # Middle control tensor - also uses the same resolution
             middle_channels = block_out_channels[-1]
-            middle_downsample = 2 ** (len(block_out_channels) - 1)
-            middle_height = max(1, base_latent_resolution // middle_downsample)
-            middle_width = max(1, base_latent_resolution // middle_downsample)
             
             control_inputs["middle_control_0"] = {
                 "batch": self.min_batch,
                 "channels": middle_channels,
-                "height": middle_height,
-                "width": middle_width,
+                "height": base_latent_resolution,
+                "width": base_latent_resolution,
             }
-            print(f"   middle_control_0: {middle_channels}ch @ {middle_height}x{middle_width} (middle_block)")
+            print(f"   middle_control_0: {middle_channels}ch @ {base_latent_resolution}x{base_latent_resolution} (middle_block)")
             
             print(f"🎛️  Generated {len(control_inputs)} ControlNet inputs for diffusers UNet")
             print(f"     This matches {len(block_out_channels)} down blocks + 1 middle block")
+            print(f"     All control tensors use uniform resolution: {base_latent_resolution}x{base_latent_resolution}")
             
             return control_inputs
             
