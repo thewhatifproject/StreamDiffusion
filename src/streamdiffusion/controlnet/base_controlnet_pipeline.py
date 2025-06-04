@@ -528,9 +528,24 @@ class BaseControlNetPipeline:
         # Store original method
         self._original_unet_step = self.stream.unet_step
         
-        # Create patched method
-        def patched_unet_step(x_t_latent, t_list, idx=None):
-            # Handle CFG expansion
+        # Detect if TensorRT acceleration is being used
+        is_tensorrt = hasattr(self.stream.unet, 'engine') or hasattr(self.stream.unet, 'use_control')
+        
+        if is_tensorrt:
+            print("🚀 TensorRT ControlNet mode enabled")
+            self._patch_tensorrt_mode()
+        else:
+            print("🐍 PyTorch ControlNet mode enabled")
+            self._patch_pytorch_mode()
+        
+        self._is_patched = True
+        print(f"Patched StreamDiffusion with {self.model_type} ControlNet support")
+
+    def _patch_tensorrt_mode(self):
+        """Patch for TensorRT mode with ControlNet support"""
+        
+        def patched_unet_step_tensorrt(x_t_latent, t_list, idx=None):
+            # Handle CFG expansion (same as original)
             if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
                 x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
                 t_list_expanded = torch.concat([t_list[0:1], t_list], dim=0)
@@ -549,25 +564,14 @@ class BaseControlNetPipeline:
                 x_t_latent_plus_uc, t_list_expanded, self.stream.prompt_embeds, **conditioning_context
             )
             
-            # Prepare UNet kwargs
-            unet_kwargs = {
-                'sample': x_t_latent_plus_uc,
-                'timestep': t_list_expanded,
-                'encoder_hidden_states': self.stream.prompt_embeds,
-                'return_dict': False,
-            }
-            
-            # Add ControlNet conditioning
-            if down_block_res_samples is not None:
-                unet_kwargs['down_block_additional_residuals'] = down_block_res_samples
-            if mid_block_res_sample is not None:
-                unet_kwargs['mid_block_additional_residual'] = mid_block_res_sample
-            
-            # Allow subclasses to add additional UNet kwargs (e.g., SDXL added_cond_kwargs)
-            unet_kwargs.update(self._get_additional_unet_kwargs(**conditioning_context))
-            
-            # Call UNet with ControlNet conditioning
-            model_pred = self.stream.unet(**unet_kwargs)[0]
+            # Call TensorRT engine with ControlNet inputs (using diffusers-style interface)
+            model_pred = self.stream.unet(
+                x_t_latent_plus_uc,
+                t_list_expanded,
+                self.stream.prompt_embeds,
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+            ).sample
             
             # Continue with original CFG logic
             if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
@@ -624,17 +628,148 @@ class BaseControlNetPipeline:
             return denoised_batch, model_pred
         
         # Replace the method
-        self.stream.unet_step = patched_unet_step
-        self._is_patched = True
-        print(f"Patched StreamDiffusion with {self.model_type} ControlNet support")
-    
+        self.stream.unet_step = patched_unet_step_tensorrt
+
+    def _patch_pytorch_mode(self):
+        """Patch for PyTorch mode with ControlNet support (original implementation)"""
+        
+        def patched_unet_step_pytorch(x_t_latent, t_list, idx=None):
+            # Handle CFG expansion
+            if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
+                x_t_latent_plus_uc = torch.concat([x_t_latent[0:1], x_t_latent], dim=0)
+                t_list_expanded = torch.concat([t_list[0:1], t_list], dim=0)
+            elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
+                x_t_latent_plus_uc = torch.concat([x_t_latent, x_t_latent], dim=0)
+                t_list_expanded = torch.concat([t_list, t_list], dim=0)
+            else:
+                x_t_latent_plus_uc = x_t_latent
+                t_list_expanded = t_list
+            
+            # Get pipeline-specific conditioning context
+            conditioning_context = self._get_conditioning_context(x_t_latent_plus_uc, t_list_expanded)
+            
+            # Get ControlNet conditioning
+            down_block_res_samples, mid_block_res_sample = self._get_controlnet_conditioning(
+                x_t_latent_plus_uc, t_list_expanded, self.stream.prompt_embeds, **conditioning_context
+            )
+            
+            # Prepare UNet kwargs
+            unet_kwargs = {
+                'sample': x_t_latent_plus_uc,
+                'timestep': t_list_expanded,
+                'encoder_hidden_states': self.stream.prompt_embeds,
+                'return_dict': False,
+            }
+            
+            # Add ControlNet conditioning
+            if down_block_res_samples is not None:
+                unet_kwargs['down_block_additional_residuals'] = down_block_res_samples
+            if mid_block_res_sample is not None:
+                unet_kwargs['mid_block_additional_residual'] = mid_block_res_sample
+            
+            # Allow subclasses to add additional UNet kwargs (e.g., SDXL added_cond_kwargs)
+            unet_kwargs.update(self._get_additional_unet_kwargs(**conditioning_context))
+            
+            # Call UNet with ControlNet conditioning
+            model_pred = self.stream.unet(**unet_kwargs)[0]
+            
+            # Continue with original CFG logic (same as TensorRT version)
+            if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
+                noise_pred_text = model_pred[1:]
+                self.stream.stock_noise = torch.concat(
+                    [model_pred[0:1], self.stream.stock_noise[1:]], dim=0
+                )
+            elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
+                noise_pred_uncond, noise_pred_text = model_pred.chunk(2)
+            else:
+                noise_pred_text = model_pred
+            
+            if self.stream.guidance_scale > 1.0 and (
+                self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize"
+            ):
+                noise_pred_uncond = self.stream.stock_noise * self.stream.delta
+            
+            if self.stream.guidance_scale > 1.0 and self.stream.cfg_type != "none":
+                model_pred = noise_pred_uncond + self.stream.guidance_scale * (
+                    noise_pred_text - noise_pred_uncond
+                )
+            else:
+                model_pred = noise_pred_text
+            
+            # Compute the previous noisy sample x_t -> x_t-1
+            if self.stream.use_denoising_batch:
+                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
+                if self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize":
+                    scaled_noise = self.stream.beta_prod_t_sqrt * self.stream.stock_noise
+                    delta_x = self.stream.scheduler_step_batch(model_pred, scaled_noise, idx)
+                    alpha_next = torch.concat(
+                        [
+                            self.stream.alpha_prod_t_sqrt[1:],
+                            torch.ones_like(self.stream.alpha_prod_t_sqrt[0:1]),
+                        ],
+                        dim=0,
+                    )
+                    delta_x = alpha_next * delta_x
+                    beta_next = torch.concat(
+                        [
+                            self.stream.beta_prod_t_sqrt[1:],
+                            torch.ones_like(self.stream.beta_prod_t_sqrt[0:1]),
+                        ],
+                        dim=0,
+                    )
+                    delta_x = delta_x / beta_next
+                    init_noise = torch.concat(
+                        [self.stream.init_noise[1:], self.stream.init_noise[0:1]], dim=0
+                    )
+                    self.stream.stock_noise = init_noise + delta_x
+            else:
+                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
+            
+            return denoised_batch, model_pred
+        
+        # Replace the method  
+        self.stream.unet_step = patched_unet_step_pytorch
+
+    def _prepare_tensorrt_conditioning(self, x_t_latent, t_list) -> Dict[str, List[torch.Tensor]]:
+        """
+        Prepare ControlNet conditioning in TensorRT format
+        
+        Organizes control tensors to match TensorRT engine input expectations.
+        This method would be used for direct TensorRT conditioning dict format if needed.
+        
+        Args:
+            x_t_latent: Latent input tensor
+            t_list: Timestep list
+            
+        Returns:
+            Dictionary with 'input', 'output', 'middle' keys containing organized tensors
+        """
+        # Get ControlNet conditioning using existing method
+        down_block_res_samples, mid_block_res_sample = self._get_controlnet_conditioning(
+            x_t_latent, t_list, self.stream.prompt_embeds
+        )
+        
+        conditioning_dict = {'input': [], 'output': [], 'middle': []}
+        
+        if down_block_res_samples is not None:
+            # Down block residuals become input controls (reversed)
+            conditioning_dict['input'] = list(reversed(down_block_res_samples))
+        
+        if mid_block_res_sample is not None:
+            conditioning_dict['middle'] = [mid_block_res_sample]
+        
+        # Note: output controls are typically not used at runtime in diffusers
+        # They're mainly for shape specification during compilation
+        
+        return conditioning_dict
+
     def _unpatch_stream_diffusion(self) -> None:
         """Restore original StreamDiffusion unet_step method"""
         if self._is_patched and self._original_unet_step is not None:
             self.stream.unet_step = self._original_unet_step
             self._is_patched = False
             print("Unpatched StreamDiffusion")
-    
+
     def _convert_to_tensor_early(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> torch.Tensor:
         """
         Convert input to tensor as early as possible to maximize GPU utilization

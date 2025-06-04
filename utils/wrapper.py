@@ -531,6 +531,13 @@ class StreamDiffusionWrapper:
                     UNet,
                     VAEEncoder,
                 )
+                # Add ControlNet detection and support
+                from streamdiffusion.acceleration.tensorrt.model_detection import (
+                    detect_model_from_diffusers_unet, 
+                    extract_unet_architecture, 
+                    validate_architecture
+                )
+                from streamdiffusion.acceleration.tensorrt.controlnet_wrapper import create_controlnet_wrapper
 
                 def create_prefix(
                     model_id_or_path: str,
@@ -542,6 +549,18 @@ class StreamDiffusionWrapper:
                         return f"{maybe_path.stem}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}"
                     else:
                         return f"{model_id_or_path}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}"
+
+                # Detect ControlNet support needed based on UNet architecture
+                use_controlnet_trt = False
+                unet_arch = {}
+                try:
+                    model_type = detect_model_from_diffusers_unet(stream.unet)
+                    unet_arch = extract_unet_architecture(stream.unet)
+                    unet_arch = validate_architecture(unet_arch, model_type)
+                    use_controlnet_trt = True  # Always enable ControlNet support in TRT engines
+                    print(f"🎛️ Enabling TensorRT ControlNet support for {model_type}")
+                except Exception as e:
+                    print(f"⚠️ ControlNet architecture detection failed: {e}, compiling without ControlNet support")
 
                 engine_dir = Path(engine_dir)
                 unet_path = os.path.join(
@@ -589,15 +608,33 @@ class StreamDiffusionWrapper:
                         min_batch_size=stream.trt_unet_batch_size,
                         embedding_dim=stream.text_encoder.config.hidden_size,
                         unet_dim=stream.unet.config.in_channels,
+                        use_control=use_controlnet_trt,
+                        unet_arch=unet_arch if use_controlnet_trt else None,
                     )
-                    compile_unet(
-                        stream.unet,
-                        unet_model,
-                        unet_path + ".onnx",
-                        unet_path + ".opt.onnx",
-                        unet_path,
-                        opt_batch_size=stream.trt_unet_batch_size,
-                    )
+                    
+                    # Use ControlNet wrapper if ControlNet support is enabled
+                    if use_controlnet_trt:
+                        print("🚀 Compiling UNet with ControlNet support")
+                        control_input_names = unet_model.get_input_names()
+                        wrapped_unet = create_controlnet_wrapper(stream.unet, control_input_names)
+                        compile_unet(
+                            wrapped_unet,
+                            unet_model,
+                            unet_path + ".onnx",
+                            unet_path + ".opt.onnx",
+                            unet_path,
+                            opt_batch_size=stream.trt_unet_batch_size,
+                        )
+                    else:
+                        print("🔧 Compiling UNet without ControlNet support")
+                        compile_unet(
+                            stream.unet,
+                            unet_model,
+                            unet_path + ".onnx",
+                            unet_path + ".opt.onnx",
+                            unet_path,
+                            opt_batch_size=stream.trt_unet_batch_size,
+                        )
 
                 if not os.path.exists(vae_decoder_path):
                     os.makedirs(os.path.dirname(vae_decoder_path), exist_ok=True)
@@ -654,6 +691,15 @@ class StreamDiffusionWrapper:
                 stream.unet = UNet2DConditionModelEngine(
                     unet_path, cuda_stream, use_cuda_graph=False
                 )
+                
+                # Store ControlNet metadata on the engine for runtime use
+                if use_controlnet_trt:
+                    setattr(stream.unet, 'use_control', True)
+                    setattr(stream.unet, 'unet_arch', unet_arch)
+                    print("✅ TensorRT UNet engine configured for ControlNet support")
+                else:
+                    setattr(stream.unet, 'use_control', False)
+                    
                 stream.vae = AutoencoderKLEngine(
                     vae_encoder_path,
                     vae_decoder_path,

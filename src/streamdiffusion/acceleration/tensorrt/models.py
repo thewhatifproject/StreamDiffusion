@@ -229,6 +229,8 @@ class UNet(BaseModel):
         embedding_dim=768,
         text_maxlen=77,
         unet_dim=4,
+        use_control=False,
+        unet_arch=None,
     ):
         super(UNet, self).__init__(
             fp16=fp16,
@@ -240,20 +242,166 @@ class UNet(BaseModel):
         )
         self.unet_dim = unet_dim
         self.name = "UNet"
+        
+        # ControlNet support
+        self.use_control = use_control
+        self.unet_arch = unet_arch or {}
+        
+        # Initialize ControlNet input configurations
+        if self.use_control and self.unet_arch:
+            self.control_inputs = self.get_control()
+            self._add_control_inputs()
+        else:
+            self.control_inputs = {}
+
+    def get_control(self) -> dict:
+        """
+        Generate ControlNet input configurations based on UNet architecture
+        
+        This is the core method that translates ComfyUI_TensorRT's get_control() logic
+        for diffusers models. It calculates the exact tensor shapes needed for each
+        ControlNet layer based on the UNet's downsampling pattern.
+        
+        Returns:
+            Dictionary mapping control input names to tensor shape specifications
+        """
+        if not self.unet_arch:
+            print("⚠️  No UNet architecture provided, ControlNet inputs disabled")
+            return {}
+        
+        try:
+            # Extract architecture parameters (ComfyUI_TensorRT style)
+            model_channels = self.unet_arch.get("model_channels", 320)
+            channel_mult = self.unet_arch.get("channel_mult", (1, 2, 4, 4))
+            num_res_blocks = self.unet_arch.get("num_res_blocks", (2, 2, 2, 2))
+            
+            print(f"🏗️  Generating ControlNet inputs for model_channels={model_channels}, "
+                  f"channel_mult={channel_mult}, num_res_blocks={num_res_blocks}")
+            
+            # Calculate input block channels (mimics ComfyUI_TensorRT set_block_chans logic)
+            input_block_chans = self._calculate_input_block_channels(
+                model_channels, channel_mult, num_res_blocks
+            )
+            
+            control_inputs = {}
+            
+            # Generate input control tensors (down blocks)
+            # Reverse order to match ComfyUI_TensorRT's indexing
+            for i, (ch, ds) in enumerate(reversed(input_block_chans)):
+                control_inputs[f"input_control_{i}"] = {
+                    "batch": self.min_batch,
+                    "channels": ch,
+                    "height": self.min_latent_shape * ds,
+                    "width": self.min_latent_shape * ds,
+                }
+            
+            # Generate output control tensors (up blocks)
+            # Forward order for output controls
+            for i, (ch, ds) in enumerate(input_block_chans):
+                control_inputs[f"output_control_{i}"] = {
+                    "batch": self.min_batch,
+                    "channels": ch,
+                    "height": self.min_latent_shape * ds,
+                    "width": self.min_latent_shape * ds,
+                }
+            
+            # Middle control tensor (bottleneck)
+            # Use the deepest layer (highest channel count, highest downsampling)
+            if input_block_chans:
+                ch, ds = input_block_chans[-1]  # Last element has highest channels/downsampling
+                control_inputs["middle_control_0"] = {
+                    "batch": self.min_batch,
+                    "channels": ch,
+                    "height": self.min_latent_shape * ds,
+                    "width": self.min_latent_shape * ds,
+                }
+            
+            print(f"🎛️  Generated {len(control_inputs)} ControlNet input tensors")
+            
+            # Debug: Print some control input shapes for verification
+            for name, shape_dict in list(control_inputs.items())[:3]:  # Show first 3
+                print(f"   {name}: {shape_dict['channels']}ch @ {shape_dict['height']}x{shape_dict['width']}")
+            if len(control_inputs) > 3:
+                print(f"   ... and {len(control_inputs) - 3} more")
+            
+            return control_inputs
+            
+        except Exception as e:
+            print(f"❌ Failed to generate ControlNet inputs: {e}")
+            return {}
+
+    def _calculate_input_block_channels(self, model_channels, channel_mult, num_res_blocks):
+        """
+        Calculate input block channels and downsampling factors
+        
+        This replicates ComfyUI_TensorRT's set_block_chans() method exactly,
+        which is critical for correct ControlNet input shape calculation.
+        
+        Args:
+            model_channels: Base channel count
+            channel_mult: Channel multipliers per level
+            num_res_blocks: Number of residual blocks per level
+            
+        Returns:
+            List of (channels, downsampling_factor) tuples for each block
+        """
+        ch = model_channels
+        ds = 1  # downsampling factor
+        input_block_chans = [(model_channels, ds)]
+        
+        for level, mult in enumerate(channel_mult):
+            # Add residual blocks at this level
+            for nr in range(num_res_blocks[level]):
+                ch = mult * model_channels
+                input_block_chans.append((ch, ds))
+            
+            # Add downsampling block (except for last level)
+            if level != len(channel_mult) - 1:
+                out_ch = ch
+                ch = out_ch
+                ds *= 2  # Increase downsampling factor
+                input_block_chans.append((ch, ds))
+        
+        return input_block_chans
+
+    def _add_control_inputs(self):
+        """Add ControlNet inputs to the model's input/output specifications"""
+        if not self.control_inputs:
+            return
+        
+        # Store original methods
+        self._original_get_input_names = self.get_input_names
+        self._original_get_dynamic_axes = self.get_dynamic_axes
+        self._original_get_input_profile = self.get_input_profile
+        self._original_get_shape_dict = self.get_shape_dict
+        self._original_get_sample_input = self.get_sample_input
 
     def get_input_names(self):
-        return ["sample", "timestep", "encoder_hidden_states"]
+        """Get input names including ControlNet inputs"""
+        base_names = ["sample", "timestep", "encoder_hidden_states"]
+        if self.use_control and self.control_inputs:
+            # Add control input names in the correct order
+            control_names = sorted(self.control_inputs.keys())
+            return base_names + control_names
+        return base_names
 
     def get_output_names(self):
         return ["latent"]
 
     def get_dynamic_axes(self):
-        return {
+        base_axes = {
             "sample": {0: "2B", 2: "H", 3: "W"},
             "timestep": {0: "2B"},
             "encoder_hidden_states": {0: "2B"},
             "latent": {0: "2B", 2: "H", 3: "W"},
         }
+        
+        if self.use_control and self.control_inputs:
+            # Add dynamic axes for ControlNet inputs
+            for name in self.control_inputs:
+                base_axes[name] = {0: "2B", 2: "H", 3: "W"}
+        
+        return base_axes
 
     def get_input_profile(self, batch_size, image_height, image_width, static_batch, static_shape):
         latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
@@ -269,7 +417,8 @@ class UNet(BaseModel):
             min_latent_width,
             max_latent_width,
         ) = self.get_minmax_dims(batch_size, image_height, image_width, static_batch, static_shape)
-        return {
+        
+        profile = {
             "sample": [
                 (min_batch, self.unet_dim, min_latent_height, min_latent_width),
                 (batch_size, self.unet_dim, latent_height, latent_width),
@@ -282,26 +431,91 @@ class UNet(BaseModel):
                 (max_batch, self.text_maxlen, self.embedding_dim),
             ],
         }
+        
+        if self.use_control and self.control_inputs:
+            # Add ControlNet input profiles
+            for name, shape_spec in self.control_inputs.items():
+                channels = shape_spec["channels"]
+                
+                # Calculate ControlNet tensor dimensions based on latent dimensions
+                # The control tensor resolution scales with the base latent resolution
+                height_scale = shape_spec["height"] // self.min_latent_shape
+                width_scale = shape_spec["width"] // self.min_latent_shape
+                
+                min_height = min_latent_height * height_scale
+                max_height = max_latent_height * height_scale
+                min_width = min_latent_width * width_scale
+                max_width = max_latent_width * width_scale
+                opt_height = latent_height * height_scale
+                opt_width = latent_width * width_scale
+                
+                profile[name] = [
+                    (min_batch, channels, min_height, min_width),
+                    (batch_size, channels, opt_height, opt_width),
+                    (max_batch, channels, max_height, max_width),
+                ]
+        
+        return profile
 
     def get_shape_dict(self, batch_size, image_height, image_width):
         latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
-        return {
+        shape_dict = {
             "sample": (2 * batch_size, self.unet_dim, latent_height, latent_width),
             "timestep": (2 * batch_size,),
             "encoder_hidden_states": (2 * batch_size, self.text_maxlen, self.embedding_dim),
             "latent": (2 * batch_size, 4, latent_height, latent_width),
         }
+        
+        if self.use_control and self.control_inputs:
+            # Add ControlNet input shapes
+            for name, shape_spec in self.control_inputs.items():
+                channels = shape_spec["channels"]
+                
+                # Calculate actual tensor size based on current latent dimensions
+                height_scale = shape_spec["height"] // self.min_latent_shape
+                width_scale = shape_spec["width"] // self.min_latent_shape
+                
+                control_height = latent_height * height_scale
+                control_width = latent_width * width_scale
+                
+                shape_dict[name] = (2 * batch_size, channels, control_height, control_width)
+        
+        return shape_dict
 
     def get_sample_input(self, batch_size, image_height, image_width):
         latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
         dtype = torch.float16 if self.fp16 else torch.float32
-        return (
+        
+        base_inputs = [
             torch.randn(
                 2 * batch_size, self.unet_dim, latent_height, latent_width, dtype=torch.float32, device=self.device
             ),
             torch.ones((2 * batch_size,), dtype=torch.float32, device=self.device),
             torch.randn(2 * batch_size, self.text_maxlen, self.embedding_dim, dtype=dtype, device=self.device),
-        )
+        ]
+        
+        if self.use_control and self.control_inputs:
+            # Add ControlNet sample inputs
+            control_inputs = []
+            for name in sorted(self.control_inputs.keys()):
+                shape_spec = self.control_inputs[name]
+                channels = shape_spec["channels"]
+                
+                # Calculate actual tensor size
+                height_scale = shape_spec["height"] // self.min_latent_shape
+                width_scale = shape_spec["width"] // self.min_latent_shape
+                control_height = latent_height * height_scale
+                control_width = latent_width * width_scale
+                
+                control_input = torch.randn(
+                    2 * batch_size, channels, control_height, control_width, 
+                    dtype=dtype, device=self.device
+                )
+                control_inputs.append(control_input)
+            
+            return tuple(base_inputs + control_inputs)
+        
+        return tuple(base_inputs)
 
 
 class VAE(BaseModel):
