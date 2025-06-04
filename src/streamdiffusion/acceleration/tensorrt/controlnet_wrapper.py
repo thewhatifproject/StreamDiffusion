@@ -57,22 +57,37 @@ class ControlNetUNetWrapper(torch.nn.Module):
         Returns:
             UNet output (noise prediction)
         """
-        # Organize control inputs by type
+        print(f"🔗 ControlNet wrapper forward: sample.shape={sample.shape}")
+        print(f"🔗 Received {len(control_args)} control tensors")
+        
+        # DIFFUSERS-SPECIFIC: Simple organization for diffusers UNet structure
+        # We expect: input_control_0, input_control_1, ..., input_control_N, middle_control_0
+        
         down_block_controls = []
-        mid_block_controls = []
+        mid_block_control = None
         
-        # Extract input controls (for down blocks)
-        for idx in self.input_control_indices:
-            if idx - 3 < len(control_args):  # -3 to account for sample, timestep, encoder_hidden_states
-                down_block_controls.append(control_args[idx - 3])
+        # Extract input controls for down_block_additional_residuals
+        # These should be the first N tensors (one per down block)
+        input_control_count = len(self.input_control_indices)
         
-        # Extract middle controls
-        for idx in self.middle_control_indices:
-            if idx - 3 < len(control_args):
-                mid_block_controls.append(control_args[idx - 3])
+        if input_control_count > 0:
+            print(f"🔗 Processing {input_control_count} input controls for down blocks")
+            
+            # Get input control tensors in order
+            for i, idx in enumerate(self.input_control_indices):
+                control_arg_idx = idx - 3  # Adjust for sample, timestep, encoder_hidden_states
+                if control_arg_idx < len(control_args):
+                    control_tensor = control_args[control_arg_idx]
+                    print(f"   Down block {i}: {control_tensor.shape}")
+                    down_block_controls.append(control_tensor)
         
-        # Note: Output controls are typically not used during forward pass in diffusers
-        # They're mainly for shape specification during compilation
+        # Extract middle control (should be the last tensor)
+        if self.middle_control_indices:
+            idx = self.middle_control_indices[0]
+            control_arg_idx = idx - 3
+            if control_arg_idx < len(control_args):
+                mid_block_control = control_args[control_arg_idx]
+                print(f"   Middle block: {mid_block_control.shape}")
         
         # Prepare UNet arguments
         unet_kwargs = {
@@ -82,14 +97,18 @@ class ControlNetUNetWrapper(torch.nn.Module):
             'return_dict': False,
         }
         
-        # Add ControlNet conditioning if available
+        # CRITICAL: Pass control tensors exactly as diffusers UNet expects
         if down_block_controls:
-            # Reverse the order to match expected down block order
-            unet_kwargs['down_block_additional_residuals'] = list(reversed(down_block_controls))
+            # diffusers UNet expects a tuple/list of control tensors for down blocks
+            print(f"🔗 Adding {len(down_block_controls)} down_block_additional_residuals")
+            unet_kwargs['down_block_additional_residuals'] = down_block_controls
         
-        if mid_block_controls:
-            # Use the first middle control (there's typically only one)
-            unet_kwargs['mid_block_additional_residual'] = mid_block_controls[0]
+        if mid_block_control is not None:
+            # diffusers UNet expects a single tensor for middle block
+            print(f"🔗 Adding mid_block_additional_residual: {mid_block_control.shape}")
+            unet_kwargs['mid_block_additional_residual'] = mid_block_control
+        
+        print(f"🔗 Calling UNet with {len(unet_kwargs)} arguments")
         
         # Call UNet with ControlNet conditioning
         return self.unet(**unet_kwargs)

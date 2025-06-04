@@ -258,9 +258,8 @@ class UNet(BaseModel):
         """
         Generate ControlNet input configurations based on UNet architecture
         
-        This is the core method that translates ComfyUI_TensorRT's get_control() logic
-        for diffusers models. It calculates the exact tensor shapes needed for each
-        ControlNet layer based on the UNet's downsampling pattern.
+        DIFFUSERS-SPECIFIC IMPLEMENTATION: Generates control inputs that match
+        diffusers UNet2DConditionModel's down_block_additional_residuals structure.
         
         Returns:
             Dictionary mapping control input names to tensor shape specifications
@@ -270,99 +269,64 @@ class UNet(BaseModel):
             return {}
         
         try:
-            # Extract architecture parameters (ComfyUI_TensorRT style)
-            model_channels = self.unet_arch.get("model_channels", 320)
-            channel_mult = self.unet_arch.get("channel_mult", (1, 2, 4, 4))
-            num_res_blocks = self.unet_arch.get("num_res_blocks", (2, 2, 2, 2))
+            # Extract diffusers-specific architecture parameters
+            block_out_channels = self.unet_arch.get("block_out_channels", (320, 640, 1280, 1280))
+            down_block_types = self.unet_arch.get("down_block_types", [])
             
-            print(f"🏗️  Generating ControlNet inputs for model_channels={model_channels}, "
-                  f"channel_mult={channel_mult}, num_res_blocks={num_res_blocks}")
-            
-            # Calculate input block channels (mimics ComfyUI_TensorRT set_block_chans logic)
-            input_block_chans = self._calculate_input_block_channels(
-                model_channels, channel_mult, num_res_blocks
-            )
+            print(f"🏗️  Generating ControlNet inputs for diffusers UNet:")
+            print(f"     block_out_channels={block_out_channels}")
+            print(f"     down_block_types={down_block_types}")
+            print(f"     Number of down blocks: {len(down_block_types)}")
             
             control_inputs = {}
+            base_latent_resolution = self.min_latent_shape
             
-            # Generate input control tensors (down blocks)
-            # Reverse order to match ComfyUI_TensorRT's indexing
-            for i, (ch, ds) in enumerate(reversed(input_block_chans)):
+            # CRITICAL FIX: Generate exactly one control input per down block
+            # This matches diffusers UNet's down_block_additional_residuals expectation
+            for i, channels in enumerate(block_out_channels):
+                # Calculate spatial resolution for this down block
+                # Down blocks progressively reduce spatial resolution by 2x
+                downsample_factor = 2 ** i
+                control_height = base_latent_resolution // downsample_factor
+                control_width = base_latent_resolution // downsample_factor
+                
+                # Ensure minimum resolution of 1x1
+                control_height = max(1, control_height)
+                control_width = max(1, control_width)
+                
                 control_inputs[f"input_control_{i}"] = {
                     "batch": self.min_batch,
-                    "channels": ch,
-                    "height": self.min_latent_shape * ds,
-                    "width": self.min_latent_shape * ds,
+                    "channels": channels,
+                    "height": control_height,
+                    "width": control_width,
                 }
+                print(f"   input_control_{i}: {channels}ch @ {control_height}x{control_width} (down_block_{i})")
             
-            # Generate output control tensors (up blocks)
-            # Forward order for output controls
-            for i, (ch, ds) in enumerate(input_block_chans):
-                control_inputs[f"output_control_{i}"] = {
-                    "batch": self.min_batch,
-                    "channels": ch,
-                    "height": self.min_latent_shape * ds,
-                    "width": self.min_latent_shape * ds,
-                }
+            # Middle control tensor - use the deepest block's channels
+            # This matches the bottleneck of the UNet
+            middle_channels = block_out_channels[-1]
+            middle_downsample = 2 ** (len(block_out_channels) - 1)
+            middle_height = max(1, base_latent_resolution // middle_downsample)
+            middle_width = max(1, base_latent_resolution // middle_downsample)
             
-            # Middle control tensor (bottleneck)
-            # Use the deepest layer (highest channel count, highest downsampling)
-            if input_block_chans:
-                ch, ds = input_block_chans[-1]  # Last element has highest channels/downsampling
-                control_inputs["middle_control_0"] = {
-                    "batch": self.min_batch,
-                    "channels": ch,
-                    "height": self.min_latent_shape * ds,
-                    "width": self.min_latent_shape * ds,
-                }
+            control_inputs["middle_control_0"] = {
+                "batch": self.min_batch,
+                "channels": middle_channels,
+                "height": middle_height,
+                "width": middle_width,
+            }
+            print(f"   middle_control_0: {middle_channels}ch @ {middle_height}x{middle_width} (middle_block)")
             
-            print(f"🎛️  Generated {len(control_inputs)} ControlNet input tensors")
-            
-            # Debug: Print some control input shapes for verification
-            for name, shape_dict in list(control_inputs.items())[:3]:  # Show first 3
-                print(f"   {name}: {shape_dict['channels']}ch @ {shape_dict['height']}x{shape_dict['width']}")
-            if len(control_inputs) > 3:
-                print(f"   ... and {len(control_inputs) - 3} more")
+            print(f"🎛️  Generated {len(control_inputs)} ControlNet inputs for diffusers UNet")
+            print(f"     This matches {len(block_out_channels)} down blocks + 1 middle block")
             
             return control_inputs
             
         except Exception as e:
             print(f"❌ Failed to generate ControlNet inputs: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
-
-    def _calculate_input_block_channels(self, model_channels, channel_mult, num_res_blocks):
-        """
-        Calculate input block channels and downsampling factors
-        
-        This replicates ComfyUI_TensorRT's set_block_chans() method exactly,
-        which is critical for correct ControlNet input shape calculation.
-        
-        Args:
-            model_channels: Base channel count
-            channel_mult: Channel multipliers per level
-            num_res_blocks: Number of residual blocks per level
-            
-        Returns:
-            List of (channels, downsampling_factor) tuples for each block
-        """
-        ch = model_channels
-        ds = 1  # downsampling factor
-        input_block_chans = [(model_channels, ds)]
-        
-        for level, mult in enumerate(channel_mult):
-            # Add residual blocks at this level
-            for nr in range(num_res_blocks[level]):
-                ch = mult * model_channels
-                input_block_chans.append((ch, ds))
-            
-            # Add downsampling block (except for last level)
-            if level != len(channel_mult) - 1:
-                out_ch = ch
-                ch = out_ch
-                ds *= 2  # Increase downsampling factor
-                input_block_chans.append((ch, ds))
-        
-        return input_block_chans
 
     def _add_control_inputs(self):
         """Add ControlNet inputs to the model's input/output specifications"""

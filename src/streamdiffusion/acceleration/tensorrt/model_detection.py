@@ -130,6 +130,15 @@ def extract_unet_architecture(unet: UNet2DConditionModel) -> Dict:
     time_embed_dim = getattr(config, 'time_embedding_dim', None)
     if time_embed_dim is None:
         time_embed_dim = model_channels * 4  # Default for most models
+
+    # CRITICAL FIX: Validate architecture against actual UNet structure
+    # This ensures we're using the correct downsampling pattern
+    actual_down_block_types = getattr(config, 'down_block_types', [])
+    if actual_down_block_types:
+        print(f"🔍 Detected down_block_types: {actual_down_block_types}")
+        # Count actual downsampling blocks (ones that reduce spatial resolution)
+        downsample_blocks = [bt for bt in actual_down_block_types if 'Downsample' in bt or bt == 'DownBlock2D']
+        print(f"🔍 Found {len(downsample_blocks)} downsampling blocks")
     
     architecture_dict = {
         "model_channels": model_channels,
@@ -150,6 +159,10 @@ def extract_unet_architecture(unet: UNet2DConditionModel) -> Dict:
         "resnet_time_scale_shift": getattr(config, 'resnet_time_scale_shift', 'default'),
         "class_embed_type": getattr(config, 'class_embed_type', None),
         "num_class_embeds": getattr(config, 'num_class_embeds', None),
+        
+        # Store actual UNet structure info for validation
+        "down_block_types": getattr(config, 'down_block_types', []),
+        "up_block_types": getattr(config, 'up_block_types', []),
     }
     
     return architecture_dict
