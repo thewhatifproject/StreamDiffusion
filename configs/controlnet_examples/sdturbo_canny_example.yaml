@@ -1,30 +1,23 @@
-model_id: "stabilityai/sd-turbo"
-pipeline_type: "sdturbo"
-t_index_list: [0,16,32]  # Controls denoising strength - lower values = less denoising, higher = more denoising
+model_id: "C:\\_dev\\comfy\\ComfyUI\\models\\checkpoints\\sd_turbo.safetensors"
+t_index_list: [0,16,32]
 width: 512
 height: 512
 device: "cuda"
 dtype: "float16"
 
 # Generation parameters
-prompt: "a beautiful artwork, highly detailed, masterpiece"
-negative_prompt: "blurry, low quality, distorted"
-guidance_scale: 0.0  # SD Turbo typically uses no guidance
-num_inference_steps: 1  # SD Turbo single-step inference
-# Note: strength parameter removed - use t_index_list above to control denoising amount
-
-# SD Turbo optimizations
-use_taesd: true  # Use Tiny AutoEncoder for faster decoding
-safety_checker: false
+prompt: "an anime render of a girl with purple hair, masterpiece"
+negative_prompt: "blurry, low quality, flat, 2d"
+guidance_scale: 1.1
+num_inference_steps: 50
 
 # Advanced parameters
 pipeline_type: "sdturbo"
-use_lcm_lora: false  # SD Turbo already has LCM built-in
+use_lcm_lora: false
 use_tiny_vae: true
-acceleration: "tensorrt"  # Can be "tensorrt" for additional speed
-cfg_type: "none"
-seed: 42
-
+acceleration: "tensorrt"
+cfg_type: "self"
+seed: 789
 # ControlNet configurations
 controlnets:
   - model_id: "thibaud/controlnet-sd21-canny-diffusers"

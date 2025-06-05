@@ -41,6 +41,22 @@ class CannyPreprocessor(BasePreprocessor):
         # Validate and normalize input tensor
         image_tensor = self.validate_tensor_input(image_tensor)
         
+        # Resize to 512x512 first to ensure consistent output size
+        target_size = (512, 512)
+        current_size = image_tensor.shape[-2:]
+        if current_size != target_size:
+            import torch.nn.functional as F
+            if image_tensor.dim() == 3:
+                image_tensor = image_tensor.unsqueeze(0)
+            image_tensor = F.interpolate(
+                image_tensor,
+                size=target_size,
+                mode='bilinear',
+                align_corners=False
+            )
+            if image_tensor.shape[0] == 1:
+                image_tensor = image_tensor.squeeze(0)
+        
         # Convert to grayscale if needed (stay on GPU)
         if image_tensor.shape[0] == 3:  # RGB
             # Convert RGB to grayscale using standard weights
@@ -79,10 +95,14 @@ class CannyPreprocessor(BasePreprocessor):
             image: Input image
             
         Returns:
-            PIL Image with detected edges (black and white)
+            PIL Image with detected edges (black and white) resized to 512x512
         """
         # Convert to PIL Image if needed
         image = self.validate_input(image)
+        
+        # Resize to 512x512 first to ensure consistent output size
+        if image.size != (512, 512):
+            image = image.resize((512, 512), Image.LANCZOS)
         
         # Convert to numpy array
         image_np = np.array(image)
@@ -102,5 +122,9 @@ class CannyPreprocessor(BasePreprocessor):
         # Convert back to PIL Image (RGB format for consistency)
         edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
         result = Image.fromarray(edges_rgb)
+        
+        # Ensure final output is exactly 512x512
+        if result.size != (512, 512):
+            result = result.resize((512, 512), Image.LANCZOS)
         
         return result 
