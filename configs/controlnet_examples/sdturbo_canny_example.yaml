@@ -27,7 +27,7 @@ seed: 42
 
 # ControlNet configurations
 controlnets:
-  - model_id: "lllyasviel/control_v11p_sd15_canny"
+  - model_id: "thibaud/controlnet-sd21-canny-diffusers"
     conditioning_scale: 0.8
     preprocessor: "canny"
     preprocessor_params:
