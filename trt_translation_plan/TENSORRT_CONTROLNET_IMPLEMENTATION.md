@@ -1,8 +1,227 @@
-# TensorRT ControlNet Implementation Summary
+# TensorRT ControlNet Implementation for StreamDiffusion
 
 ## Overview
 
-This document summarizes the implementation of TensorRT acceleration with ControlNet support for StreamDiffusion. The implementation enables automatic compilation of TensorRT engines with ControlNet input slots based on UNet architecture detection, allowing ControlNet models to work seamlessly with TensorRT acceleration.
+This document outlines the implementation of TensorRT acceleration with ControlNet support for StreamDiffusion, adapting the proven ComfyUI_TensorRT approach to work with diffusers-based architecture.
+
+## Key Components
+
+### 1. Model Detection (`model_detection.py`)
+- Detects model type from diffusers UNet (SD 1.5, SD 2.1, SD-XL)
+- Extracts UNet architecture parameters needed for ControlNet input calculation
+- Validates architecture compatibility
+
+### 2. ControlNet-Aware TensorRT Models (`models.py`)
+- **Core Innovation**: `get_control()` method that calculates ControlNet input tensor shapes
+- Generates TensorRT input profiles with ControlNet slots
+- Handles dynamic batching and resolution scaling
+
+### 3. ControlNet Wrapper (`controlnet_wrapper.py`)
+- Wraps diffusers UNet to accept additional ControlNet inputs
+- Maps control tensors to `down_block_additional_residuals` and `mid_block_additional_residual`
+- Ensures compatibility with TensorRT compilation
+
+### 4. Runtime Integration
+- Seamless integration with existing StreamDiffusion wrapper
+- Automatic ControlNet preprocessing and tensor routing
+- TensorRT engine building and execution
+
+## Implementation Status
+
+### ✅ Completed
+- Model detection and architecture extraction
+- ControlNet input dimension calculation 
+- TensorRT model modifications with ControlNet support
+- ControlNet wrapper implementation
+- Basic integration with StreamDiffusion wrapper
+
+### 🚧 Current Challenge
+- Channel dimension mapping between ControlNet outputs and UNet expectations
+- ONNX export compatibility during TensorRT compilation
+
+## Key Insight: ComfyUI_TensorRT Approach
+
+The critical insight from ComfyUI_TensorRT is that **ControlNet models are trained to output tensors that exactly match UNet internal feature map dimensions**. Therefore:
+
+1. **No ControlNet model needed during compilation** - only UNet architecture analysis
+2. **Calculate expected dimensions** from UNet structure
+3. **Compile engines with correct input slots** 
+4. **Runtime provides actual ControlNet outputs** that match these dimensions
+
+## Technical Implementation
+
+### UNet Architecture Analysis
+```python
+def get_control(self) -> dict:
+    """
+    Generate ControlNet input configurations based on UNet architecture
+    
+    Returns dictionary mapping control input names to tensor specifications:
+    - input_control_0: {channels: 320, height: 64, width: 64}
+    - input_control_1: {channels: 640, height: 64, width: 64}
+    - etc.
+    """
+```
+
+### TensorRT Integration
+- Input profiles include ControlNet tensors
+- Dynamic axes support variable batch sizes
+- Shape dictionaries for runtime validation
+
+### Runtime Wrapper
+```python
+def forward(self, sample, timestep, encoder_hidden_states, *control_inputs):
+    # Map control inputs to diffusers format
+    unet_kwargs = {
+        "down_block_additional_residuals": down_controls,
+        "mid_block_additional_residual": mid_control
+    }
+    return self.unet(**unet_kwargs)
+```
+
+---
+
+## DEBUGGING SESSION LEARNINGS (Conversation Summary)
+
+### 🔍 **Issues Discovered & Fixes Applied**
+
+#### **Issue 1: Spatial Resolution Mismatch**
+**Problem**: TensorRT model compiled for 32x32 control tensors (256x256 images) but production uses 64x64 (512x512 images)
+
+**Symptoms**:
+```
+🔍 Creating control inputs with fixed spatial size: 32x32  # WRONG
+🔗 Down block 0: torch.Size([2, 320, 64, 64])              # ACTUAL
+```
+
+**Root Cause**: Using `self.min_latent_shape` (32 for 256x256) instead of production resolution
+
+**Fix Applied**:
+```python
+# BEFORE: control_height = self.min_latent_shape  # 32
+# AFTER: 
+production_resolution = 512  # Standard StreamDiffusion
+control_height = production_resolution // 8  # 64
+```
+
+**Status**: ✅ **FIXED** - Spatial dimensions now correctly match 64x64
+
+#### **Issue 2: Channel Dimension Mapping**
+**Problem**: UNet expects different channels than `block_out_channels` for ControlNet inputs
+
+**Symptoms**:
+```
+RuntimeError: The size of tensor a (320) must match the size of tensor b (640) at non-singleton dimension 1
+```
+
+**Analysis**: 
+- Our mapping: `[320, 640, 1280, 1280]` (block_out_channels)
+- UNet expects: First control tensor should be 640ch, not 320ch
+
+**Fix Applied**:
+```python
+# BEFORE: control_channels = (320, 640, 1280, 1280)
+# AFTER:  control_channels = (640, 1280, 1280, 1280)  # Skip 320, start from 640
+```
+
+**Status**: 🚧 **ATTEMPTED** - Still getting channel mismatch errors
+
+### 🎯 **Key Insights Discovered**
+
+1. **Diffusers vs ComfyUI Architecture Differences**:
+   - ComfyUI: Progressive downsampling in ControlNet tensors
+   - Diffusers: Constant spatial size (same as latent), varying channels only
+
+2. **Production vs Development Resolution**:
+   - Debug scripts use arbitrary resolutions
+   - Real production uses 512x512 → 64x64 latents consistently
+
+3. **UNet Internal Feature Map Structure**:
+   - `block_out_channels` != actual internal feature map channels
+   - Need to match UNet's internal residual connection points
+   - First down block expects 640ch, not 320ch (based on error analysis)
+
+4. **TensorRT Compilation Process**:
+   - ONNX export happens during `compile_unet()`
+   - Uses sample tensors from `get_sample_input()`
+   - Error occurs during `torch.jit._get_trace_graph()` 
+
+### 🔧 **Files Modified**
+
+1. **`models.py`**: 
+   - Fixed spatial resolution calculation (32x32 → 64x64)
+   - Updated channel mapping (320,640,1280,1280 → 640,1280,1280,1280)
+   - Added production resolution constants
+
+2. **`debug_controlnet_dimensions.py`**:
+   - Created comprehensive testing framework
+   - Added real-world simulation tests
+   - Identified resolution and channel mismatches
+
+### 🧪 **Debugging Methodology Used**
+
+1. **Systematic Testing**:
+   - Manual tensor dimension tests
+   - Real-world production simulation
+   - Error message analysis for dimension mismatches
+
+2. **Architecture Analysis**:
+   - UNet configuration inspection
+   - ComfyUI_TensorRT approach research
+   - Diffusers documentation review
+
+3. **Error Pattern Recognition**:
+   - `"tensor a (X) must match tensor b (Y)"` → Channel mismatch at specific layer
+   - `"UNet expects: AxA, we provided: BxB"` → Spatial dimension mismatch
+
+### ❌ **Current Status: Still Not Working**
+
+**Latest Error** (after all fixes):
+```
+RuntimeError: The size of tensor a (320) must match the size of tensor b (640) at non-singleton dimension 1
+```
+
+**This indicates**:
+- Spatial resolution: ✅ Fixed (64x64 working)
+- Channel mapping: ❌ Still incorrect despite attempted fix
+
+### 🎯 **Next Steps for Fresh Investigation**
+
+1. **Deep UNet Analysis**: 
+   - Inspect actual UNet forward pass to understand internal feature map channels
+   - Compare with working ControlNet implementations
+
+2. **Alternative Channel Mappings**:
+   - Try different control tensor channel configurations
+   - Test with actual ControlNet model outputs to understand expected patterns
+
+3. **Diffusers ControlNet Study**:
+   - Analyze how diffusers ControlNet models are trained
+   - Understand the exact relationship between ControlNet outputs and UNet inputs
+
+4. **ComfyUI_TensorRT Deep Dive**:
+   - Study the exact channel calculation methodology in ComfyUI_TensorRT
+   - Understand if there are additional mappings we're missing
+
+### 📋 **Current Implementation State**
+
+**Working**:
+- ✅ Model detection and architecture extraction
+- ✅ TensorRT input profile generation  
+- ✅ ControlNet wrapper integration
+- ✅ Spatial dimension calculation (64x64)
+- ✅ Basic ONNX export structure
+
+**Not Working**:
+- ❌ Channel dimension mapping for ControlNet inputs
+- ❌ Successful ONNX export during TensorRT compilation
+- ❌ End-to-end TensorRT engine building with ControlNet
+
+**Core Problem**: Despite understanding the ComfyUI_TensorRT approach and implementing the spatial fixes, the **channel mapping between ControlNet tensor outputs and diffusers UNet internal feature maps** remains incorrect.
+
+---
+
+*End of debugging session summary - ready for fresh investigation with full context*
 
 ## Key Features Implemented
 

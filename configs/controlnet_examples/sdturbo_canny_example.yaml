@@ -1,6 +1,6 @@
 model_id: "stabilityai/sd-turbo"
 pipeline_type: "sdturbo"
-t_index_list: [32]  # Controls denoising strength - lower values = less denoising, higher = more denoising
+t_index_list: [0,16,32]  # Controls denoising strength - lower values = less denoising, higher = more denoising
 width: 512
 height: 512
 device: "cuda"
@@ -21,7 +21,7 @@ safety_checker: false
 pipeline_type: "sdturbo"
 use_lcm_lora: false  # SD Turbo already has LCM built-in
 use_tiny_vae: true
-acceleration: "none"  # Can be "tensorrt" for additional speed
+acceleration: "tensorrt"  # Can be "tensorrt" for additional speed
 cfg_type: "none"
 seed: 42
 

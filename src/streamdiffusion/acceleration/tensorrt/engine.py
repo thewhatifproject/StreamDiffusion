@@ -85,21 +85,21 @@ class UNet2DConditionModelEngine:
         # Add input controls (down blocks)
         if 'input' in controlnet_conditioning:
             for i, tensor in enumerate(controlnet_conditioning['input']):
-                input_name = f"input_control_{i}"
+                input_name = f"input_control_{i:02d}"  # Use zero-padded names
                 shape_dict[input_name] = tensor.shape
                 input_dict[input_name] = tensor
         
         # Add output controls (up blocks) 
         if 'output' in controlnet_conditioning:
             for i, tensor in enumerate(controlnet_conditioning['output']):
-                input_name = f"output_control_{i}"
+                input_name = f"output_control_{i:02d}"  # Use zero-padded names
                 shape_dict[input_name] = tensor.shape
                 input_dict[input_name] = tensor
         
         # Add middle controls
         if 'middle' in controlnet_conditioning:
             for i, tensor in enumerate(controlnet_conditioning['middle']):
-                input_name = f"middle_control_{i}"
+                input_name = f"input_control_middle"  # Use consistent middle naming
                 shape_dict[input_name] = tensor.shape
                 input_dict[input_name] = tensor
 
@@ -119,15 +119,15 @@ class UNet2DConditionModelEngine:
         """
         # Add down block residuals as input controls
         if down_block_additional_residuals is not None:
-            # Reverse to match TensorRT input control ordering
-            for i, tensor in enumerate(reversed(down_block_additional_residuals)):
-                input_name = f"input_control_{i}"
+            # Map directly to engine input names (no reversal needed for our approach)
+            for i, tensor in enumerate(down_block_additional_residuals):
+                input_name = f"input_control_{i:02d}"  # Use zero-padded names to match engine
                 shape_dict[input_name] = tensor.shape
                 input_dict[input_name] = tensor
         
         # Add middle block residual
         if mid_block_additional_residual is not None:
-            input_name = "middle_control_0"
+            input_name = "input_control_middle"  # Match engine middle control name
             shape_dict[input_name] = mid_block_additional_residual.shape
             input_dict[input_name] = mid_block_additional_residual
 

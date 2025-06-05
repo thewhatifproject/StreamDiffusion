@@ -541,14 +541,14 @@ class StreamDiffusionWrapper:
 
                 def create_prefix(
                     model_id_or_path: str,
-                    max_batch_size: int,
+                    max_batch: int,
                     min_batch_size: int,
                 ):
                     maybe_path = Path(model_id_or_path)
                     if maybe_path.exists():
-                        return f"{maybe_path.stem}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}"
+                        return f"{maybe_path.stem}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}--mode-{self.mode}"
                     else:
-                        return f"{model_id_or_path}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch_size}--min_batch-{min_batch_size}--mode-{self.mode}"
+                        return f"{model_id_or_path}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}--mode-{self.mode}"
 
                 # Detect ControlNet support needed based on UNet architecture
                 use_controlnet_trt = False
@@ -567,7 +567,7 @@ class StreamDiffusionWrapper:
                     engine_dir,
                     create_prefix(
                         model_id_or_path=model_id_or_path,
-                        max_batch_size=stream.trt_unet_batch_size,
+                        max_batch=stream.trt_unet_batch_size,
                         min_batch_size=stream.trt_unet_batch_size,
                     ),
                     "unet.engine",
@@ -576,7 +576,7 @@ class StreamDiffusionWrapper:
                     engine_dir,
                     create_prefix(
                         model_id_or_path=model_id_or_path,
-                        max_batch_size=self.batch_size
+                        max_batch=self.batch_size
                         if self.mode == "txt2img"
                         else stream.frame_bff_size,
                         min_batch_size=self.batch_size
@@ -589,7 +589,7 @@ class StreamDiffusionWrapper:
                     engine_dir,
                     create_prefix(
                         model_id_or_path=model_id_or_path,
-                        max_batch_size=self.batch_size
+                        max_batch=self.batch_size
                         if self.mode == "txt2img"
                         else stream.frame_bff_size,
                         min_batch_size=self.batch_size
@@ -604,7 +604,7 @@ class StreamDiffusionWrapper:
                     unet_model = UNet(
                         fp16=True,
                         device=stream.device,
-                        max_batch_size=stream.trt_unet_batch_size,
+                        max_batch=stream.trt_unet_batch_size,
                         min_batch_size=stream.trt_unet_batch_size,
                         embedding_dim=stream.text_encoder.config.hidden_size,
                         unet_dim=stream.unet.config.in_channels,
@@ -641,7 +641,7 @@ class StreamDiffusionWrapper:
                     stream.vae.forward = stream.vae.decode
                     vae_decoder_model = VAE(
                         device=stream.device,
-                        max_batch_size=self.batch_size
+                        max_batch=self.batch_size
                         if self.mode == "txt2img"
                         else stream.frame_bff_size,
                         min_batch_size=self.batch_size
@@ -665,7 +665,7 @@ class StreamDiffusionWrapper:
                     vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
                     vae_encoder_model = VAEEncoder(
                         device=stream.device,
-                        max_batch_size=self.batch_size
+                        max_batch=self.batch_size
                         if self.mode == "txt2img"
                         else stream.frame_bff_size,
                         min_batch_size=self.batch_size
@@ -724,6 +724,8 @@ class StreamDiffusionWrapper:
         except Exception:
             traceback.print_exc()
             print("Acceleration has failed. Falling back to normal mode.")
+            # TODO: Remove this temporary error once the fix is ready
+            raise NotImplementedError("Temporarily disabled for maintenance")
 
         if seed < 0: # Random seed
             seed = np.random.randint(0, 1000000)

@@ -504,6 +504,42 @@ class BaseControlNetPipeline:
                 
                 down_samples, mid_sample = controlnet(**controlnet_kwargs)
                 
+                # 🔍 DEBUG: CAPTURE REAL CONTROLNET FORMAT (COMMENTED OUT FOR CLEAN OUTPUT)
+                # print(f"\n🎯 REAL CONTROLNET OUTPUT FORMAT CAPTURED:")
+                # print(f"📊 ControlNet {i} ({type(controlnet).__name__}):")
+                # print(f"   Input latent shape: {x_t_latent.shape}")
+                # print(f"   Control image shape: {control_image.shape}")
+                # print(f"   Conditioning scale: {scale}")
+                
+                # print(f"\n📋 DOWN_BLOCK_ADDITIONAL_RESIDUALS FORMAT:")
+                # print(f"   Type: {type(down_samples)}")
+                # print(f"   Length: {len(down_samples) if down_samples is not None else 'None'}")
+                # if down_samples is not None:
+                #     for j, tensor in enumerate(down_samples):
+                #         if tensor is not None:
+                #             print(f"   Position {j}: {tensor.shape} (dtype: {tensor.dtype})")
+                #         else:
+                #             print(f"   Position {j}: None")
+                
+                # print(f"\n📋 MID_BLOCK_ADDITIONAL_RESIDUAL FORMAT:")
+                # if mid_sample is not None:
+                #     print(f"   Type: {type(mid_sample)}")
+                #     print(f"   Shape: {mid_sample.shape} (dtype: {mid_sample.dtype})")
+                # else:
+                #     print(f"   mid_sample: None")
+                
+                # print(f"\n🔗 TUPLE STRUCTURE:")
+                # if down_samples is not None:
+                #     shapes_list = []
+                #     for j, tensor in enumerate(down_samples):
+                #         if tensor is not None:
+                #             shapes_list.append(f"{tensor.shape[1]}ch")
+                #         else:
+                #             shapes_list.append("None")
+                #     print(f"   down_block_additional_residuals: [{', '.join(shapes_list)}]")
+                # print(f"   mid_block_additional_residual: {mid_sample.shape[1] if mid_sample is not None else 'None'}ch")
+                # print(f"🎯 END REAL CONTROLNET FORMAT\n")
+                
                 # Combine outputs
                 if down_block_res_samples is None:
                     down_block_res_samples = down_samples
@@ -563,6 +599,47 @@ class BaseControlNetPipeline:
             down_block_res_samples, mid_block_res_sample = self._get_controlnet_conditioning(
                 x_t_latent_plus_uc, t_list_expanded, self.stream.prompt_embeds, **conditioning_context
             )
+            
+            # CRITICAL FIX: TensorRT engine expects ALL control tensors at 64x64
+            # Upsample any varying spatial dimensions to match engine expectations
+            if down_block_res_samples is not None:
+                target_spatial_size = 64  # TensorRT engine expects uniform 64x64
+                upsampled_tensors = []
+                
+                for i, tensor in enumerate(down_block_res_samples):
+                    current_size = tensor.shape[-1]  # Get spatial dimension
+                    if current_size != target_spatial_size:
+                        # Upsample to 64x64 using bilinear interpolation
+                        import torch.nn.functional as F
+                        upsampled = F.interpolate(
+                            tensor, 
+                            size=(target_spatial_size, target_spatial_size), 
+                            mode='bilinear', 
+                            align_corners=False
+                        )
+                        upsampled_tensors.append(upsampled)
+                        print(f"🔧 Upsampled control tensor {i}: {tensor.shape} → {upsampled.shape}")
+                    else:
+                        upsampled_tensors.append(tensor)
+                        print(f"✅ Control tensor {i} already correct size: {tensor.shape}")
+                
+                down_block_res_samples = upsampled_tensors
+            
+            # Upsample middle block if needed
+            if mid_block_res_sample is not None:
+                target_spatial_size = 64  # TensorRT engine expects uniform 64x64
+                current_size = mid_block_res_sample.shape[-1]
+                if current_size != target_spatial_size:
+                    import torch.nn.functional as F
+                    mid_block_res_sample = F.interpolate(
+                        mid_block_res_sample,
+                        size=(target_spatial_size, target_spatial_size),
+                        mode='bilinear',
+                        align_corners=False
+                    )
+                    print(f"🔧 Upsampled middle control: {current_size}x{current_size} → 64x64")
+                else:
+                    print(f"✅ Middle control already correct size: {mid_block_res_sample.shape}")
             
             # Call TensorRT engine with ControlNet inputs (using diffusers-style interface)
             model_pred = self.stream.unet(

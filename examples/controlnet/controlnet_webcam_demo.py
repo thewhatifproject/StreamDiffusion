@@ -24,6 +24,160 @@ from streamdiffusion.image_utils import postprocess_image
 # sys.path.append(str(Path(__file__).parent.parent))
 
 
+def debug_unet_architecture(wrapper):
+    """Debug UNet architecture to understand channel expectations"""
+    print("\n🔍 DEBUGGING UNET ARCHITECTURE:")
+    
+    # Access the underlying UNet
+    unet = wrapper.stream.unet
+    print(f"UNet config: {unet.config}")
+    print(f"UNet class: {type(unet).__name__}")
+    
+    # Print down block configuration
+    print(f"Down block types: {unet.config.down_block_types}")
+    print(f"Block out channels: {unet.config.block_out_channels}")
+    
+    # Inspect down blocks
+    print("\n📋 DOWN BLOCKS ANALYSIS:")
+    for i, block in enumerate(unet.down_blocks):
+        print(f"Down block {i}: {type(block).__name__}")
+        print(f"  Block out channels: {block.out_channels if hasattr(block, 'out_channels') else 'N/A'}")
+        
+        # Look for ResNet blocks
+        if hasattr(block, 'resnets'):
+            for j, resnet in enumerate(block.resnets):
+                print(f"    ResNet {j}: in={resnet.in_channels}, out={resnet.out_channels}")
+    
+    print(f"\n🎯 CRITICAL INSIGHT:")
+    print(f"Standard SD UNet has 4 down blocks with channels: {unet.config.block_out_channels}")
+    print(f"But ControlNet tensors should match the ResNet OUTPUT channels, not block_out_channels")
+
+
+def debug_controlnet_tensors(wrapper):
+    """Debug ControlNet tensor processing"""
+    print("\n🔍 DEBUGGING CONTROLNET TENSORS:")
+    
+    # Check if TensorRT mode is active
+    print(f"TensorRT active: {hasattr(wrapper.stream, 'trt_unet')}")
+    
+    if hasattr(wrapper.stream, 'trt_unet'):
+        print("🚀 TensorRT MODE:")
+        try:
+            # Inspect TensorRT inputs
+            trt_model = wrapper.stream.trt_unet
+            print(f"TensorRT inputs: {list(trt_model.input_names)}")
+            for i, input_name in enumerate(trt_model.input_names):
+                if 'control' in input_name.lower():
+                    print(f"  Control input {i}: {input_name}")
+        except Exception as e:
+            print(f"TensorRT inspection failed: {e}")
+
+
+def debug_tensor_matching_deep(wrapper, sample_tensor, timestep_tensor, encoder_hidden_states):
+    """Deep debug of tensor matching during UNet forward pass"""
+    print("\n🔬 DEEP TENSOR MATCHING DEBUG:")
+    
+    # Create a small test to understand the processing
+    try:
+        # Temporarily monkey patch the UNet forward to capture internal processing
+        original_forward = wrapper.stream.unet.forward
+        
+        def debug_forward(*args, **kwargs):
+            print(f"\n📍 UNet Forward Called:")
+            print(f"Args: {len(args)}")
+            print(f"Kwargs keys: {list(kwargs.keys())}")
+            
+            # Check down_block_additional_residuals processing
+            if 'down_block_additional_residuals' in kwargs:
+                residuals = kwargs['down_block_additional_residuals']
+                print(f"\n🎯 DOWN_BLOCK_ADDITIONAL_RESIDUALS:")
+                print(f"Type: {type(residuals)}")
+                print(f"Length: {len(residuals) if residuals else 'None'}")
+                if residuals:
+                    for i, res in enumerate(residuals):
+                        if res is not None:
+                            print(f"  Residual {i}: {res.shape}")
+                        else:
+                            print(f"  Residual {i}: None")
+            
+            # Call original with error catching
+            try:
+                result = original_forward(*args, **kwargs)
+                print("✅ UNet forward succeeded")
+                return result
+            except Exception as e:
+                print(f"❌ UNet forward failed: {e}")
+                print(f"Error type: {type(e).__name__}")
+                
+                # Try to extract more info about the failing operation
+                import traceback
+                print("📍 Full traceback:")
+                traceback.print_exc()
+                raise
+        
+        # Apply the monkey patch temporarily
+        wrapper.stream.unet.forward = debug_forward
+        
+        # Try a simple forward pass
+        print("\n🧪 TESTING SIMPLE FORWARD PASS:")
+        try:
+            # Create minimal test inputs
+            test_sample = torch.randn(1, 4, 64, 64, device=sample_tensor.device, dtype=sample_tensor.dtype)
+            test_timestep = torch.tensor([500], device=timestep_tensor.device, dtype=timestep_tensor.dtype)
+            test_encoder = torch.randn(1, 77, 768, device=encoder_hidden_states.device, dtype=encoder_hidden_states.dtype)
+            
+            # Test without ControlNet first
+            print("Testing WITHOUT ControlNet...")
+            result = wrapper.stream.unet(test_sample, test_timestep, test_encoder)
+            print("✅ Base UNet works")
+            
+            # Test with fake ControlNet residuals
+            print("\nTesting WITH ControlNet (fake residuals)...")
+            fake_residuals = [
+                torch.randn(1, 320, 64, 64, device=test_sample.device, dtype=test_sample.dtype),
+                torch.randn(1, 640, 64, 64, device=test_sample.device, dtype=test_sample.dtype),
+                torch.randn(1, 1280, 64, 64, device=test_sample.device, dtype=test_sample.dtype),
+                None  # 4th position is None for DownBlock2D
+            ]
+            result = wrapper.stream.unet(
+                test_sample, 
+                test_timestep, 
+                test_encoder,
+                down_block_additional_residuals=fake_residuals
+            )
+            print("✅ UNet with fake ControlNet works!")
+            
+        except Exception as e:
+            print(f"❌ Test failed: {e}")
+        
+        finally:
+            # Restore original forward
+            wrapper.stream.unet.forward = original_forward
+            
+    except Exception as e:
+        print(f"❌ Deep debug failed: {e}")
+
+
+def debug_actual_tensor_shapes(sample_tensor, control_tensors):
+    """Debug actual tensor shapes during forward pass"""
+    print(f"\n🔍 TENSOR SHAPE DEBUGGING:")
+    print(f"📏 Sample tensor shape: {sample_tensor.shape}")
+    
+    if control_tensors:
+        if isinstance(control_tensors, dict):
+            for key, tensors in control_tensors.items():
+                if isinstance(tensors, list):
+                    for i, tensor in enumerate(tensors):
+                        print(f"📏 Control {key}[{i}] shape: {tensor.shape}")
+                else:
+                    print(f"📏 Control {key} shape: {tensors.shape}")
+        elif isinstance(control_tensors, list):
+            for i, tensor in enumerate(control_tensors):
+                print(f"📏 Control tensor[{i}] shape: {tensor.shape}")
+        else:
+            print(f"📏 Control tensors type: {type(control_tensors)}")
+
+
 def get_current_controlnet_scale(wrapper, index=0):
     """Safely get current ControlNet scale"""
     if not wrapper.use_controlnet:
@@ -132,7 +286,7 @@ def main():
         width=args.resolution,
         height=args.resolution,
         warmup=10,
-        acceleration=getattr(config, 'acceleration', 'none'),
+        acceleration=getattr(config, 'acceleration', 'none'),  # RESTORED: Test TensorRT with fixed format
         do_add_noise=True,
         use_lcm_lora=use_lcm_lora,
         use_tiny_vae=use_tiny_vae,
@@ -147,6 +301,18 @@ def main():
     
     print("✓ Pipeline created successfully")
     
+    # Debug UNet architecture (COMMENTED OUT FOR CLEAN OUTPUT)
+    # debug_unet_architecture(wrapper)
+    # debug_controlnet_tensors(wrapper)
+    
+    # # Prepare some test tensors for deep debugging
+    # test_sample = torch.randn(2, 4, 64, 64, device="cuda", dtype=torch.float16)
+    # test_timestep = torch.tensor([500, 600], device="cuda", dtype=torch.float16)
+    # test_encoder = torch.randn(2, 77, 768, device="cuda", dtype=torch.float16)
+    
+    # # Deep debug tensor matching
+    # debug_tensor_matching_deep(wrapper, test_sample, test_timestep, test_encoder)
+    
     # Prepare the model with prompt
     wrapper.prepare(
         prompt=prompt,
@@ -155,6 +321,12 @@ def main():
         guidance_scale=getattr(config, 'guidance_scale', 1.2 if cfg_type != "none" else 1.0),
         delta=getattr(config, 'delta', 1.0),
     )
+    
+    print("🔍 DEBUGGING: Checking if TensorRT compilation succeeded...")
+    if hasattr(wrapper.stream, 'unet') and hasattr(wrapper.stream.unet, 'engine'):
+        print("✅ TensorRT engine detected - compilation succeeded!")
+    else:
+        print("❌ No TensorRT engine - running in PyTorch mode")
     
     # Setup webcam
     cap = cv2.VideoCapture(args.camera)
@@ -179,10 +351,12 @@ def main():
     print("  - Press '+' to increase ControlNet scale")
     print("  - Press '-' to decrease ControlNet scale")
     print("  - Press 'p' to change prompt interactively")
+    print("  - Press 'd' to debug tensor shapes during inference")
     
     frame_count = 0
     show_preprocessed = args.show_preprocessed
     fps_counter = []
+    debug_tensor_shapes = False
     
     # Get preprocessor name for display
     preprocessor_name = controlnet_config['preprocessor'].replace("_", " ").title()
@@ -213,6 +387,20 @@ def main():
             wrapper.update_control_image_efficient(frame_pil)
             prep_time = time.time() - prep_start
             profile_times['preprocessing'].append(prep_time)
+            
+            # Debug tensor shapes if requested
+            if debug_tensor_shapes and frame_count > 0:
+                print(f"\n🔍 FRAME {frame_count} TENSOR DEBUG:")
+                # Try to access sample tensor (this is a bit hacky but for debugging)
+                try:
+                    sample_tensor = torch.randn(1, 4, args.resolution // 8, args.resolution // 8, device='cuda', dtype=torch.float16)
+                    print(f"📏 Sample latent tensor shape: {sample_tensor.shape}")
+                    
+                    # Get ControlNet tensors if available
+                    if hasattr(wrapper.stream, 'controlnets'):
+                        print(f"📋 Number of ControlNets: {len(wrapper.stream.controlnets)}")
+                except Exception as e:
+                    print(f"❌ Debug tensor access failed: {e}")
             
             # Profile generation
             gen_start = time.time()
@@ -287,6 +475,8 @@ def main():
             # Add info overlay
             current_scale = get_current_controlnet_scale(wrapper)
             info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
+            if debug_tensor_shapes:
+                info_text += " | DEBUG ON"
             
             cv2.putText(combined, info_text, (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
@@ -354,6 +544,10 @@ def main():
                 # Toggle control image preview
                 show_preprocessed = not show_preprocessed
                 print(f"🖼️  Control image preview: {'ON' if show_preprocessed else 'OFF'}")
+            elif key == ord('d'):
+                # Toggle tensor shape debugging
+                debug_tensor_shapes = not debug_tensor_shapes
+                print(f"🔍 Tensor shape debugging: {'ON' if debug_tensor_shapes else 'OFF'}")
             elif key == ord('+'):
                 # Increase ControlNet scale
                 if has_controlnets(wrapper):
