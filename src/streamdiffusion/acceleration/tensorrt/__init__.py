@@ -14,6 +14,7 @@ from .engine import AutoencoderKLEngine, UNet2DConditionModelEngine
 from .models import VAE, BaseModel, UNet, VAEEncoder
 from .model_detection import detect_model_from_diffusers_unet, extract_unet_architecture, validate_architecture
 from .controlnet_wrapper import create_controlnet_wrapper
+from .engine_pool import ControlNetEnginePool
 
 
 class TorchVAEEncoder(torch.nn.Module):
@@ -114,7 +115,7 @@ def accelerate_with_tensorrt(
     use_controlnet = hasattr(stream, 'controlnets') and len(getattr(stream, 'controlnets', [])) > 0
     
     if use_controlnet:
-        print("🎛️ ControlNet detected - enabling TensorRT ControlNet support")
+        print("ControlNet detected - enabling TensorRT ControlNet support")
         
         # Detect model architecture
         try:
@@ -122,13 +123,13 @@ def accelerate_with_tensorrt(
             unet_arch = extract_unet_architecture(unet)
             unet_arch = validate_architecture(unet_arch, model_type)
             
-            print(f"📋 Detected model: {model_type}")
-            print(f"🏗️ Architecture: model_channels={unet_arch['model_channels']}, "
+            print(f"Detected model: {model_type}")
+            print(f"Architecture: model_channels={unet_arch['model_channels']}, "
                   f"channel_mult={unet_arch['channel_mult']}, "
                   f"context_dim={unet_arch['context_dim']}")
         except Exception as e:
-            print(f"❌ Failed to detect model architecture: {e}")
-            print("🔄 Falling back to standard TensorRT compilation without ControlNet")
+            print(f"Failed to detect model architecture: {e}")
+            print("Falling back to standard TensorRT compilation without ControlNet")
             use_controlnet = False
             unet_arch = {}
     else:
@@ -166,7 +167,7 @@ def accelerate_with_tensorrt(
 
     if not os.path.exists(unet_engine_path):
         if use_controlnet:
-            print("🚀 Compiling UNet with ControlNet support")
+            print("Compiling UNet with ControlNet support")
             
             # Create ControlNet-aware wrapper for ONNX export
             control_input_names = unet_model.get_input_names()
@@ -182,7 +183,7 @@ def accelerate_with_tensorrt(
                 **engine_build_options,
             )
         else:
-            print("🔧 Compiling UNet without ControlNet support")
+            print("Compiling UNet without ControlNet support")
             compile_unet(
                 unet,
                 unet_model,
@@ -192,7 +193,7 @@ def accelerate_with_tensorrt(
                 **engine_build_options,
             )
     else:
-        print("♻️ Using existing UNet engine")
+        print("Using existing UNet engine")
         del unet
 
     if not os.path.exists(vae_decoder_engine_path):
@@ -229,7 +230,17 @@ def accelerate_with_tensorrt(
         setattr(stream.unet, 'use_control', True)
         setattr(stream.unet, 'unet_arch', unet_arch)
         setattr(stream.unet, 'control_input_names', unet_model.get_input_names())
-        print("✅ TensorRT UNet engine configured for ControlNet support")
+        print("TensorRT UNet engine configured for ControlNet support")
+        
+        # Initialize ControlNet engine pool for automatic compilation
+        controlnet_engine_dir = os.path.join(engine_dir, "controlnet")
+        os.makedirs(controlnet_engine_dir, exist_ok=True)
+        
+        stream.controlnet_engine_pool = ControlNetEnginePool(
+            engine_dir=controlnet_engine_dir,
+            stream=cuda_stream
+        )
+        print("ControlNet engine pool initialized")
     else:
         setattr(stream.unet, 'use_control', False)
     

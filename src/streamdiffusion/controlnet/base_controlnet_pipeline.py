@@ -310,7 +310,41 @@ class BaseControlNetPipeline:
         # Already a PIL image
         return cached_result
     
-    def _load_controlnet_model(self, model_id: str) -> ControlNetModel:
+    def _load_controlnet_model(self, model_id: str):
+        """
+        Load a ControlNet model with TensorRT acceleration support
+        
+        Args:
+            model_id: Model ID or path
+            
+        Returns:
+            Hybrid ControlNet (TensorRT if available, PyTorch fallback)
+        """
+        # First load the PyTorch model as fallback
+        pytorch_controlnet = self._load_pytorch_controlnet_model(model_id)
+        
+        # Check if TensorRT engine pool is available
+        if hasattr(self.stream, 'controlnet_engine_pool'):
+            # Determine ControlNet type and model type from model_id or config
+            controlnet_type = self._infer_controlnet_type(model_id)
+            model_type = self._infer_model_type()
+            
+            print(f"Loading ControlNet {model_id} with TensorRT acceleration support")
+            print(f"  ControlNet type: {controlnet_type}, Model type: {model_type}")
+            
+            # Get hybrid ControlNet from engine pool (auto-compiles if needed)
+            return self.stream.controlnet_engine_pool.get_or_load_engine(
+                model_id=model_id,
+                pytorch_model=pytorch_controlnet,
+                controlnet_type=controlnet_type,
+                model_type=model_type
+            )
+        else:
+            # Fallback to PyTorch only
+            print(f"Loading ControlNet {model_id} (PyTorch only - no TensorRT acceleration)")
+            return pytorch_controlnet
+    
+    def _load_pytorch_controlnet_model(self, model_id: str):
         """
         Load a ControlNet model from HuggingFace or local path
         
@@ -352,6 +386,78 @@ class BaseControlNetPipeline:
             
         except Exception as e:
             raise ValueError(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
+    
+    def _infer_controlnet_type(self, model_id: str) -> str:
+        """
+        Infer ControlNet type from model ID
+        
+        Args:
+            model_id: ControlNet model identifier
+            
+        Returns:
+            Inferred ControlNet type
+        """
+        model_lower = model_id.lower()
+        
+        # Common ControlNet type mappings
+        if "canny" in model_lower:
+            return "canny"
+        elif "depth" in model_lower:
+            return "depth"
+        elif "openpose" in model_lower or "pose" in model_lower:
+            return "openpose"
+        elif "normal" in model_lower:
+            return "normal"
+        elif "seg" in model_lower:
+            return "seg"
+        elif "lineart" in model_lower:
+            return "lineart"
+        elif "softedge" in model_lower:
+            return "softedge"
+        elif "scribble" in model_lower:
+            return "scribble"
+        elif "mlsd" in model_lower:
+            return "mlsd"
+        elif "qr" in model_lower:
+            return "qr"
+        else:
+            # Default fallback
+            return "canny"
+    
+    def _infer_model_type(self) -> str:
+        """
+        Infer base model type from StreamDiffusion configuration
+        
+        Returns:
+            Inferred model type (sd15, sdxl, turbo)
+        """
+        # Check UNet configuration to determine model type
+        if hasattr(self.stream, 'unet') and hasattr(self.stream.unet, 'config'):
+            unet_config = self.stream.unet.config
+            
+            # Check for SDXL characteristics
+            if hasattr(unet_config, 'projection_class_embeddings_input_dim'):
+                return "sdxl"
+            elif hasattr(unet_config, 'time_cond_proj_dim'):
+                return "sdxl"
+            # Check cross attention dimension for SDXL
+            elif hasattr(unet_config, 'cross_attention_dim') and unet_config.cross_attention_dim == 2048:
+                return "sdxl"
+        
+        # Check text encoder for SDXL
+        if hasattr(self.stream, 'text_encoder') and hasattr(self.stream.text_encoder, 'config'):
+            text_config = self.stream.text_encoder.config
+            if hasattr(text_config, 'hidden_size') and text_config.hidden_size == 1024:
+                return "sdxl"
+        
+        # Check model type from pipeline
+        if hasattr(self.stream, 'pipe'):
+            pipe_class_name = self.stream.pipe.__class__.__name__
+            if "SDXL" in pipe_class_name or "Turbo" in pipe_class_name:
+                return "sdxl"
+        
+        # Default to SD 1.5
+        return "sd15"
     
     def _prepare_control_image(self, 
                               control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
