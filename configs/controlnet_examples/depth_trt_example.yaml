@@ -1,5 +1,5 @@
 model_id: "C:\\_dev\\comfy\\ComfyUI\\models\\checkpoints\\kohaku-v2.1.safetensors"
-t_index_list: [0,16,32]
+t_index_list: [16,32]
 width: 512
 height: 512
 device: "cuda"

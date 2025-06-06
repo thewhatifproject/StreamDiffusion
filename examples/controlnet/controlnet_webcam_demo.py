@@ -94,18 +94,16 @@ def main():
     config.height = args.resolution
     
     # Determine t_index_list and other parameters based on pipeline type
+    t_index_list = getattr(config, 't_index_list', [0,16])
     if pipeline_type == 'sdturbo':
-        t_index_list = [0]  # Single step for SD Turbo
-        cfg_type = "none"
-        use_lcm_lora = False
-        use_tiny_vae = True
+        cfg_type = getattr(config, 'cfg_type', "none")
+        use_lcm_lora = getattr(config, 'use_lcm_lora', False)
+        use_tiny_vae = getattr(config, 'use_tiny_vae', True)
     elif pipeline_type == 'sdxlturbo':
-        t_index_list = [0, 16]  # Two steps for SD-XL Turbo  
-        cfg_type = "none"
-        use_lcm_lora = False
-        use_tiny_vae = False
+        cfg_type = getattr(config, 'cfg_type', "none")
+        use_lcm_lora = getattr(config, 'use_lcm_lora', False)
+        use_tiny_vae = getattr(config, 'use_tiny_vae', False)
     else:  # sd1.5
-        t_index_list = getattr(config, 't_index_list', [32, 45])
         cfg_type = getattr(config, 'cfg_type', 'self')
         use_lcm_lora = getattr(config, 'use_lcm_lora', True)
         use_tiny_vae = getattr(config, 'use_tiny_vae', True)

@@ -1,5 +1,5 @@
 model_id: "C:\\_dev\\comfy\\ComfyUI\\models\\checkpoints\\sd_turbo.safetensors"
-t_index_list: [0,16,32]
+t_index_list: [0,16]
 width: 512
 height: 512
 device: "cuda"
@@ -13,7 +13,7 @@ num_inference_steps: 50
 
 # Advanced parameters
 pipeline_type: "sdturbo"
-use_lcm_lora: false
+use_lcm_lora: true
 use_tiny_vae: true
 acceleration: "tensorrt"
 cfg_type: "self"
