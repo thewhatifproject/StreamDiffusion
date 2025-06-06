@@ -454,24 +454,6 @@ def main():
                 fps_counter.pop(0)
             avg_fps = len(fps_counter) / sum(fps_counter) if fps_counter else 0
             
-            # Show profiling info every 30 frames
-            if frame_count % 30 == 0 and frame_count > 0:
-                recent_prep = profile_times['preprocessing'][-30:]
-                recent_gen = profile_times['generation'][-30:]
-                recent_display = profile_times['display'][-30:]
-                recent_total = profile_times['total'][-30:]
-                
-                print(f"\n📊 Performance Profile (last 30 frames):")
-                print(f"  Preprocessing: {sum(recent_prep)/len(recent_prep)*1000:.1f}ms avg")
-                print(f"  Generation:    {sum(recent_gen)/len(recent_gen)*1000:.1f}ms avg")
-                print(f"  Display:       {sum(recent_display)/len(recent_display)*1000:.1f}ms avg")
-                print(f"  Total:         {sum(recent_total)/len(recent_total)*1000:.1f}ms avg")
-                print(f"  FPS:           {avg_fps:.1f}")
-                if pipeline_type == 'sdturbo':
-                    print(f"  ⚡ SD Turbo single-step inference: {gen_time*1000:.1f}ms")
-                elif pipeline_type == 'sdxlturbo':
-                    print(f"  ⚡ SD-XL Turbo multi-step inference: {gen_time*1000:.1f}ms")
-            
             # Add info overlay
             current_scale = get_current_controlnet_scale(wrapper)
             info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
