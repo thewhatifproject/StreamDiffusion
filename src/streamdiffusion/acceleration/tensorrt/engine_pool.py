@@ -2,11 +2,11 @@
 ControlNet Engine Pool Management
 
 This module manages multiple ControlNet TensorRT engines, providing
-on-demand compilation, loading, and hybrid TensorRT/PyTorch operation.
+synchronous compilation, loading, and hybrid TensorRT/PyTorch operation.
 """
 
 import os
-import threading
+import time
 import hashlib
 from typing import Dict, Optional, Set, Union, Any, List
 from pathlib import Path
@@ -38,12 +38,6 @@ class ControlNetEnginePool:
         # Engine storage
         self.engines: Dict[str, HybridControlNet] = {}
         self.compiled_models: Set[str] = set()
-        self.compiling_models: Set[str] = set()
-        self.compilation_status: Dict[str, str] = {}
-        
-        # Compilation thread management
-        self._compilation_threads: Dict[str, threading.Thread] = {}
-        self._compilation_lock = threading.Lock()
         
         # Discover existing engines
         self._discover_existing_engines()
@@ -84,6 +78,24 @@ class ControlNetEnginePool:
         model_engine_dir = self._get_model_engine_dir(model_id)
         engine_path = model_engine_dir / "cnet.engine"
         
+        # If engine doesn't exist, compile it now (synchronously)
+        if not engine_path.exists():
+            print(f"ControlNet engine not found for {model_id}, compiling now...")
+            compilation_start = time.time()
+            
+            success = self._compile_controlnet(
+                pytorch_model, controlnet_type, model_type, str(engine_path)
+            )
+            
+            compilation_time = time.time() - compilation_start
+            
+            if success:
+                print(f"✅ ControlNet compilation completed in {compilation_time:.2f}s")
+                print(f"   Engine saved to: {engine_path}")
+            else:
+                print(f"❌ ControlNet compilation failed after {compilation_time:.2f}s")
+                print(f"   Will use PyTorch fallback for {model_id}")
+        
         # Create hybrid ControlNet wrapper
         hybrid_controlnet = HybridControlNet(
             model_id=model_id,
@@ -95,102 +107,7 @@ class ControlNetEnginePool:
         # Store in pool
         self.engines[model_id] = hybrid_controlnet
         
-        # Start background compilation if TensorRT not available
-        if not hybrid_controlnet.is_using_tensorrt:
-            self._start_background_compilation(
-                model_id, pytorch_model, controlnet_type, model_type
-            )
-        
         return hybrid_controlnet
-    
-    def compile_controlnet_on_demand(self, 
-                                   model_id: str,
-                                   pytorch_model: Any,
-                                   sample_inputs: Dict[str, torch.Tensor],
-                                   controlnet_type: str = "canny",
-                                   model_type: str = "sd15",
-                                   **build_options) -> bool:
-        """
-        Compile ControlNet to TensorRT on-demand
-        
-        Args:
-            model_id: ControlNet model identifier
-            pytorch_model: PyTorch ControlNet model to compile
-            sample_inputs: Sample inputs for shape inference
-            controlnet_type: Type of ControlNet
-            model_type: Base model type
-            **build_options: Additional build options
-            
-        Returns:
-            True if compilation started/completed, False if failed
-        """
-        engine_path = self._get_engine_path(model_id)
-        
-        # Check if already compiled
-        if engine_path.exists():
-            return True
-        
-        # Check if compilation is in progress
-        if model_id in self._compilation_threads:
-            thread = self._compilation_threads[model_id]
-            if thread.is_alive():
-                return False  # Compilation in progress
-        
-        try:
-            return self._compile_controlnet_sync(
-                model_id, pytorch_model, sample_inputs, 
-                controlnet_type, model_type, **build_options
-            )
-        except Exception as e:
-            print(f"ControlNet compilation failed for {model_id}: {e}")
-            self.compilation_status[model_id] = f"Failed: {e}"
-            return False
-    
-    def _start_background_compilation(self, 
-                                    model_id: str,
-                                    pytorch_model: Any, 
-                                    controlnet_type: str,
-                                    model_type: str):
-        """
-        Start background compilation of ControlNet to TensorRT
-        
-        Args:
-            model_id: ControlNet model identifier
-            pytorch_model: PyTorch ControlNet model
-            controlnet_type: Type of ControlNet
-            model_type: Base model type
-        """
-        if model_id in self.compiling_models:
-            return  # Already compiling
-            
-        self.compiling_models.add(model_id)
-        
-        def compile_worker():
-            try:
-                model_engine_dir = self._get_model_engine_dir(model_id)
-                engine_path = model_engine_dir / "cnet.engine"
-                
-                print(f"Starting background compilation of {model_id} to TensorRT...")
-                print(f"Engine will be saved to: {engine_path}")
-                
-                success = self._compile_controlnet(
-                    pytorch_model, controlnet_type, model_type, str(engine_path)
-                )
-                
-                if success:
-                    print(f"Successfully compiled {model_id} to TensorRT")
-                    # Update the existing hybrid model to use TensorRT
-                    if model_id in self.engines:
-                        self.engines[model_id].upgrade_to_tensorrt(str(engine_path))
-                else:
-                    print(f"Failed to compile {model_id} to TensorRT, will continue using PyTorch")
-                    
-            except Exception as e:
-                print(f"Error compiling {model_id}: {e}")
-            finally:
-                self.compiling_models.discard(model_id)
-        
-        threading.Thread(target=compile_worker, daemon=True).start()
     
     def _compile_controlnet(self, 
                            pytorch_model: Any,
@@ -319,26 +236,17 @@ class ControlNetEnginePool:
         status = {
             "total_engines": len(self.engines),
             "compiled_models": len(self.compiled_models),
-            "active_compilations": len([t for t in self._compilation_threads.values() if t.is_alive()]),
             "engines": {}
         }
         
         for model_id, engine in self.engines.items():
             engine_status = engine.status.copy()
-            engine_status["compilation_status"] = self.compilation_status.get(model_id, "Unknown")
             status["engines"][model_id] = engine_status
         
         return status
     
     def cleanup(self) -> None:
         """Clean up resources and stop background threads"""
-        # Wait for compilation threads to finish (with timeout)
-        for model_id, thread in list(self._compilation_threads.items()):
-            if thread.is_alive():
-                print(f"Waiting for ControlNet compilation to finish: {model_id}")
-                thread.join(timeout=10)  # 10 second timeout
-        
-        self._compilation_threads.clear()
         self.engines.clear()
     
     def __del__(self):

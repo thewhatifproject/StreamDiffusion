@@ -84,8 +84,8 @@ def test_controlnet_integration():
         print(f"❌ Failed to enable TensorRT acceleration: {e}")
         return False
     
-    # Step 3: Load ControlNet (should trigger automatic compilation)
-    print("\n3. Loading ControlNet (should trigger automatic compilation)...")
+    # Step 3: Load ControlNet (should trigger synchronous compilation)
+    print("\n3. Loading ControlNet (should trigger synchronous compilation)...")
     initial_time = time.time()
     
     try:
@@ -104,19 +104,7 @@ def test_controlnet_integration():
             if hybrid_controlnet.is_using_tensorrt:
                 print("✅ ControlNet is using TensorRT engine")
             else:
-                print("⚠️  ControlNet is using PyTorch (TensorRT compilation may be in progress)")
-                
-                # Wait a bit for background compilation
-                print("   Waiting for background compilation...")
-                for i in range(30):  # Wait up to 30 seconds
-                    time.sleep(1)
-                    if hybrid_controlnet.is_using_tensorrt:
-                        print(f"✅ ControlNet upgraded to TensorRT after {i+1}s")
-                        break
-                    if i % 5 == 4:
-                        print(f"   Still compiling... ({i+1}s)")
-                else:
-                    print("⚠️  Background compilation still in progress or failed")
+                print("⚠️  ControlNet is using PyTorch fallback (compilation may have failed)")
         else:
             print("❌ ControlNet not found in engine pool")
             return False
@@ -152,7 +140,6 @@ def test_controlnet_integration():
         print(f"✅ Engine pool status:")
         print(f"   Total engines: {status['total_engines']}")
         print(f"   Compiled models: {status['compiled_models']}")
-        print(f"   Active compilations: {status['active_compilations']}")
         
         for model_id, engine_status in status['engines'].items():
             print(f"   {model_id}: {engine_status}")

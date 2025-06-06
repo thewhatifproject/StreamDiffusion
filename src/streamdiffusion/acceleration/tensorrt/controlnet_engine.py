@@ -264,31 +264,6 @@ class HybridControlNet:
         """Check if currently using TensorRT engine"""
         return self.trt_engine is not None
     
-    def upgrade_to_tensorrt(self, engine_path: str) -> bool:
-        """
-        Upgrade to TensorRT engine after background compilation completes
-        
-        Args:
-            engine_path: Path to the compiled TensorRT engine
-            
-        Returns:
-            True if upgrade successful, False otherwise
-        """
-        try:
-            print(f"Upgrading ControlNet {self.model_id} to TensorRT...")
-            
-            # Load TensorRT engine
-            self.trt_engine = ControlNetModelEngine(engine_path, self.stream)
-            self.engine_path = engine_path
-            
-            print(f"Successfully upgraded ControlNet {self.model_id} to TensorRT")
-            return True
-            
-        except Exception as e:
-            print(f"Failed to upgrade ControlNet {self.model_id} to TensorRT: {e}")
-            self.trt_engine = None
-            return False
-    
     @property
     def status(self) -> Dict[str, Any]:
         """Get current status information"""
