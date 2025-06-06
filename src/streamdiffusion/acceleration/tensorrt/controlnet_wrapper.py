@@ -60,31 +60,18 @@ class ControlNetUNetWrapper(torch.nn.Module):
         print(f"🔗 ControlNet wrapper forward: sample.shape={sample.shape}")
         print(f"🔗 Received {len(control_args)} control tensors")
         
-        # REAL CONTROLNET FORMAT: 12 down block tensors + 1 middle tensor
-        # CRITICAL FIX: All control tensors come in at 64x64, need to downsample to match real format
-        # Real format: [320ch@64x64]*3 + [320/640ch@32x32]*3 + [640/1280ch@16x16]*3 + [1280ch@8x8]*3 + middle@8x8
+        # tensors at proper resolutions:
+        # [320ch@64x64]*3 + [320/640ch@32x32]*3 + [640/1280ch@16x16]*3 + [1280ch@8x8]*3 + middle@8x8
         
         down_block_controls = []
         mid_block_control = None
         
-        # Define target spatial dimensions for each position
-        target_spatial_dims = [
-            # Down block 0: 64x64 (positions 0-2)
-            64, 64, 64,
-            # Down block 1: 32x32 (positions 3-5)  
-            32, 32, 32,
-            # Down block 2: 16x16 (positions 6-8)
-            16, 16, 16,
-            # Down block 3: 8x8 (positions 9-11)
-            8, 8, 8
-        ]
-        
-        # Extract the 12 down block control tensors
+        # Extract the 12 down block control tensors + 1 middle control tensor
         input_control_count = len(self.input_control_indices)
-        print(f"🔗 Processing {input_control_count} input controls for REAL ControlNet format")
+        print(f"🔗 Processing {input_control_count} input controls - NO INTERPOLATION NEEDED!")
         
         if input_control_count > 0:
-            # Get all 12 down block control tensors + 1 middle control tensor
+            # Get all control tensors at their CORRECT native sizes
             all_control_tensors = []
             middle_tensor = None
             
@@ -95,33 +82,19 @@ class ControlNetUNetWrapper(torch.nn.Module):
                     
                     # Check if this is the middle control tensor (last one)
                     if i == input_control_count - 1:  # Last tensor is middle
-                        # Downsample middle control from 64x64 to 8x8
-                        target_size = 8
-                        if tensor.shape[-1] != target_size:
-                            import torch.nn.functional as F
-                            tensor = F.interpolate(tensor, size=(target_size, target_size), mode='bilinear', align_corners=False)
                         middle_tensor = tensor
-                        print(f"🔗 Middle control: {tensor.shape} (downsampled to 8x8)")
+                        print(f"🔗 Middle control: {tensor.shape} (already correct size!)")
                     else:
-                        # Downsample down block control to target spatial dimension
-                        if i < len(target_spatial_dims):
-                            target_size = target_spatial_dims[i]
-                            if tensor.shape[-1] != target_size:
-                                import torch.nn.functional as F
-                                tensor = F.interpolate(tensor, size=(target_size, target_size), mode='bilinear', align_corners=False)
+                        # No interpolation needed - tensor is already at correct size!
                         all_control_tensors.append(tensor)
-                        print(f"🔗 Down control {i}: {tensor.shape} (target: {target_size}x{target_size})")
+                        print(f"🔗 Down control {i}: {tensor.shape} (already correct size!)")
             
             # Validate we have exactly 12 down block tensors
             if len(all_control_tensors) == 12:
                 down_block_controls = all_control_tensors
                 mid_block_control = middle_tensor
-                print(f"✅ PERFECT: Got exactly 12 down block tensors + 1 middle tensor")
-                print(f"🔗 Final down block tensor shapes: {[t.shape for t in down_block_controls]}")
-                if mid_block_control is not None:
-                    print(f"🔗 Final middle block tensor shape: {mid_block_control.shape}")
             else:
-                print(f"❌ ERROR: Expected 12 down block tensors, got {len(all_control_tensors)}")
+                print(f"ERROR: Expected 12 down block tensors, got {len(all_control_tensors)}")
                 # Fallback: empty controls
                 down_block_controls = None
                 mid_block_control = None
@@ -134,21 +107,19 @@ class ControlNetUNetWrapper(torch.nn.Module):
             'return_dict': False,
         }
         
-        # CRITICAL: Pass control tensors exactly as diffusers UNet expects
+        # Pass control tensors directly - no processing needed!
         if down_block_controls:
-            # diffusers UNet expects a tuple/list of control tensors for down blocks
-            # REAL FORMAT: 12 tensors exactly as provided by real ControlNet
-            print(f"🔗 Adding down_block_additional_residuals:")
-            print(f"   Type: list with {len(down_block_controls)} tensors")
-            for i, ctrl in enumerate(down_block_controls):
-                print(f"   Position {i}: {ctrl.shape}")
+            # print(f"Adding down_block_additional_residuals:")
+            # print(f"   Type: list with {len(down_block_controls)} tensors")
+            # for i, ctrl in enumerate(down_block_controls):
+            #     print(f"   Position {i}: {ctrl.shape}")
             unet_kwargs['down_block_additional_residuals'] = down_block_controls
         
         if mid_block_control is not None:
-            print(f"🔗 Adding mid_block_additional_residual: {mid_block_control.shape}")
+            # print(f"Adding mid_block_additional_residual: {mid_block_control.shape}")
             unet_kwargs['mid_block_additional_residual'] = mid_block_control
         
-        print(f"🔗 Calling UNet with {len(unet_kwargs)} arguments")
+        # print(f"Calling UNet with {len(unet_kwargs)} arguments")
         
         # Call UNet with ControlNet conditioning
         return self.unet(**unet_kwargs)
@@ -182,7 +153,7 @@ class MultiControlNetUNetWrapper(torch.nn.Module):
             end_idx = start_idx + controls_per_net
             self.controlnet_indices.append(list(range(start_idx, end_idx)))
         
-        print(f"🔗 Multi-ControlNet wrapper initialized for {num_controlnets} ControlNets")
+        print(f"Multi-ControlNet wrapper initialized for {num_controlnets} ControlNets")
     
     def forward(self, sample, timestep, encoder_hidden_states, *control_args):
         """

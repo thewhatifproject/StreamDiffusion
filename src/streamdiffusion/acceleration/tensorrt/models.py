@@ -256,86 +256,74 @@ class UNet(BaseModel):
 
     def get_control(self) -> dict:
         """
-        Generate ControlNet input configurations based on REAL ControlNet format
+        Generate ControlNet input configurations with CORRECT spatial dimensions
         
-        BREAKTHROUGH DISCOVERY: Real ControlNet provides 12 down block tensors + 1 middle!
-        Each UNet down block has multiple ResNet layers, and ControlNet provides 
-        a tensor for EACH individual ResNet layer.
+        FIXED: Generate control tensors at their natural multi-resolution sizes
+        This eliminates the need for expensive runtime interpolation in the wrapper.
         
-        REAL FORMAT DISCOVERED:
+        FORMAT:
         - Position 0-2:  320ch @ 64×64  (Down block 0 - 3 ResNet layers)
         - Position 3-5:  320/640ch @ 32×32  (Down block 1 - 3 ResNet layers)  
         - Position 6-8:  640/1280ch @ 16×16  (Down block 2 - 3 ResNet layers)
         - Position 9-11: 1280ch @ 8×8   (Down block 3 - 3 ResNet layers)
         - Middle:        1280ch @ 8×8   (1 middle block tensor)
         
-        TENSORRT COMPATIBILITY FIX:
-        TensorRT doesn't support varying spatial dimensions in optimization profiles.
-        So we generate ALL control inputs at uniform 64×64 and let the wrapper
-        downsample them to correct sizes at runtime: 64→32→16→8
-        
-        Total: 13 control inputs (12 down + 1 middle), all at 64×64 for TensorRT
+        Total: 13 control inputs (12 down + 1 middle)
         """
         # Get UNet architecture
         block_out_channels = self.unet_arch.get('block_out_channels', (320, 640, 1280, 1280))
         
-        # Base spatial dimensions for latent input (512x512 → 64x64 latents)
-        base_spatial = 64  # Always 64x64 for 512x512 generation
-        
         control_inputs = {}
         
-        print(f"🎯 REAL CONTROLNET FORMAT: Generating 12 down + 1 middle control tensors")
-        print(f"   Based on discovered format: [320ch@64x64]*3 + [320/640ch@32x32]*3 + [640/1280ch@16x16]*3 + [1280ch@8x8]*3 + middle")
+      
         
-        # Generate the EXACT 12 down block control tensors to match real ControlNet
-        # CRITICAL FIX: Use uniform spatial dimensions for TensorRT compatibility
-        # Let the wrapper handle downsampling at runtime
+        # Generate control tensors with CORRECT spatial dimensions
         control_configs = [
-            # Down block 0: 3 tensors @ 64x64 (uniform spatial size)
+            # Down block 0: 3 tensors @ 64x64 (correct size)
             (320, 64),   # Position 0: First ResNet in down block 0
             (320, 64),   # Position 1: Second ResNet in down block 0  
             (320, 64),   # Position 2: Third ResNet in down block 0
             
-            # Down block 1: 3 tensors @ 64x64 (uniform spatial size) 
-            (320, 64),   # Position 3: First ResNet in down block 1 (320→640 transition)
-            (640, 64),   # Position 4: Second ResNet in down block 1
-            (640, 64),   # Position 5: Third ResNet in down block 1
+            # Down block 1: 3 tensors @ 32x32 (CORRECT SIZE - was 64x64)
+            (320, 32),   # Position 3: First ResNet in down block 1 
+            (640, 32),   # Position 4: Second ResNet in down block 1
+            (640, 32),   # Position 5: Third ResNet in down block 1
             
-            # Down block 2: 3 tensors @ 64x64 (uniform spatial size)
-            (640, 64),   # Position 6: First ResNet in down block 2 (640→1280 transition)  
-            (1280, 64),  # Position 7: Second ResNet in down block 2
-            (1280, 64),  # Position 8: Third ResNet in down block 2
+            # Down block 2: 3 tensors @ 16x16 (CORRECT SIZE - was 64x64)
+            (640, 16),   # Position 6: First ResNet in down block 2
+            (1280, 16),  # Position 7: Second ResNet in down block 2
+            (1280, 16),  # Position 8: Third ResNet in down block 2
             
-            # Down block 3: 3 tensors @ 64x64 (uniform spatial size)
-            (1280, 64),  # Position 9: First ResNet in down block 3
-            (1280, 64),  # Position 10: Second ResNet in down block 3
-            (1280, 64),  # Position 11: Third ResNet in down block 3
+            # Down block 3: 3 tensors @ 8x8 (CORRECT SIZE - was 64x64)
+            (1280, 8),   # Position 9: First ResNet in down block 3
+            (1280, 8),   # Position 10: Second ResNet in down block 3
+            (1280, 8),   # Position 11: Third ResNet in down block 3
         ]
         
-        # Generate down block control inputs
+        # Generate down block control inputs with CORRECT sizes
         for i, (channels, spatial_size) in enumerate(control_configs):
-            input_name = f"input_control_{i:02d}"  # Use zero-padded numbers
+            input_name = f"input_control_{i:02d}"
             control_inputs[input_name] = {
                 'batch': self.min_batch,
                 'channels': channels,
                 'height': spatial_size,
                 'width': spatial_size,
-                'downsampling_factor': 1  # No downsampling in diffusers
+                'downsampling_factor': 1  # No downsampling needed!
             }
-            print(f"   {input_name}: {channels}ch @ {spatial_size}x{spatial_size}")
+            # print(f"   {input_name}: {channels}ch @ {spatial_size}x{spatial_size}")
         
-        # Add middle block control (always present)
+        # Add middle block control with CORRECT size
         control_inputs["input_control_middle"] = {
             'batch': self.min_batch,
-            'channels': 1280,  # Always 1280 for middle block
-            'height': 64,      # Use uniform 64x64 for TensorRT compatibility (downsample at runtime)
-            'width': 64,
+            'channels': 1280,
+            'height': 8,      # CORRECT SIZE: 8x8 (was 64x64)
+            'width': 8,
             'downsampling_factor': 1
         }
-        print(f"   input_control_middle: 1280ch @ 64x64 (will downsample to 8x8 at runtime)")
+        # print(f"   input_control_middle: 1280ch @ 8x8 (CORRECT SIZE)")
         
-        print(f"🎯 TOTAL: {len(control_inputs)} control inputs (12 down + 1 middle)")
-        print(f"   This matches the EXACT real ControlNet format!")
+        # print(f"   TOTAL: {len(control_inputs)} control inputs at CORRECT multi-resolution sizes")
+ 
         
         return control_inputs
 
@@ -372,9 +360,20 @@ class UNet(BaseModel):
         }
         
         if self.use_control and self.control_inputs:
-            # Add dynamic axes for ControlNet inputs
-            for name in self.control_inputs:
-                base_axes[name] = {0: "2B", 2: "H", 3: "W"}
+            # Add dynamic axes for ControlNet inputs with UNIQUE spatial dimension names
+            # This prevents TensorRT conflicts when inputs have different spatial sizes
+            for name, shape_spec in self.control_inputs.items():
+                height = shape_spec["height"]
+                width = shape_spec["width"]
+                
+                # Use unique spatial dimension names based on actual size
+                # This tells TensorRT that 64x64, 32x32, 16x16, 8x8 are different
+                spatial_suffix = f"{height}x{width}"
+                base_axes[name] = {
+                    0: "2B", 
+                    2: f"H_{spatial_suffix}", 
+                    3: f"W_{spatial_suffix}"
+                }
         
         return base_axes
 
