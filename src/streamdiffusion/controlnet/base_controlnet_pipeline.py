@@ -70,11 +70,9 @@ class BaseControlNetPipeline:
             Index of the added ControlNet
         """
         if not controlnet_config.enabled:
-            print(f"{self.model_type} {controlnet_config.model_id} is disabled, skipping")
             return -1
         
         # Load ControlNet model
-        print(f"Loading {self.model_type} ControlNet: {controlnet_config.model_id}")
         controlnet = self._load_controlnet_model(controlnet_config.model_id)
         
         # Load preprocessor if specified
@@ -114,7 +112,6 @@ class BaseControlNetPipeline:
         if len(self.controlnets) == 1:
             self._patch_stream_diffusion()
         
-        print(f"Added {self.model_type} ControlNet {len(self.controlnets) - 1}: {controlnet_config.model_id}")
         return len(self.controlnets) - 1
     
     def remove_controlnet(self, index: int) -> None:
@@ -133,8 +130,6 @@ class BaseControlNetPipeline:
             # Unpatch if no ControlNets remain
             if len(self.controlnets) == 0:
                 self._unpatch_stream_diffusion()
-            
-            print(f"Removed {self.model_type} ControlNet {index}")
         else:
             raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
     
@@ -146,7 +141,6 @@ class BaseControlNetPipeline:
         self.preprocessors.clear()
         
         self._unpatch_stream_diffusion()
-        print(f"Cleared all {self.model_type} ControlNets")
     
     def update_control_image(self, 
                            index: int, 
@@ -213,7 +207,6 @@ class BaseControlNetPipeline:
         except Exception as e:
             # Fallback to original input if tensor conversion fails
             use_tensor_processing = False
-            print(f"⚠️  Tensor conversion failed: {e}, falling back to PIL processing")
         
         # Group ControlNets by preprocessor type to avoid duplicate processing
         preprocessor_groups = {}
@@ -372,8 +365,8 @@ class BaseControlNetPipeline:
                 processed_tensor = processed_tensor.to(device=self.device, dtype=self.dtype)
                 return self._post_process_control_image(processed_tensor)
             except Exception as e:
-                print(f"⚠️  Tensor processing failed for {type(preprocessor).__name__}: {e}")
                 # Fall through to PIL processing
+                pass
         
         # Check if input is already a tensor that we can work with directly
         if isinstance(control_image, torch.Tensor) and preprocessor is None:
@@ -515,7 +508,6 @@ class BaseControlNetPipeline:
                     mid_block_res_sample += mid_sample
                     
             except Exception as e:
-                print(f"Warning: {self.model_type} ControlNet {i} failed: {e}")
                 continue
         
         return down_block_res_samples, mid_block_res_sample
@@ -532,15 +524,12 @@ class BaseControlNetPipeline:
         is_tensorrt = hasattr(self.stream.unet, 'engine') or hasattr(self.stream.unet, 'use_control')
         
         if is_tensorrt:
-            print("🚀 TensorRT ControlNet mode enabled")
             self._patch_tensorrt_mode()
         else:
-            print("🐍 PyTorch ControlNet mode enabled")
             self._patch_pytorch_mode()
         
         self._is_patched = True
-        print(f"Patched StreamDiffusion with {self.model_type} ControlNet support")
-
+    
     def _patch_tensorrt_mode(self):
         """Patch for TensorRT mode with ControlNet support"""
         
@@ -567,12 +556,11 @@ class BaseControlNetPipeline:
             # FIXED: TensorRT engine now expects CORRECT varying spatial dimensions
             # No upsampling needed - tensors are passed through at their native sizes
             if down_block_res_samples is not None:
-                print(f"🚀 TensorRT: Passing {len(down_block_res_samples)} control tensors at correct sizes")
                 for i, tensor in enumerate(down_block_res_samples):
-                    print(f"   Control tensor {i}: {tensor.shape} (native size)")
+                    pass
             
             if mid_block_res_sample is not None:
-                print(f"🚀 TensorRT: Middle control tensor: {mid_block_res_sample.shape} (native size)")
+                pass
             
             # Call TensorRT engine with ControlNet inputs (using diffusers-style interface)
             model_pred = self.stream.unet(
@@ -778,7 +766,6 @@ class BaseControlNetPipeline:
         if self._is_patched and self._original_unet_step is not None:
             self.stream.unet_step = self._original_unet_step
             self._is_patched = False
-            print("Unpatched StreamDiffusion")
 
     def _convert_to_tensor_early(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> torch.Tensor:
         """

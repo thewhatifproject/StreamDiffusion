@@ -413,8 +413,6 @@ class UNet(BaseModel):
                 height = shape_spec["height"]  # Use EXACT height from config
                 width = shape_spec["width"]    # Use EXACT width from config
                 
-                print(f"🔧 Profile for {name}: {channels}ch @ {height}x{width}")
-                
                 profile[name] = [
                     (min_batch, channels, height, width),      # Use exact dimensions
                     (batch_size, channels, height, width),     # Use exact dimensions  
@@ -463,8 +461,6 @@ class UNet(BaseModel):
                 channels = shape_spec["channels"]
                 height = shape_spec["height"]  # Use the EXACT height from our config
                 width = shape_spec["width"]    # Use the EXACT width from our config
-                
-                print(f"🔧 Generating sample tensor {name}: {channels}ch @ {height}x{width}")
                 
                 control_input = torch.randn(
                     2 * batch_size, channels, height, width, 

@@ -195,7 +195,7 @@ class StreamDiffusionWrapper:
     ) -> None:
         """
         Prepares the model for inference.
-
+        
         Parameters
         ----------
         prompt : str
@@ -208,9 +208,11 @@ class StreamDiffusionWrapper:
             The delta multiplier of virtual residual noise,
             by default 1.0.
         """
-        print(f"🎯 StreamDiffusionWrapper.prepare() called with prompt: '{prompt}'")
-        print(f"📊 Self.stream type: {type(self.stream)}")
-        print(f"📊 Has ControlNet: {self.use_controlnet}")
+        
+        # Apply ControlNet if configured
+        if self.use_controlnet and hasattr(self, 'controlnet_configs') and self.controlnet_configs:
+            # Apply ControlNet integration
+            self._apply_controlnet_integration()
         
         self.stream.prepare(
             prompt,
@@ -439,7 +441,6 @@ class StreamDiffusionWrapper:
         # Determine if this should be an SDXL pipeline from controlnet config
         pipeline_type = self._get_pipeline_type_from_config(controlnet_config)
         is_sdxl = pipeline_type == "sdxlturbo"
-        print(f"🔍 Pipeline type from config: {pipeline_type} -> {'SDXL' if is_sdxl else 'SD 1.5'} pipeline will be loaded")
         
         try:  # Load from local directory
             if is_sdxl:
@@ -447,12 +448,10 @@ class StreamDiffusionWrapper:
                 pipe = StableDiffusionXLPipeline.from_pretrained(
                     model_id_or_path,
                 ).to(device=self.device, dtype=self.dtype)
-                print(f"✅ Loaded SDXL pipeline from {model_id_or_path}")
             else:
                 pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
                     model_id_or_path,
                 ).to(device=self.device, dtype=self.dtype)
-                print(f"✅ Loaded SD 1.5 pipeline from {model_id_or_path}")
 
         except ValueError:  # Load from huggingface
             if is_sdxl:
@@ -460,12 +459,10 @@ class StreamDiffusionWrapper:
                 pipe = StableDiffusionXLPipeline.from_single_file(
                     model_id_or_path,
                 ).to(device=self.device, dtype=self.dtype)
-                print(f"✅ Loaded SDXL pipeline from single file {model_id_or_path}")
             else:
                 pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_single_file(
                     model_id_or_path,
                 ).to(device=self.device, dtype=self.dtype)
-                print(f"✅ Loaded SD 1.5 pipeline from single file {model_id_or_path}")
         except Exception:  # No model found
             traceback.print_exc()
             print("Model load has failed. Doesn't exist.")
@@ -496,7 +493,6 @@ class StreamDiffusionWrapper:
                 for lora_name, lora_scale in lora_dict.items():
                     stream.load_lora(lora_name)
                     stream.fuse_lora(lora_scale=lora_scale)
-                    print(f"Use LoRA: {lora_name} in weights {lora_scale}")
 
         if use_tiny_vae:
             if vae_id is not None:
@@ -509,7 +505,6 @@ class StreamDiffusionWrapper:
                 stream.vae = AutoencoderTiny.from_pretrained(taesd_model).to(
                     device=pipe.device, dtype=pipe.dtype
                 )
-                print(f"Using Tiny VAE: {taesd_model}")
 
         try:
             if acceleration == "xformers":
@@ -558,9 +553,9 @@ class StreamDiffusionWrapper:
                     unet_arch = extract_unet_architecture(stream.unet)
                     unet_arch = validate_architecture(unet_arch, model_type)
                     use_controlnet_trt = True  # Always enable ControlNet support in TRT engines
-                    print(f"🎛️ Enabling TensorRT ControlNet support for {model_type}")
+                    print(f"Enabling TensorRT ControlNet support for {model_type}")
                 except Exception as e:
-                    print(f"⚠️ ControlNet architecture detection failed: {e}, compiling without ControlNet support")
+                    print(f"ControlNet architecture detection failed: {e}, compiling without ControlNet support")
 
                 engine_dir = Path(engine_dir)
                 unet_path = os.path.join(
@@ -614,7 +609,6 @@ class StreamDiffusionWrapper:
                     
                     # Use ControlNet wrapper if ControlNet support is enabled
                     if use_controlnet_trt:
-                        print("🚀 Compiling UNet with ControlNet support")
                         control_input_names = unet_model.get_input_names()
                         wrapped_unet = create_controlnet_wrapper(stream.unet, control_input_names)
                         compile_unet(
@@ -626,7 +620,6 @@ class StreamDiffusionWrapper:
                             opt_batch_size=stream.trt_unet_batch_size,
                         )
                     else:
-                        print("🔧 Compiling UNet without ControlNet support")
                         compile_unet(
                             stream.unet,
                             unet_model,
@@ -696,7 +689,6 @@ class StreamDiffusionWrapper:
                 if use_controlnet_trt:
                     setattr(stream.unet, 'use_control', True)
                     setattr(stream.unet, 'unet_arch', unet_arch)
-                    print("✅ TensorRT UNet engine configured for ControlNet support")
                 else:
                     setattr(stream.unet, 'use_control', False)
                     
@@ -713,14 +705,12 @@ class StreamDiffusionWrapper:
                 gc.collect()
                 torch.cuda.empty_cache()
 
-                print("TensorRT acceleration enabled.")
             if acceleration == "sfast":
                 from streamdiffusion.acceleration.sfast import (
                     accelerate_with_stable_fast,
                 )
 
                 stream = accelerate_with_stable_fast(stream)
-                print("StableFast acceleration enabled.")
         except Exception:
             traceback.print_exc()
             print("Acceleration has failed. Falling back to normal mode.")
@@ -780,8 +770,6 @@ class StreamDiffusionWrapper:
             
         pipeline_type = config_dict.get('pipeline_type', 'sd1.5')
         
-        print(f"Applying ControlNet patch for {pipeline_type}")
-        
         if pipeline_type == "sdxlturbo":
             from streamdiffusion.controlnet.controlnet_sdxlturbo_pipeline import SDXLTurboControlNetPipeline
             controlnet_pipeline = SDXLTurboControlNetPipeline(stream, self.device, self.dtype)
@@ -798,7 +786,6 @@ class StreamDiffusionWrapper:
         for config in controlnet_config:
             model_id = config.get('model_id')
             if not model_id:
-                print("⚠️  Skipping ControlNet config without model_id")
                 continue
                 
             preprocessor = config.get('preprocessor', None)
@@ -818,9 +805,8 @@ class StreamDiffusionWrapper:
                 )
                 
                 controlnet_pipeline.add_controlnet(cn_config)
-                print(f"✓ Added ControlNet: {model_id}")
             except Exception as e:
-                print(f"❌ Failed to add ControlNet {model_id}: {e}")
+                pass
         
         return controlnet_pipeline
 
