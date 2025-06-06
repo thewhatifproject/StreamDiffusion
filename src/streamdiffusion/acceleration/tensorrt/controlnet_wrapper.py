@@ -57,9 +57,7 @@ class ControlNetUNetWrapper(torch.nn.Module):
         Returns:
             UNet output (noise prediction)
         """
-        print(f"🔗 ControlNet wrapper forward: sample.shape={sample.shape}")
-        print(f"🔗 Received {len(control_args)} control tensors")
-        
+
         # tensors at proper resolutions:
         # [320ch@64x64]*3 + [320/640ch@32x32]*3 + [640/1280ch@16x16]*3 + [1280ch@8x8]*3 + middle@8x8
         
@@ -68,7 +66,6 @@ class ControlNetUNetWrapper(torch.nn.Module):
         
         # Extract the 12 down block control tensors + 1 middle control tensor
         input_control_count = len(self.input_control_indices)
-        print(f"🔗 Processing {input_control_count} input controls - NO INTERPOLATION NEEDED!")
         
         if input_control_count > 0:
             # Get all control tensors at their CORRECT native sizes
@@ -83,11 +80,10 @@ class ControlNetUNetWrapper(torch.nn.Module):
                     # Check if this is the middle control tensor (last one)
                     if i == input_control_count - 1:  # Last tensor is middle
                         middle_tensor = tensor
-                        print(f"🔗 Middle control: {tensor.shape} (already correct size!)")
                     else:
                         # No interpolation needed - tensor is already at correct size!
                         all_control_tensors.append(tensor)
-                        print(f"🔗 Down control {i}: {tensor.shape} (already correct size!)")
+
             
             # Validate we have exactly 12 down block tensors
             if len(all_control_tensors) == 12:

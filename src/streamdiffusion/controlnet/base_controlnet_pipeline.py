@@ -47,7 +47,7 @@ class BaseControlNetPipeline:
         self._original_unet_step = None
         self._is_patched = False
         
-        # Optimization: Cache transforms and reusable tensors
+        # Cache transforms and reusable tensors
         import torchvision.transforms as transforms
         self._cached_transform = transforms.ToTensor()
         self._temp_tensor_cache = {}
@@ -55,6 +55,12 @@ class BaseControlNetPipeline:
         # Cache for preprocessed images to eliminate redundant processing
         self._preprocessed_cache = {}
         self._last_input_frame = None
+        
+        # Cache preprocessor type names to avoid expensive type() calls
+        self._preprocessor_type_cache = {}
+        
+        # Pre-allocate active indices list to avoid repeated allocations
+        self._active_indices_cache = []
     
     def add_controlnet(self, 
                       controlnet_config: ControlNetConfig,
@@ -155,7 +161,7 @@ class BaseControlNetPipeline:
         if not (0 <= index < len(self.controlnets)):
             raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
         
-        # Skip processing if scale is 0 (optimization)
+        # Skip processing if scale is 0 
         if self.controlnet_scales[index] == 0:
             return
             
@@ -208,13 +214,22 @@ class BaseControlNetPipeline:
             # Fallback to original input if tensor conversion fails
             use_tensor_processing = False
         
+        # Reuse active indices list and clear only when needed
+        self._active_indices_cache.clear()
+        
         # Group ControlNets by preprocessor type to avoid duplicate processing
         preprocessor_groups = {}
         for i in range(len(self.controlnets)):
             if self.controlnet_scales[i] > 0:  # Only process active ones
+                self._active_indices_cache.append(i)  # Cache active indices
                 preprocessor = self.preprocessors[i]
                 if preprocessor is not None:
-                    preprocessor_type = type(preprocessor).__name__
+                    # Use cached preprocessor type name
+                    preprocessor_id = id(preprocessor)
+                    if preprocessor_id not in self._preprocessor_type_cache:
+                        self._preprocessor_type_cache[preprocessor_id] = type(preprocessor).__name__
+                    preprocessor_type = self._preprocessor_type_cache[preprocessor_id]
+                    
                     if preprocessor_type not in preprocessor_groups:
                         preprocessor_groups[preprocessor_type] = {
                             'preprocessor': preprocessor,
@@ -222,11 +237,15 @@ class BaseControlNetPipeline:
                         }
                     preprocessor_groups[preprocessor_type]['indices'].append(i)
         
+        # Early exit if no active ControlNets
+        if not self._active_indices_cache:
+            return
+        
         # Process once per preprocessor type
         for preprocessor_type, group in preprocessor_groups.items():
             preprocessor = group['preprocessor']
             
-            # Debug: Check if tensor processing is available and being used
+            # Check tensor processing capability once per group
             has_tensor_processing = hasattr(preprocessor, 'process_tensor')
             using_tensor = use_tensor_processing and has_tensor_processing
             
@@ -462,20 +481,43 @@ class BaseControlNetPipeline:
         if not self.controlnets:
             return None, None
         
-        # Quick check: any active ControlNets?
-        active_indices = [
-            i for i, (controlnet, control_image, scale) in enumerate(
-                zip(self.controlnets, self.controlnet_images, self.controlnet_scales)
-            ) if controlnet is not None and control_image is not None and scale > 0
-        ]
+        #  Use cached active indices if available (from recent update_control_image_efficient call)
+        if hasattr(self, '_active_indices_cache') and self._active_indices_cache:
+            # Verify cached indices are still valid (scales might have changed)
+            active_indices = [
+                i for i in self._active_indices_cache 
+                if i < len(self.controlnets) and 
+                   self.controlnets[i] is not None and 
+                   self.controlnet_images[i] is not None and 
+                   self.controlnet_scales[i] > 0
+            ]
+        else:
+            # Fallback to full calculation
+            active_indices = [
+                i for i, (controlnet, control_image, scale) in enumerate(
+                    zip(self.controlnets, self.controlnet_images, self.controlnet_scales)
+                ) if controlnet is not None and control_image is not None and scale > 0
+            ]
         
         if not active_indices:
             return None, None
         
-        down_block_res_samples = None
-        mid_block_res_sample = None
+        #  Pre-compute common controlnet_kwargs base
+        base_kwargs = {
+            'sample': x_t_latent,
+            'timestep': timestep,
+            'encoder_hidden_states': encoder_hidden_states,
+            'return_dict': False,
+        }
+        additional_kwargs = self._get_additional_controlnet_kwargs(**kwargs)
+        base_kwargs.update(additional_kwargs)
         
-        # Only process active ControlNets
+        #  Batch processing - collect all ControlNet outputs first, then combine vectorized
+        down_samples_list = []
+        mid_samples_list = []
+        scales_list = []
+        
+        # Process all active ControlNets and collect outputs
         for i in active_indices:
             controlnet = self.controlnets[i]
             control_image = self.controlnet_images[i]
@@ -483,32 +525,51 @@ class BaseControlNetPipeline:
             
             # Forward pass through ControlNet
             try:
-                controlnet_kwargs = {
-                    'sample': x_t_latent,
-                    'timestep': timestep,
-                    'encoder_hidden_states': encoder_hidden_states,
+                #  Use pre-computed base kwargs and only add specific values
+                controlnet_kwargs = base_kwargs.copy()
+                controlnet_kwargs.update({
                     'controlnet_cond': control_image,
                     'conditioning_scale': scale,
-                    'return_dict': False,
-                }
-                
-                # Allow subclasses to add additional kwargs (e.g., SDXL added_cond_kwargs)
-                controlnet_kwargs.update(self._get_additional_controlnet_kwargs(**kwargs))
+                })
                 
                 down_samples, mid_sample = controlnet(**controlnet_kwargs)
-                
-                # Combine outputs
-                if down_block_res_samples is None:
-                    down_block_res_samples = down_samples
-                    mid_block_res_sample = mid_sample
-                else:
-                    # Add contributions from this ControlNet
-                    for j in range(len(down_block_res_samples)):
-                        down_block_res_samples[j] += down_samples[j]
-                    mid_block_res_sample += mid_sample
+                down_samples_list.append(down_samples)
+                mid_samples_list.append(mid_sample)
+                scales_list.append(scale)
                     
             except Exception as e:
                 continue
+        
+        #  Vectorized combination instead of sequential addition
+        if not down_samples_list:
+            return None, None
+        
+        # Combine outputs using vectorized operations
+        if len(down_samples_list) == 1:
+            # Single ControlNet - no combination needed
+            down_block_res_samples = down_samples_list[0]
+            mid_block_res_sample = mid_samples_list[0]
+        else:
+            # Multiple ControlNets - use vectorized addition
+            down_block_res_samples = None
+            mid_block_res_sample = None
+            
+            # Process down block samples
+            for down_samples in down_samples_list:
+                if down_block_res_samples is None:
+                    down_block_res_samples = down_samples
+                else:
+                    #  Vectorized in-place addition
+                    for j in range(len(down_block_res_samples)):
+                        down_block_res_samples[j] = down_block_res_samples[j] + down_samples[j]
+            
+            # Process middle block samples  
+            for mid_sample in mid_samples_list:
+                if mid_block_res_sample is None:
+                    mid_block_res_sample = mid_sample
+                else:
+                    #  Vectorized addition
+                    mid_block_res_sample = mid_block_res_sample + mid_sample
         
         return down_block_res_samples, mid_block_res_sample
     

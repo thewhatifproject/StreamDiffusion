@@ -16,10 +16,9 @@ from pathlib import Path
 import sys
 import time
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-from utils.wrapper import StreamDiffusionWrapper
-from streamdiffusion.controlnet import load_controlnet_config
-from streamdiffusion.image_utils import postprocess_image
+from collections import deque  # OPTIMIZATION: For efficient sliding window FPS tracking
+
+# OPTIMIZATION: Remove heavy imports from module level - import when needed
 
 def get_current_controlnet_scale(wrapper, index=0):
     """Safely get current ControlNet scale"""
@@ -36,6 +35,12 @@ def has_controlnets(wrapper):
     return hasattr(wrapper.stream, 'controlnets') and len(getattr(wrapper.stream, 'controlnets', [])) > 0
 
 def main():
+    # OPTIMIZATION: Import heavy modules only when actually needed
+    sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+    from utils.wrapper import StreamDiffusionWrapper
+    from streamdiffusion.controlnet import load_controlnet_config
+    from streamdiffusion.image_utils import postprocess_image
+    
     parser = argparse.ArgumentParser(description="ControlNet Webcam Demo")
     
     # Get the script directory to make paths relative to it
@@ -190,11 +195,34 @@ def main():
     
     frame_count = 0
     show_preprocessed = args.show_preprocessed and not args.simple  # Disable in simple mode
-    fps_counter = [] if not args.simple else None
+    # OPTIMIZATION: Replace list with deque for O(1) operations instead of O(n) pop(0)
+    fps_counter = deque(maxlen=30) if not args.simple else None
     debug_tensor_shapes = False
     
-    # Get preprocessor name for display (only if not simple mode)
-    preprocessor_name = controlnet_config['preprocessor'].replace("_", " ").title() if not args.simple else ""
+    # OPTIMIZATION: Pre-compute display strings and cache them
+    if not args.simple:
+        preprocessor_name = controlnet_config['preprocessor'].replace("_", " ").title()
+        pipeline_display_name = {
+            'sd1.5': 'SD 1.5',
+            'sdturbo': 'SD TURBO', 
+            'sdxlturbo': 'SD-XL TURBO'
+        }.get(pipeline_type, pipeline_type.upper())
+        
+        # Pre-compute static text elements
+        steps_text = f" | Steps: {len(t_index_list)}" if pipeline_type in ['sdturbo', 'sdxlturbo'] else ""
+        pipeline_text_base = f"{pipeline_display_name} | Preprocessor: {preprocessor_name}{steps_text}"
+        generated_label = f"{pipeline_display_name} Generated"
+        window_title = f'ControlNet StreamDiffusion - {preprocessor_name}'
+        
+        # Pre-compute font constants to avoid repeated lookups
+        FONT_MAIN = cv2.FONT_HERSHEY_SIMPLEX
+        COLOR_GREEN = (0, 255, 0)
+        COLOR_CYAN = (0, 255, 255) 
+        COLOR_YELLOW = (255, 255, 0)
+        COLOR_WHITE = (255, 255, 255)
+    else:
+        preprocessor_name = ""
+        window_title = 'ControlNet StreamDiffusion'
     
     # Profiling variables (disabled in simple mode)
     profile_times = None if args.simple else {
@@ -204,8 +232,8 @@ def main():
         'total': []
     }
     
-    # Lightweight FPS tracking for simple mode
-    simple_fps_times = [] if args.simple else None
+    # OPTIMIZATION: Use deque for simple mode FPS tracking too
+    simple_fps_times = deque(maxlen=30) if args.simple else None
     
     # OPTIMIZATION: Pre-allocate reusable buffers for image processing
     target_size = (args.resolution, args.resolution)
@@ -317,29 +345,27 @@ def main():
                 # Calculate FPS
                 end_time = time.time()
                 frame_time = end_time - start_time
+                # OPTIMIZATION: deque automatically maintains maxlen, no need for manual pop
                 fps_counter.append(frame_time)
                 profile_times['total'].append(frame_time)
                 
-                if len(fps_counter) > 30:  # Keep last 30 frames
-                    fps_counter.pop(0)
+                # OPTIMIZATION: More efficient FPS calculation with deque
                 avg_fps = len(fps_counter) / sum(fps_counter) if fps_counter else 0
             else:
                 # In simple mode, lightweight FPS tracking
                 end_time = time.time()
                 frame_time = end_time - start_time
+                # OPTIMIZATION: deque automatically maintains maxlen
                 simple_fps_times.append(frame_time)
-                
-                if len(simple_fps_times) > 30:  # Keep last 30 frames
-                    simple_fps_times.pop(0)
                 
                 # Print FPS to console every 30 frames (much faster than cv2.putText)
                 if frame_count % 30 == 0 and frame_count > 0:
                     avg_fps = len(simple_fps_times) / sum(simple_fps_times) if simple_fps_times else 0
-                    print(f"🚀 Simple Mode FPS: {avg_fps:.1f}")
+                    print(f"Simple Mode FPS: {avg_fps:.1f}")
                 
                 avg_fps = 0  # Don't calculate for overlay
             
-            # Add info overlay (disabled in simple mode)
+            # OPTIMIZATION: Reduce putText calls and use pre-computed constants
             if not args.simple:
                 current_scale = get_current_controlnet_scale(wrapper)
                 info_text = f"Frame: {frame_count} | FPS: {avg_fps:.1f} | Scale: {current_scale:.2f}"
@@ -347,45 +373,35 @@ def main():
                     info_text += " | DEBUG ON"
                 
                 cv2.putText(combined, info_text, (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                           FONT_MAIN, 0.6, COLOR_GREEN, 2)
                 
-                # Add pipeline type info
-                pipeline_display_name = {
-                    'sd1.5': 'SD 1.5',
-                    'sdturbo': 'SD TURBO',
-                    'sdxlturbo': 'SD-XL TURBO'
-                }.get(pipeline_type, pipeline_type.upper())
-                
-                pipeline_text = f"{pipeline_display_name} | Preprocessor: {preprocessor_name}"
-                if pipeline_type in ['sdturbo', 'sdxlturbo']:
-                    steps = len(t_index_list)
-                    pipeline_text += f" | Steps: {steps}"
-                cv2.putText(combined, pipeline_text, (10, 60), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                # Add pipeline type info (use pre-computed base)
+                cv2.putText(combined, pipeline_text_base, (10, 60), 
+                           FONT_MAIN, 0.5, COLOR_CYAN, 1)
                 
                 # Add timing info
                 if frame_count > 0:
                     timing_text = f"Prep: {prep_time*1000:.1f}ms | Gen: {gen_time*1000:.1f}ms"
                     cv2.putText(combined, timing_text, (10, 90), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+                               FONT_MAIN, 0.4, COLOR_YELLOW, 1)
                 
-                # Add labels
+                # OPTIMIZATION: Consolidate label rendering
                 if show_preprocessed and control_bgr_buffer is not None:
+                    # 3-panel layout labels
                     cv2.putText(combined, "Input", (10, combined.shape[0] - 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                    cv2.putText(combined, f"{preprocessor_name}", (args.resolution//2 + 10, combined.shape[0] - 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                    label_text = f"{pipeline_display_name} Generated"
-                    cv2.putText(combined, label_text, (10, combined.shape[0] - args.resolution//2 - 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                               FONT_MAIN, 0.5, COLOR_WHITE, 1)
+                    cv2.putText(combined, preprocessor_name, (args.resolution//2 + 10, combined.shape[0] - 10), 
+                               FONT_MAIN, 0.5, COLOR_WHITE, 1)
+                    cv2.putText(combined, generated_label, (10, combined.shape[0] - args.resolution//2 - 10), 
+                               FONT_MAIN, 0.5, COLOR_WHITE, 1)
                 else:
+                    # 2-panel layout labels  
                     cv2.putText(combined, "Input", (10, combined.shape[0] - 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                    label_text = f"{pipeline_display_name} Generated"
-                    cv2.putText(combined, label_text, (args.resolution + 10, combined.shape[0] - 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                               FONT_MAIN, 0.5, COLOR_WHITE, 1)
+                    cv2.putText(combined, generated_label, (args.resolution + 10, combined.shape[0] - 10), 
+                               FONT_MAIN, 0.5, COLOR_WHITE, 1)
             
-            cv2.imshow(f'ControlNet StreamDiffusion{" - " + preprocessor_name if not args.simple else ""}', combined)
+            cv2.imshow(window_title, combined)
             frame_count += 1
             
             # Handle key presses (simplified in simple mode)
