@@ -49,6 +49,7 @@ class ControlNetGUI:
         self.negative_prompt_var = tk.StringVar(value=getattr(config, 'negative_prompt', ''))
         self.guidance_scale_var = tk.DoubleVar(value=getattr(config, 'guidance_scale', 1.1))
         self.num_steps_var = tk.IntVar(value=getattr(config, 'num_inference_steps', 50))
+        self.seed_var = tk.IntVar(value=getattr(config, 'seed', 2))
         
         # ControlNet variables - support multiple ControlNets
         self.controlnet_vars = []
@@ -171,6 +172,20 @@ class ControlNetGUI:
         steps_label.pack(side=tk.RIGHT, padx=(5,0))
         self.num_steps_var.trace('w', lambda *args: steps_label.config(text=f"{self.num_steps_var.get()}"))
         
+        # Seed
+        ttk.Label(gen_frame, text="Seed:").pack(anchor=tk.W, pady=(10,0))
+        seed_frame = ttk.Frame(gen_frame)
+        seed_frame.pack(fill=tk.X, pady=2)
+        
+        seed_scale = ttk.Scale(seed_frame, from_=0, to=999999, 
+                              variable=self.seed_var, orient=tk.HORIZONTAL,
+                              command=self.update_pipeline_params)
+        seed_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        seed_label = ttk.Label(seed_frame, text=f"{self.seed_var.get()}")
+        seed_label.pack(side=tk.RIGHT, padx=(5,0))
+        self.seed_var.trace('w', lambda *args: seed_label.config(text=f"{self.seed_var.get()}"))
+        
     def setup_controlnet_controls(self, parent):
         """Setup ControlNet-specific controls"""
         info_frame = ttk.LabelFrame(parent, text="ControlNet Information", padding=10)
@@ -276,12 +291,27 @@ class ControlNetGUI:
         """Update pipeline parameters"""
         if hasattr(self.wrapper, 'stream'):
             try:
-                # Update prompt
+                # Update prompt - this can be done dynamically
                 if hasattr(self.wrapper.stream, 'update_prompt'):
                     self.wrapper.stream.update_prompt(self.prompt_var.get())
                 
-                # Note: Other parameters like guidance_scale typically require re-preparation
-                # For real-time updates, we'd need to implement dynamic parameter updates in the wrapper
+                # For other parameters, we need to re-prepare the pipeline
+                # This is expensive but necessary for real-time parameter changes
+                if self.running:
+                    print("Updating pipeline parameters...")
+                    self.wrapper.prepare(
+                        prompt=self.prompt_var.get(),
+                        negative_prompt=self.negative_prompt_var.get(),
+                        num_inference_steps=self.num_steps_var.get(),
+                        guidance_scale=self.guidance_scale_var.get(),
+                        delta=getattr(self.config, 'delta', 1.0),
+                    )
+                    
+                    # Update seed in the stream
+                    if hasattr(self.wrapper.stream, 'generator'):
+                        self.wrapper.stream.generator.manual_seed(int(self.seed_var.get()))
+                    elif hasattr(self.wrapper.stream, 'set_seed'):
+                        self.wrapper.stream.set_seed(int(self.seed_var.get()))
                 
             except Exception as e:
                 print(f"Failed to update pipeline params: {e}")
@@ -335,6 +365,7 @@ class ControlNetGUI:
         # Reset generation params
         self.guidance_scale_var.set(getattr(self.config, 'guidance_scale', 1.1))
         self.num_steps_var.set(getattr(self.config, 'num_inference_steps', 50))
+        self.seed_var.set(getattr(self.config, 'seed', 2))
         
         # Reset ControlNet strengths
         self.reset_controlnet_strengths()
@@ -539,6 +570,8 @@ class ControlNetGUI:
             self.stop_camera()
         self.cleanup()
         self.root.destroy()
+        # Force exit the entire application
+        sys.exit(0)
     
     def cleanup(self):
         """Cleanup resources"""
@@ -546,6 +579,19 @@ class ControlNetGUI:
         if self.cap:
             self.cap.release()
         cv2.destroyAllWindows()
+        
+        # Clear queues to prevent hanging
+        try:
+            while not self.frame_queue.empty():
+                self.frame_queue.get_nowait()
+        except:
+            pass
+        
+        try:
+            while not self.result_queue.empty():
+                self.result_queue.get_nowait()
+        except:
+            pass
 
 
 def main():

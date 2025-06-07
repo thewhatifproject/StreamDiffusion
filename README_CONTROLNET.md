@@ -111,6 +111,8 @@ controlnets:
 # https://github.com/yuvraj108c/ComfyUI-Depth-Anything-Tensorrt
 # additionally, for all of the demo configs, they must be updated to suite your environment. 
 
+# test with simple gui
+python ./examples/controlnet/controlnet_webcam_gui_demo.py --config ./configs/controlnet_examples/sdturbo_depth_trt_example.yaml
 
 # Basic webcam test with ControlNet (SD1.5 config)
 python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/depth_trt_example.yaml
