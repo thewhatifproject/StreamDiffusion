@@ -334,10 +334,10 @@ class BaseControlNetPipeline:
             
             # Debug: Check what batch size we're getting
             detected_batch_size = getattr(self.stream, 'trt_unet_batch_size', 1)
-            print(f"🔍 DEBUG: Detected UNet batch size: {detected_batch_size}")
-            print(f"🔍 DEBUG: Stream object has trt_unet_batch_size: {hasattr(self.stream, 'trt_unet_batch_size')}")
-            if hasattr(self.stream, 'trt_unet_batch_size'):
-                print(f"🔍 DEBUG: Stream.trt_unet_batch_size = {self.stream.trt_unet_batch_size}")
+            # print(f"🔍 DEBUG: Detected UNet batch size: {detected_batch_size}")
+            # print(f"🔍 DEBUG: Stream object has trt_unet_batch_size: {hasattr(self.stream, 'trt_unet_batch_size')}")
+            # if hasattr(self.stream, 'trt_unet_batch_size'):
+                # print(f"🔍 DEBUG: Stream.trt_unet_batch_size = {self.stream.trt_unet_batch_size}")
             
             # Get hybrid ControlNet from engine pool (auto-compiles if needed)
             return self.stream.controlnet_engine_pool.get_or_load_engine(
@@ -593,7 +593,7 @@ class BaseControlNetPipeline:
             Tuple of (down_block_res_samples, mid_block_res_sample)
         """
         if not self.controlnets:
-            print("🔍 DEBUG: No ControlNets configured, returning None conditioning")
+            # print("🔍 DEBUG: No ControlNets configured, returning None conditioning")
             return None, None
         
         #  Use cached active indices if available (from recent update_control_image_efficient call)
@@ -615,10 +615,10 @@ class BaseControlNetPipeline:
             ]
         
         if not active_indices:
-            print("🔍 DEBUG: No active ControlNets found (all scales are 0 or missing images)")
+            # print("🔍 DEBUG: No active ControlNets found (all scales are 0 or missing images)")
             return None, None
         
-        print(f"🎯 DEBUG: Processing {len(active_indices)} active ControlNets: {[self.controlnets[i].__class__.__name__ if hasattr(self.controlnets[i], '__class__') else str(type(self.controlnets[i])) for i in active_indices]}")
+        # print(f"🎯 DEBUG: Processing {len(active_indices)} active ControlNets: {[self.controlnets[i].__class__.__name__ if hasattr(self.controlnets[i], '__class__') else str(type(self.controlnets[i])) for i in active_indices]}")
         
         #  Pre-compute common controlnet_kwargs base
         base_kwargs = {
@@ -641,7 +641,7 @@ class BaseControlNetPipeline:
             control_image = self.controlnet_images[i]
             scale = self.controlnet_scales[i]
             
-            print(f"🎮 DEBUG: Calling ControlNet {i} (scale: {scale}, type: {type(controlnet).__name__})")
+            # print(f"🎮 DEBUG: Calling ControlNet {i} (scale: {scale}, type: {type(controlnet).__name__})")
             
             # Debug the TensorRT detection
             has_is_using_tensorrt = hasattr(controlnet, 'is_using_tensorrt')
@@ -650,8 +650,8 @@ class BaseControlNetPipeline:
             use_tensorrt = controlnet.use_tensorrt if has_use_tensorrt else False
             has_trt_engine = hasattr(controlnet, 'trt_engine')
             trt_engine_exists = (controlnet.trt_engine is not None) if has_trt_engine else False
-            print(f"🔍 DEBUG: ControlNet {i} - has_is_using_tensorrt: {has_is_using_tensorrt}, is_using_tensorrt: {is_using_tensorrt}")
-            print(f"🔍 DEBUG: ControlNet {i} - has_use_tensorrt: {has_use_tensorrt}, use_tensorrt: {use_tensorrt}, trt_engine_exists: {trt_engine_exists}")
+            # print(f"🔍 DEBUG: ControlNet {i} - has_is_using_tensorrt: {has_is_using_tensorrt}, is_using_tensorrt: {is_using_tensorrt}")
+            # print(f"🔍 DEBUG: ControlNet {i} - has_use_tensorrt: {has_use_tensorrt}, use_tensorrt: {use_tensorrt}, trt_engine_exists: {trt_engine_exists}")
             
             # Handle batch expansion for TensorRT ControlNets
             current_control_image = control_image
@@ -662,7 +662,7 @@ class BaseControlNetPipeline:
                 control_batch_size = control_image.shape[0] if control_image.dim() == 4 else 1
                 
                 if control_batch_size != main_batch_size:
-                    print(f"🔧 DEBUG: Expanding ControlNet batch from {control_batch_size} to {main_batch_size} for TensorRT")
+                    # print(f"🔧 DEBUG: Expanding ControlNet batch from {control_batch_size} to {main_batch_size} for TensorRT")
                     # Expand control image to match main batch size
                     if control_image.dim() == 4:
                         # Already has batch dim, expand it
@@ -685,7 +685,7 @@ class BaseControlNetPipeline:
                 mid_samples_list.append(mid_sample)
                 scales_list.append(scale)
                 
-                print(f"✅ DEBUG: ControlNet {i} completed successfully")
+                # print(f"✅ DEBUG: ControlNet {i} completed successfully")
                     
             except Exception as e:
                 print(f"❌ DEBUG: ControlNet {i} failed: {e}")
@@ -693,10 +693,10 @@ class BaseControlNetPipeline:
         
         #  Vectorized combination instead of sequential addition
         if not down_samples_list:
-            print("🔍 DEBUG: No ControlNet outputs collected, returning None conditioning")
+            # print("🔍 DEBUG: No ControlNet outputs collected, returning None conditioning")
             return None, None
         
-        print(f"🎯 DEBUG: Combining outputs from {len(down_samples_list)} ControlNets")
+        # print(f"🎯 DEBUG: Combining outputs from {len(down_samples_list)} ControlNets")
         
         # Combine outputs using vectorized operations
         if len(down_samples_list) == 1:
@@ -778,7 +778,7 @@ class BaseControlNetPipeline:
                 pass
             
             # Call TensorRT engine with ControlNet inputs (using diffusers-style interface)
-            print(f"🚀 DEBUG: Calling TensorRT UNet with ControlNet conditioning - down_blocks: {len(down_block_res_samples) if down_block_res_samples else 0}, mid_block: {'Yes' if mid_block_res_sample is not None else 'No'}")
+            # print(f"🚀 DEBUG: Calling TensorRT UNet with ControlNet conditioning - down_blocks: {len(down_block_res_samples) if down_block_res_samples else 0}, mid_block: {'Yes' if mid_block_res_sample is not None else 'No'}")
             
             model_pred = self.stream.unet(
                 x_t_latent_plus_uc,
@@ -788,7 +788,7 @@ class BaseControlNetPipeline:
                 mid_block_additional_residual=mid_block_res_sample,
             ).sample
             
-            print(f"✅ DEBUG: TensorRT UNet with ControlNet completed successfully")
+            # print(f"✅ DEBUG: TensorRT UNet with ControlNet completed successfully")
             
             # Continue with original CFG logic
             if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
