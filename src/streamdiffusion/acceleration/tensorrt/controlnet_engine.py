@@ -62,6 +62,8 @@ class ControlNetModelEngine:
         Returns:
             Tuple of (down_block_residuals, mid_block_residual)
         """
+        print(f"🔥 DEBUG: TensorRT ControlNet engine forward pass - sample: {sample.shape}, timestep: {timestep.shape}, encoder_hidden_states: {encoder_hidden_states.shape}, controlnet_cond: {controlnet_cond.shape}")
+        
         # Ensure timestep is float32
         if timestep.dtype != torch.float32:
             timestep = timestep.float()
@@ -97,6 +99,8 @@ class ControlNetModelEngine:
         
         # Extract and organize outputs
         down_blocks, mid_block = self._extract_controlnet_outputs(outputs, conditioning_scale)
+        
+        print(f"✅ DEBUG: TensorRT ControlNet inference completed - down_blocks: {len(down_blocks)}, mid_block: {mid_block.shape if mid_block is not None else None}")
         
         return down_blocks, mid_block
     
@@ -202,10 +206,13 @@ class HybridControlNet:
         """
         try:
             if self.engine_path and self.stream:
+                print(f"🚀 DEBUG: Loading TensorRT ControlNet engine from {self.engine_path}")
                 self.trt_engine = ControlNetModelEngine(self.engine_path, self.stream)
                 self.use_tensorrt = True
+                print(f"✅ DEBUG: TensorRT ControlNet engine loaded successfully for {self.model_id}")
                 return True
         except Exception as e:
+            print(f"❌ DEBUG: TensorRT ControlNet engine load failed for {self.model_id}: {e}")
             self.fallback_reason = f"TensorRT engine load failed: {e}"
             self.use_tensorrt = False
         
@@ -221,16 +228,19 @@ class HybridControlNet:
         # Try TensorRT first if available
         if self.use_tensorrt and self.trt_engine:
             try:
+                print(f"⚡ DEBUG: Using TensorRT ControlNet for inference ({self.model_id})")
                 return self.trt_engine(*args, **kwargs)
             except Exception as e:
-                print(f"Warning: TensorRT ControlNet failed ({e}), falling back to PyTorch")
+                print(f"❌ DEBUG: TensorRT ControlNet failed ({e}), falling back to PyTorch for {self.model_id}")
                 self.use_tensorrt = False
                 self.fallback_reason = f"Runtime error: {e}"
         
         # Fallback to PyTorch
         if self.pytorch_model is None:
+            print(f"💥 DEBUG: No PyTorch fallback available for ControlNet {self.model_id}")
             raise RuntimeError(f"No PyTorch fallback available for ControlNet {self.model_id}")
         
+        print(f"🐍 DEBUG: Using PyTorch ControlNet for inference ({self.model_id})")
         # Call PyTorch model - this should return the same format
         return self._call_pytorch_model(*args, **kwargs)
     
@@ -241,8 +251,12 @@ class HybridControlNet:
         This method ensures the PyTorch model returns the same output format
         as the TensorRT engine.
         """
+        print(f"🐍 DEBUG: Calling PyTorch ControlNet model ({self.model_id})")
+        
         # Call the PyTorch ControlNet
         result = self.pytorch_model(*args, **kwargs)
+        
+        print(f"🐍 DEBUG: PyTorch ControlNet inference completed, result type: {type(result)}")
         
         # Handle different PyTorch ControlNet output formats
         if isinstance(result, tuple) and len(result) == 2:
