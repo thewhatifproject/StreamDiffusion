@@ -273,9 +273,15 @@ class ControlNetGUI:
         
         pipeline_type = getattr(self.config, 'pipeline_type', 'sd1.5')
         model_id = self.config.model_id if hasattr(self.config, 'model_id') else "Unknown"
+        acceleration = getattr(self.config, 'acceleration', 'none')
         
         ttk.Label(pipeline_frame, text=f"Pipeline Type: {pipeline_type}").pack(anchor=tk.W)
         ttk.Label(pipeline_frame, text=f"Model: {model_id.split('/')[-1]}").pack(anchor=tk.W)
+        ttk.Label(pipeline_frame, text=f"Acceleration: {acceleration}").pack(anchor=tk.W)
+        
+        if acceleration.lower() == 'tensorrt':
+            ttk.Label(pipeline_frame, text="ℹ️ TensorRT: Frame buffer size locked at config value", 
+                     font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W, pady=(5,0))
         
         # Performance settings
         perf_frame = ttk.LabelFrame(parent, text="Performance", padding=10)
@@ -289,7 +295,6 @@ class ControlNetGUI:
         temporal_frame.pack(fill=tk.X, padx=5, pady=5)
         
         # Check if TensorRT is enabled (frame buffer changes not allowed)
-        acceleration = getattr(self.config, 'acceleration', 'none')
         tensorrt_enabled = acceleration.lower() == 'tensorrt'
         
         # Frame Buffer Size
