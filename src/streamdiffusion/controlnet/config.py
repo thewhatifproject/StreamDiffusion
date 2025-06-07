@@ -71,6 +71,13 @@ class StreamDiffusionControlNetConfig:
     guidance_scale: float = 1.2
     num_inference_steps: int = 50
     
+    # Temporal consistency parameters
+    frame_buffer_size: int = 1
+    """Frame buffer size for temporal consistency (1-10, higher = more consistent but more VRAM)"""
+    
+    delta: float = 1.0
+    """Delta multiplier for virtual residual noise (0.1-2.0, lower = more temporal stability)"""
+    
     use_taesd: bool = True
     """Use Tiny AutoEncoder for faster decoding"""
     
@@ -153,6 +160,8 @@ def save_controlnet_config(config: StreamDiffusionControlNetConfig,
         'negative_prompt': config.negative_prompt,
         'guidance_scale': config.guidance_scale,
         'num_inference_steps': config.num_inference_steps,
+        'frame_buffer_size': config.frame_buffer_size,
+        'delta': config.delta,
         'use_taesd': config.use_taesd,
         'safety_checker': config.safety_checker,
         'use_lcm_lora': config.use_lcm_lora,
