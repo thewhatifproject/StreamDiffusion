@@ -51,6 +51,11 @@ class ControlNetGUI:
         self.num_steps_var = tk.IntVar(value=getattr(config, 'num_inference_steps', 50))
         self.seed_var = tk.IntVar(value=getattr(config, 'seed', 2))
         
+        # Temporal consistency variables
+        self.frame_buffer_size_var = tk.IntVar(value=getattr(config, 'frame_buffer_size', 1))
+        self.delta_var = tk.DoubleVar(value=getattr(config, 'delta', 1.0))
+        self.cfg_type_var = tk.StringVar(value=getattr(config, 'cfg_type', 'self'))
+        
         # ControlNet variables - support multiple ControlNets
         self.controlnet_vars = []
         self.controlnet_enabled_vars = []
@@ -279,6 +284,67 @@ class ControlNetGUI:
         self.show_fps_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(perf_frame, text="Show FPS", variable=self.show_fps_var).pack(anchor=tk.W)
         
+        # Temporal consistency settings
+        temporal_frame = ttk.LabelFrame(parent, text="Temporal Consistency", padding=10)
+        temporal_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Check if TensorRT is enabled (frame buffer changes not allowed)
+        acceleration = getattr(self.config, 'acceleration', 'none')
+        tensorrt_enabled = acceleration.lower() == 'tensorrt'
+        
+        # Frame Buffer Size
+        ttk.Label(temporal_frame, text="Frame Buffer Size:").pack(anchor=tk.W)
+        buffer_frame = ttk.Frame(temporal_frame)
+        buffer_frame.pack(fill=tk.X, pady=2)
+        
+        buffer_scale = ttk.Scale(buffer_frame, from_=1, to=10, 
+                               variable=self.frame_buffer_size_var, orient=tk.HORIZONTAL,
+                               command=self.update_pipeline_params,
+                               state="disabled" if tensorrt_enabled else "normal")
+        buffer_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        buffer_label = ttk.Label(buffer_frame, text=f"{self.frame_buffer_size_var.get()}")
+        buffer_label.pack(side=tk.RIGHT, padx=(5,0))
+        self.frame_buffer_size_var.trace('w', lambda *args: buffer_label.config(text=f"{self.frame_buffer_size_var.get()}"))
+        
+        if tensorrt_enabled:
+            ttk.Label(temporal_frame, text="⚠️ Frame Buffer Size locked (TensorRT enabled)", 
+                     font=('TkDefaultFont', 8), foreground='orange').pack(anchor=tk.W)
+        
+        # Delta (temporal stability)
+        ttk.Label(temporal_frame, text="Delta (Temporal Stability):").pack(anchor=tk.W, pady=(10,0))
+        delta_frame = ttk.Frame(temporal_frame)
+        delta_frame.pack(fill=tk.X, pady=2)
+        
+        delta_scale = ttk.Scale(delta_frame, from_=0.1, to=2.0, 
+                              variable=self.delta_var, orient=tk.HORIZONTAL,
+                              command=self.update_pipeline_params)
+        delta_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        delta_label = ttk.Label(delta_frame, text=f"{self.delta_var.get():.2f}")
+        delta_label.pack(side=tk.RIGHT, padx=(5,0))
+        self.delta_var.trace('w', lambda *args: delta_label.config(text=f"{self.delta_var.get():.2f}"))
+        
+        # CFG Type dropdown
+        ttk.Label(temporal_frame, text="CFG Type:").pack(anchor=tk.W, pady=(10,0))
+        cfg_combobox = ttk.Combobox(temporal_frame, textvariable=self.cfg_type_var, 
+                                   values=["none", "full", "self", "initialize"], 
+                                   state="readonly", width=15)
+        cfg_combobox.pack(anchor=tk.W, pady=2)
+        cfg_combobox.bind('<<ComboboxSelected>>', self.update_pipeline_params)
+        
+        # Add help text
+        if tensorrt_enabled:
+            help_text = ("TensorRT Mode: Frame buffer size fixed at config value\n"
+                        "Delta: Lower = more stable, higher = more responsive\n" 
+                        "CFG Type: none/initialize = fastest, self/full = higher quality")
+        else:
+            help_text = ("Frame Buffer: Higher = more temporal consistency, more VRAM\n"
+                        "Delta: Lower = more stable, higher = more responsive\n" 
+                        "CFG Type: none/initialize = fastest, self/full = higher quality")
+        ttk.Label(temporal_frame, text=help_text, font=('TkDefaultFont', 8), 
+                 foreground='gray').pack(anchor=tk.W, pady=(5,0))
+        
         # Export settings
         export_frame = ttk.LabelFrame(parent, text="Export Options", padding=10)
         export_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -299,12 +365,41 @@ class ControlNetGUI:
                 # This is expensive but necessary for real-time parameter changes
                 if self.running:
                     print("Updating pipeline parameters...")
+                    
+                    # Check if TensorRT is enabled
+                    acceleration = getattr(self.config, 'acceleration', 'none')
+                    tensorrt_enabled = acceleration.lower() == 'tensorrt'
+                    
+                    # Check if we need to recreate the entire pipeline (expensive operations)
+                    needs_pipeline_recreation = False
+                    
+                    if (hasattr(self.wrapper, 'frame_buffer_size') and 
+                        self.wrapper.frame_buffer_size != self.frame_buffer_size_var.get()):
+                        if tensorrt_enabled:
+                            print("ERROR: Cannot change frame buffer size with TensorRT acceleration!")
+                            print("TensorRT engines are compiled with fixed batch sizes.")
+                            print("Please update the config file and restart the application.")
+                            # Reset the GUI value to current wrapper value
+                            self.frame_buffer_size_var.set(self.wrapper.frame_buffer_size)
+                            return
+                        else:
+                            needs_pipeline_recreation = True
+                    
+                    if (hasattr(self.wrapper.stream, 'cfg_type') and 
+                        self.wrapper.stream.cfg_type != self.cfg_type_var.get()):
+                        needs_pipeline_recreation = True
+                    
+                    if needs_pipeline_recreation:
+                        print("Warning: Frame buffer size or CFG type change requires pipeline recreation (expensive)")
+                        print("Consider restarting the application with new settings for optimal performance")
+                    
+                    # Re-prepare with new parameters (works for most changes)
                     self.wrapper.prepare(
                         prompt=self.prompt_var.get(),
                         negative_prompt=self.negative_prompt_var.get(),
                         num_inference_steps=self.num_steps_var.get(),
                         guidance_scale=self.guidance_scale_var.get(),
-                        delta=getattr(self.config, 'delta', 1.0),
+                        delta=self.delta_var.get(),
                     )
                     
                     # Update seed in the stream
@@ -366,6 +461,11 @@ class ControlNetGUI:
         self.guidance_scale_var.set(getattr(self.config, 'guidance_scale', 1.1))
         self.num_steps_var.set(getattr(self.config, 'num_inference_steps', 50))
         self.seed_var.set(getattr(self.config, 'seed', 2))
+        
+        # Reset temporal consistency variables
+        self.frame_buffer_size_var.set(getattr(self.config, 'frame_buffer_size', 1))
+        self.delta_var.set(getattr(self.config, 'delta', 1.0))
+        self.cfg_type_var.set(getattr(self.config, 'cfg_type', 'self'))
         
         # Reset ControlNet strengths
         self.reset_controlnet_strengths()
@@ -708,7 +808,7 @@ def main():
         output_type="pil",
         device="cuda",
         dtype=torch.float16,
-        frame_buffer_size=1,
+        frame_buffer_size=getattr(config, 'frame_buffer_size', 1),
         width=args.resolution,
         height=args.resolution,
         warmup=10,
@@ -717,7 +817,7 @@ def main():
         use_lcm_lora=use_lcm_lora,
         use_tiny_vae=use_tiny_vae,
         use_denoising_batch=True,
-        cfg_type=cfg_type,
+        cfg_type=getattr(config, 'cfg_type', cfg_type),
         seed=getattr(config, 'seed', 2),
         use_safety_checker=False,
         # ControlNet options - pass all ControlNet configs
