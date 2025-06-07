@@ -177,6 +177,10 @@ class StreamDiffusionWrapper:
             controlnet_config=controlnet_config,
         )
 
+        # Store acceleration settings for ControlNet integration
+        self._acceleration = acceleration
+        self._engine_dir = engine_dir
+
         if device_ids is not None:
             self.stream.unet = torch.nn.DataParallel(
                 self.stream.unet, device_ids=device_ids
@@ -546,7 +550,7 @@ class StreamDiffusionWrapper:
                         return f"{model_id_or_path}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}--mode-{self.mode}"
 
                 # Detect ControlNet support needed based on UNet architecture
-                use_controlnet_trt = False
+                use_controlnet_trt = (acceleration == "tensorrt")
                 unet_arch = {}
                 try:
                     model_type = detect_model_from_diffusers_unet(stream.unet)
@@ -557,7 +561,7 @@ class StreamDiffusionWrapper:
                 except Exception as e:
                     print(f"ControlNet architecture detection failed: {e}, compiling without ControlNet support")
 
-                engine_dir = Path(engine_dir)
+                engine_dir = getattr(self, '_engine_dir', 'engines')
                 unet_path = os.path.join(
                     engine_dir,
                     create_prefix(
@@ -747,11 +751,11 @@ class StreamDiffusionWrapper:
 
         # Apply ControlNet patch if needed
         if use_controlnet and controlnet_config:
-            stream = self._apply_controlnet_patch(stream, controlnet_config)
+            stream = self._apply_controlnet_patch(stream, controlnet_config, acceleration, engine_dir)
 
         return stream
 
-    def _apply_controlnet_patch(self, stream: StreamDiffusion, controlnet_config: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Any:
+    def _apply_controlnet_patch(self, stream: StreamDiffusion, controlnet_config: Union[Dict[str, Any], List[Dict[str, Any]]], acceleration: str = "none", engine_dir: str = "engines") -> Any:
         """
         Apply ControlNet patch to StreamDiffusion based on pipeline_type
         
@@ -770,6 +774,9 @@ class StreamDiffusionWrapper:
             
         pipeline_type = config_dict.get('pipeline_type', 'sd1.5')
         
+        # Check if we should use TensorRT ControlNet acceleration
+        use_controlnet_tensorrt = (acceleration == "tensorrt")
+        
         if pipeline_type == "sdxlturbo":
             from streamdiffusion.controlnet.controlnet_sdxlturbo_pipeline import SDXLTurboControlNetPipeline
             controlnet_pipeline = SDXLTurboControlNetPipeline(stream, self.device, self.dtype)
@@ -778,6 +785,25 @@ class StreamDiffusionWrapper:
             controlnet_pipeline = ControlNetPipeline(stream, self.device, self.dtype)
         else:
             raise ValueError(f"Unsupported pipeline_type: {pipeline_type}")
+        
+        # Initialize ControlNet engine pool if using TensorRT acceleration
+        if use_controlnet_tensorrt:
+            from streamdiffusion.acceleration.tensorrt.engine_pool import ControlNetEnginePool
+            from polygraphy import cuda
+            
+            # Create engine pool with same engine directory structure as UNet
+            stream_cuda = cuda.Stream()
+            controlnet_pool = ControlNetEnginePool(engine_dir, stream_cuda)
+            
+            # Store pool on the pipeline for later use
+            setattr(controlnet_pipeline, '_controlnet_pool', controlnet_pool)
+            setattr(controlnet_pipeline, '_use_tensorrt', True)
+            # Also set on stream where ControlNet pipeline expects to find it
+            setattr(stream, 'controlnet_engine_pool', controlnet_pool)
+            print("Initialized ControlNet TensorRT engine pool")
+        else:
+            setattr(controlnet_pipeline, '_use_tensorrt', False)
+            print("Loading ControlNet in PyTorch mode (no TensorRT acceleration)")
         
         # Setup ControlNets from config
         if not isinstance(controlnet_config, list):

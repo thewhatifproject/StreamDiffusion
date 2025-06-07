@@ -16,6 +16,7 @@ from polygraphy import cuda
 from .controlnet_engine import ControlNetModelEngine, HybridControlNet
 from .controlnet_models import create_controlnet_model
 from .builder import EngineBuilder, create_onnx_path
+from .model_detection import detect_model_from_diffusers_unet
 
 
 class ControlNetEnginePool:
@@ -48,8 +49,16 @@ class ControlNetEnginePool:
             if model_dir.is_dir() and model_dir.name.startswith("controlnet_"):
                 engine_file = model_dir / "cnet.engine"
                 if engine_file.exists():
-                    # Extract model identifier from directory name
-                    model_id = model_dir.name.replace("controlnet_", "").replace("_", "/")
+                    # Extract model identifier from directory name (handle both old and new naming)
+                    dir_name = model_dir.name
+                    if "--batch-" in dir_name:
+                        # New naming: controlnet_model_name--batch-2
+                        model_part = dir_name.split("--batch-")[0]
+                        model_id = model_part.replace("controlnet_", "").replace("_", "/")
+                    else:
+                        # Old naming: controlnet_model_name (for backward compatibility)
+                        model_id = dir_name.replace("controlnet_", "").replace("_", "/")
+                    
                     self.compiled_models.add(model_id)
                     print(f"Discovered existing ControlNet engine: {model_id}")
     
@@ -57,7 +66,8 @@ class ControlNetEnginePool:
                           model_id: str,
                           pytorch_model: Any,
                           controlnet_type: str = "canny",
-                          model_type: str = "sd15") -> HybridControlNet:
+                          model_type: str = "sd15",
+                          batch_size: int = 1) -> HybridControlNet:
         """
         Get or load ControlNet engine (TensorRT if available, PyTorch fallback)
         
@@ -66,16 +76,20 @@ class ControlNetEnginePool:
             pytorch_model: PyTorch ControlNet model for fallback
             controlnet_type: Type of ControlNet (canny, depth, etc.)
             model_type: Base model type (sd15, sdxl, etc.)
+            batch_size: Batch size for the main UNet
             
         Returns:
             HybridControlNet instance (TensorRT or PyTorch)
         """
+        # Create cache key that includes batch size
+        cache_key = f"{model_id}--batch-{batch_size}"
+        
         # Check if already loaded
-        if model_id in self.engines:
-            return self.engines[model_id]
+        if cache_key in self.engines:
+            return self.engines[cache_key]
         
         # Check for existing TensorRT engine using proper naming convention
-        model_engine_dir = self._get_model_engine_dir(model_id)
+        model_engine_dir = self._get_model_engine_dir(model_id, batch_size)
         engine_path = model_engine_dir / "cnet.engine"
         
         # If engine doesn't exist, compile it now (synchronously)
@@ -83,8 +97,15 @@ class ControlNetEnginePool:
             print(f"ControlNet engine not found for {model_id}, compiling now...")
             compilation_start = time.time()
             
+            # Use robust model detection from pytorch model architecture
+            try:
+                detected_type = detect_model_from_diffusers_unet(pytorch_model)
+                model_type = detected_type.lower()
+            except Exception as e:
+                print(f"⚠️  Architecture detection failed: {e}, using provided type: {model_type}")
+            
             success = self._compile_controlnet(
-                pytorch_model, controlnet_type, model_type, str(engine_path)
+                pytorch_model, controlnet_type, model_type, str(engine_path), batch_size
             )
             
             compilation_time = time.time() - compilation_start
@@ -105,7 +126,7 @@ class ControlNetEnginePool:
         )
         
         # Store in pool
-        self.engines[model_id] = hybrid_controlnet
+        self.engines[cache_key] = hybrid_controlnet
         
         return hybrid_controlnet
     
@@ -113,7 +134,8 @@ class ControlNetEnginePool:
                            pytorch_model: Any,
                            controlnet_type: str, 
                            model_type: str,
-                           engine_path: str) -> bool:
+                           engine_path: str,
+                           batch_size: int) -> bool:
         """
         Compile ControlNet to TensorRT
         
@@ -122,6 +144,7 @@ class ControlNetEnginePool:
             controlnet_type: Type of ControlNet
             model_type: Base model type
             engine_path: Path to save the compiled TensorRT engine
+            batch_size: Batch size for the main UNet
             
         Returns:
             True if compilation succeeded, False if failed
@@ -130,26 +153,23 @@ class ControlNetEnginePool:
             print(f"Starting ControlNet compilation: {controlnet_type} ({model_type})")
             
             # Create ControlNet TensorRT model definition
-            batch_size = 1
             height = 512
             width = 512
             
             # Determine embedding dimension and other parameters
             if model_type.lower() in ["sdxl", "sdxl-turbo"]:
                 embedding_dim = 2048
+            elif model_type.lower() in ["sd21", "sd2.1"]:
+                embedding_dim = 1024
             else:
                 embedding_dim = 768
             
             controlnet_model = create_controlnet_model(
                 model_type=model_type,
                 controlnet_type=controlnet_type,
-                max_batch_size=batch_size,
+                max_batch=batch_size,
                 min_batch_size=1,
-                embedding_dim=embedding_dim,
-                image_height=height,
-                image_width=width,
-                static_batch=True,
-                static_shape=True
+                embedding_dim=embedding_dim
             )
             
             # Move model to GPU
@@ -198,6 +218,9 @@ class ControlNetEnginePool:
         if model_type.lower() in ["sdxl", "sdxl-turbo"]:
             embedding_dim = 2048
             text_embed_dim = 1280
+        elif model_type.lower() in ["sd21", "sd2.1"]:
+            embedding_dim = 1024
+            text_embed_dim = None
         else:
             embedding_dim = 768
             text_embed_dim = None
@@ -253,12 +276,13 @@ class ControlNetEnginePool:
         """Cleanup on destruction"""
         self.cleanup()
 
-    def _get_model_engine_dir(self, model_id: str) -> Path:
+    def _get_model_engine_dir(self, model_id: str, batch_size: int = 1) -> Path:
         """
         Get the engine directory for a specific ControlNet model
         
         Args:
             model_id: ControlNet model identifier
+            batch_size: Batch size (included in directory name for proper isolation)
             
         Returns:
             Path to model's engine directory
@@ -266,7 +290,7 @@ class ControlNetEnginePool:
         # Convert model_id to a safe directory name
         # Replace problematic characters for directory names
         safe_name = model_id.replace("/", "_").replace("\\", "_").replace(":", "_")
-        safe_name = "controlnet_" + safe_name
+        safe_name = f"controlnet_{safe_name}--batch-{batch_size}"
         
         model_dir = Path(self.engine_dir) / safe_name
         model_dir.mkdir(parents=True, exist_ok=True)

@@ -332,12 +332,15 @@ class BaseControlNetPipeline:
             print(f"Loading ControlNet {model_id} with TensorRT acceleration support")
             print(f"  ControlNet type: {controlnet_type}, Model type: {model_type}")
             
+            detected_batch_size = getattr(self.stream, 'trt_unet_batch_size', 1)
             # Get hybrid ControlNet from engine pool (auto-compiles if needed)
             return self.stream.controlnet_engine_pool.get_or_load_engine(
                 model_id=model_id,
                 pytorch_model=pytorch_controlnet,
                 controlnet_type=controlnet_type,
                 model_type=model_type
+                model_type=model_type,
+                batch_size=detected_batch_size
             )
         else:
             # Fallback to PyTorch only

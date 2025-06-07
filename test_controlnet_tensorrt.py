@@ -30,6 +30,7 @@ from streamdiffusion.acceleration.tensorrt.controlnet_models import create_contr
 from streamdiffusion.acceleration.tensorrt.controlnet_engine import ControlNetModelEngine, HybridControlNet
 from streamdiffusion.acceleration.tensorrt.engine_pool import ControlNetEnginePool
 from streamdiffusion.acceleration.tensorrt.builder import compile_controlnet
+from streamdiffusion.acceleration.tensorrt.model_detection import detect_model_from_diffusers_unet
 
 
 def generate_sample_inputs(model_type: str = "sd15", batch_size: int = 1, 
@@ -39,8 +40,11 @@ def generate_sample_inputs(model_type: str = "sd15", batch_size: int = 1,
     if model_type.lower() in ["sdxl", "sdxl-turbo"]:
         embedding_dim = 2048
         has_sdxl_inputs = True
+    elif model_type.lower() in ["sd21", "sd2.1", "sd2-1"]:
+        embedding_dim = 1024
+        has_sdxl_inputs = False
     else:
-        embedding_dim = 768
+        embedding_dim = 768  # SD1.5 and default
         has_sdxl_inputs = False
     
     inputs = {
@@ -62,7 +66,7 @@ def test_controlnet_compilation(model_id: str, engine_dir: str, model_type: str 
     Test ControlNet TensorRT compilation
     
     Returns:
-        (success: bool, compilation_time: float, engine_path: str)
+        (success: bool, compilation_time: float, engine_path: str, detected_model_type: str)
     """
     print(f"\n=== Testing ControlNet Compilation ===")
     print(f"Model: {model_id}")
@@ -77,6 +81,14 @@ def test_controlnet_compilation(model_id: str, engine_dir: str, model_type: str 
         load_time = time.time() - start_time
         print(f"PyTorch ControlNet loaded in {load_time:.2f}s")
         
+        # Auto-detect model type from ControlNet architecture
+        print("Auto-detecting model type from ControlNet architecture...")
+        detected_type = detect_model_from_diffusers_unet(controlnet)
+        print(f"Detected model type: {detected_type}")
+        
+        # Update model_type for the rest of the function
+        model_type = detected_type.lower()
+        
         # Create TensorRT model definition
         print("Creating TensorRT model definition...")
         controlnet_model = create_controlnet_model(
@@ -84,7 +96,7 @@ def test_controlnet_compilation(model_id: str, engine_dir: str, model_type: str 
             controlnet_type="canny",  # Default for testing
             max_batch=1,
             min_batch_size=1,
-            embedding_dim=768 if model_type == "sd15" else 2048
+            embedding_dim=768 if model_type == "sd15" else (2048 if model_type == "sdxl" else 1024)
         )
         
         # Setup paths
@@ -119,14 +131,14 @@ def test_controlnet_compilation(model_id: str, engine_dir: str, model_type: str 
         if engine_path.exists():
             engine_size = engine_path.stat().st_size / (1024 * 1024)  # MB
             print(f"Engine file size: {engine_size:.1f} MB")
-            return True, compilation_time, str(engine_path)
+            return True, compilation_time, str(engine_path), model_type
         else:
             print("ERROR: Engine file not created")
-            return False, compilation_time, ""
+            return False, compilation_time, "", model_type
             
     except Exception as e:
         print(f"ERROR during compilation: {e}")
-        return False, 0.0, ""
+        return False, 0.0, "", "sd15"
 
 
 def test_tensorrt_inference(engine_path: str, model_type: str = "sd15") -> tuple:
@@ -307,16 +319,21 @@ def test_hybrid_controlnet(model_id: str, engine_dir: str, model_type: str = "sd
 
 def main():
     parser = argparse.ArgumentParser(description="Test ControlNet TensorRT Phase 2.1 Infrastructure")
-    parser.add_argument("--model", default="lllyasviel/sd-controlnet-canny", 
+    parser.add_argument("--model", default="thibaud/controlnet-sd21-canny-diffusers", 
                        help="ControlNet model ID (default: lllyasviel/sd-controlnet-canny)")
-    parser.add_argument("--engine-dir", default="./engines/controlnet_lllyasviel_sd-controlnet-canny", 
-                       help="Directory for TensorRT engines (default: ./engines/controlnet_lllyasviel_sd-controlnet-canny)")
+    parser.add_argument("--engine-dir", default=None, 
+                       help="Directory for TensorRT engines (default: auto-generated from model ID)")
     parser.add_argument("--model-type", default="sd15", choices=["sd15", "sdxl"],
                        help="Base model type (default: sd15)")
     parser.add_argument("--skip-compilation", action="store_true",
                        help="Skip compilation if engine already exists")
     
     args = parser.parse_args()
+    
+    # Auto-generate engine directory based on model ID if not specified
+    if args.engine_dir is None:
+        model_safe_name = args.model.replace("/", "_").replace(":", "_")
+        args.engine_dir = f"./engines/controlnet_{model_safe_name}"
     
     print("=" * 60)
     print("ControlNet TensorRT Phase 2.1 Infrastructure Test")
@@ -332,8 +349,9 @@ def main():
     
     # Test 1: ControlNet Compilation
     engine_path = ""
+    model_type = args.model_type  # Default model type
     if not args.skip_compilation:
-        compilation_success, compilation_time, engine_path = test_controlnet_compilation(
+        compilation_success, compilation_time, engine_path, model_type = test_controlnet_compilation(
             args.model, args.engine_dir, args.model_type
         )
         results["compilation"] = compilation_success
@@ -352,18 +370,18 @@ def main():
     # Test 2: TensorRT Inference (if compilation succeeded)
     if results["compilation"] and engine_path:
         tensorrt_success, tensorrt_time, tensorrt_shapes = test_tensorrt_inference(
-            engine_path, args.model_type
+            engine_path, model_type
         )
         results["tensorrt_inference"] = tensorrt_success
     
     # Test 3: PyTorch Fallback
     pytorch_success, pytorch_time, pytorch_shapes = test_pytorch_fallback(
-        args.model, args.model_type
+        args.model, model_type
     )
     results["pytorch_fallback"] = pytorch_success
     
     # Test 4: HybridControlNet Wrapper
-    hybrid_success = test_hybrid_controlnet(args.model, args.engine_dir, args.model_type)
+    hybrid_success = test_hybrid_controlnet(args.model, args.engine_dir, model_type)
     results["hybrid_wrapper"] = hybrid_success
     
     # Results Summary

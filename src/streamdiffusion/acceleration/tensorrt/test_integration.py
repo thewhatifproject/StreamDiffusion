@@ -29,7 +29,7 @@ def test_controlnet_integration():
     # Setup test environment
     device = torch.device("cuda")
     model_id = "runwayml/stable-diffusion-v1-5"
-    controlnet_model_id = "lllyasviel/sd-controlnet-canny"
+    controlnet_model_id = "lllyasviel/sd-controlnet-canny"  # Use known working model
     engine_dir = Path("./engines")
     
     # Expected engine directory structure
