@@ -7,6 +7,7 @@ ControlNet-specific inputs and outputs.
 """
 
 import torch
+import tensorrt as trt
 from typing import List, Optional, Tuple, Dict, Any
 from polygraphy import cuda
 
@@ -37,6 +38,37 @@ class ControlNetModelEngine:
         self._input_names = None
         self._output_names = None
     
+    def _resolve_output_shapes(self, batch_size: int) -> Dict[str, Tuple[int, ...]]:
+        """
+        Resolve dynamic output shapes from TensorRT engine by replacing -1 with actual batch size
+        
+        Args:
+            batch_size: Actual batch size from input tensors
+            
+        Returns:
+            Dictionary of resolved output shapes
+        """
+        output_shapes = {}
+        
+        # Iterate through all engine tensors to find outputs
+        for idx in range(self.engine.engine.num_io_tensors):
+            name = self.engine.engine.get_tensor_name(idx)
+            
+            # Check if this is an output tensor
+            if self.engine.engine.get_tensor_mode(name) == trt.TensorIOMode.OUTPUT:
+                # Get the shape with dynamic dimensions
+                dynamic_shape = self.engine.engine.get_tensor_shape(name)
+                
+                # Replace -1 dimensions with actual batch size
+                resolved_shape = tuple(
+                    batch_size if dim == -1 else dim 
+                    for dim in dynamic_shape
+                )
+                
+                output_shapes[name] = resolved_shape
+        
+        return output_shapes
+
     def __call__(self, 
                  sample: torch.Tensor,
                  timestep: torch.Tensor, 
@@ -85,8 +117,10 @@ class ControlNetModelEngine:
         # Prepare shape dictionary for buffer allocation
         shape_dict = {name: tensor.shape for name, tensor in input_dict.items()}
         
-        # Add output shapes (this will be handled by the engine)
-        # The engine will automatically determine output shapes
+        # Add resolved output shapes to prevent -1 dimension errors
+        batch_size = sample.shape[0]
+        output_shapes = self._resolve_output_shapes(batch_size)
+        shape_dict.update(output_shapes)
         
         # Allocate buffers and run inference
         self.engine.allocate_buffers(shape_dict=shape_dict, device=sample.device)
