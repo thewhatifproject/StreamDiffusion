@@ -12,7 +12,7 @@ guidance_scale: 1.1
 num_inference_steps: 50
 
 # Temporal consistency parameters
-frame_buffer_size: 3
+frame_buffer_size: 1
 delta: 0.7
 
 # Advanced parameters
