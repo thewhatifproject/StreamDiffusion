@@ -3,6 +3,9 @@
 ## Problem
 StreamDiffusion + TensorRT fails when `frame_buffer_size > 1` due to batch size mismatch between engine compilation and runtime.
 
+The cause is how the batch size is calcualted for different CFG (self, initialize, etc)
+
+
 **Error**: `Expected dimensions are [6,4,64,64]. Set dimensions are [4,4,64,64]`
 
 ## Root Cause
@@ -31,7 +34,7 @@ def predict_x0_batch(self, x_t_latent):  # Input: batch_size=1
 ## Disconnect
 Engine compiled for batch size 6, runtime produces batch size 4.
 
-## Working Fix
+## potential Fix
 ```python
 # In predict_x0_batch() before concatenation:
 if x_t_latent.shape[0] == 1 and self.frame_bff_size > 1:
