@@ -13,6 +13,7 @@ num_inference_steps: 50
 
 # Temporal consistency parameters
 frame_buffer_size: 1
+use_denoising_batch: true
 delta: 0.7
 
 # Advanced parameters

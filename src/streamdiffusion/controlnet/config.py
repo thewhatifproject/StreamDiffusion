@@ -90,6 +90,10 @@ class StreamDiffusionControlNetConfig:
     acceleration: str = "tensorrt"
     cfg_type: str = "self"
     seed: int = 2
+
+    # Denoising parameters
+    use_denoising_batch: bool = True
+    """Whether to use batch processing for denoising steps"""
     
     def __post_init__(self):
         """Auto-determine model_type from pipeline_type if not explicitly set"""
@@ -169,6 +173,7 @@ def save_controlnet_config(config: StreamDiffusionControlNetConfig,
         'acceleration': config.acceleration,
         'cfg_type': config.cfg_type,
         'seed': config.seed,
+        'use_denoising_batch': config.use_denoising_batch,
         'controlnets': [
             {
                 'model_id': cn.model_id,
