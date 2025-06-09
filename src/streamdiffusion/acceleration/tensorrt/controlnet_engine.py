@@ -153,22 +153,18 @@ class ControlNetModelEngine:
         Returns:
             Tuple of (down_block_residuals, mid_block_residual)
         """
-        # Extract down block outputs (12 total) and create copies to prevent buffer corruption
+        # Extract down block outputs (12 total)
         down_blocks = []
         for i in range(12):
             output_name = f"down_block_{i:02d}"
             if output_name in outputs:
                 tensor = outputs[output_name]
-                # CRITICAL: Create a copy to prevent buffer corruption
-                tensor_copy = tensor.clone().detach()
-                down_blocks.append(tensor_copy)
+                down_blocks.append(tensor)
         
-        # Extract middle block output and create copy
+        # Extract middle block output
         mid_block = None
         if "mid_block" in outputs:
             mid_block = outputs["mid_block"]
-            # CRITICAL: Create a copy to prevent buffer corruption
-            mid_block = mid_block.clone().detach()
         
         return down_blocks, mid_block
     
