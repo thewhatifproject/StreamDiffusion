@@ -3,9 +3,9 @@
 Standalone Multi-ControlNet StreamDiffusion Pipeline
 
 Self-contained script demonstrating multiple ControlNets + StreamDiffusion integration.
-Shows depth + canny edge conditioning for maximum control.
+Shows depth + canny edge conditioning.
 
-Designed for easy porting into ai-runner or other production systems.
+Designed for reference for porting into other production systems.
 No GUI, no webcam complexity - just core pipeline logic with hardcoded configs.
 """
 
@@ -27,7 +27,7 @@ from utils.wrapper import StreamDiffusionWrapper
 # ============================================================================
 
 class Config:
-    """All configuration in one place for easy editing"""
+    """All configuration"""
     
     # Model paths
     MODEL_PATH = r"C:\_dev\comfy\ComfyUI\models\checkpoints\sd_turbo.safetensors"
@@ -49,7 +49,6 @@ class Config:
     T_INDEX_LIST = [0, 16]  
     
     # Performance settings
-    DEVICE = "cuda"
     ACCELERATION = "tensorrt"
     USE_LCM_LORA = False
     USE_TINY_VAE = True
