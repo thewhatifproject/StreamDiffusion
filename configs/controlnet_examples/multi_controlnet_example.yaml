@@ -1,5 +1,5 @@
 model_id: "C:\\_dev\\comfy\\ComfyUI\\models\\checkpoints\\sd_turbo.safetensors"
-t_index_list: [0,16,32]
+t_index_list: [0,16]
 width: 512
 height: 512
 device: "cuda"
@@ -12,7 +12,7 @@ guidance_scale: 1.1
 num_inference_steps: 50
 
 # Temporal consistency parameters
-frame_buffer_size: 3
+frame_buffer_size: 1
 delta: 0.7
 
 # Advanced parameters
