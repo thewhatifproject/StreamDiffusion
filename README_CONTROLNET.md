@@ -129,25 +129,6 @@ python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/contro
 # Basic webcam test with ControlNet (SD1.5 config)
 python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/lineart_example.yaml
 
-
-### High Performance Single Controlnet Simulation Demo
-#this demo generates images of a square moving around the screen and uses a single canny controlnet to show the performance loss in comparison to the single.py high performance demo
-python ./examples/optimal-performance/controlnet_single.py
-
-### Configuration Demo
-
-```bash
-# Test with a single image
-python ./examples/controlnet_config_demo.py --config ./configs/controlnet_examples/depth_example.yaml --input test_image.jpg
-
-# Batch processing
-python ./examples/controlnet_config_demo.py --config ./configs/controlnet_examples/canny_example.yaml --input image_folder/
-
-# Interactive mode
-python ./examples/controlnet_config_demo.py --config ./configs/controlnet_examples/multi_controlnet_example.yaml --interactive
-
-# Create example configurations
-python ./examples/controlnet_config_demo.py --create-examples
 ```
 
 ## 🔧 Supported ControlNets
