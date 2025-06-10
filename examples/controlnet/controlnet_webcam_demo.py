@@ -73,7 +73,7 @@ def main():
     print(f"✓ Loaded configuration from {args.config}")
     
     # Detect pipeline type
-    pipeline_type = getattr(config, 'pipeline_type', 'sd1.5')
+    pipeline_type = config.get('pipeline_type', 'sd1.5')
     print(f"🔧 Pipeline type: {pipeline_type}")
     
     # Set default resolution based on pipeline type if not specified
@@ -84,37 +84,37 @@ def main():
             args.resolution = 512   # SD 1.5 and SD Turbo default
     
     # Override parameters if provided
-    model_id = args.model if args.model else config.model_id
-    prompt = args.prompt if args.prompt else config.prompt
+    model_id = args.model if args.model else config['model_id']
+    prompt = args.prompt if args.prompt else config['prompt']
     if args.controlnet_scale is not None:
-        config.controlnets[0].conditioning_scale = args.controlnet_scale
+        config['controlnets'][0]['conditioning_scale'] = args.controlnet_scale
     
     # Update resolution in config
-    config.width = args.resolution
-    config.height = args.resolution
+    config['width'] = args.resolution
+    config['height'] = args.resolution
     
     # Determine t_index_list and other parameters based on pipeline type
-    t_index_list = getattr(config, 't_index_list', [0,16])
+    t_index_list = config.get('t_index_list', [0,16])
     if pipeline_type == 'sdturbo':
-        cfg_type = getattr(config, 'cfg_type', "none")
-        use_lcm_lora = getattr(config, 'use_lcm_lora', False)
-        use_tiny_vae = getattr(config, 'use_tiny_vae', True)
+        cfg_type = config.get('cfg_type', "none")
+        use_lcm_lora = config.get('use_lcm_lora', False)
+        use_tiny_vae = config.get('use_tiny_vae', True)
     elif pipeline_type == 'sdxlturbo':
-        cfg_type = getattr(config, 'cfg_type', "none")
-        use_lcm_lora = getattr(config, 'use_lcm_lora', False)
-        use_tiny_vae = getattr(config, 'use_tiny_vae', False)
+        cfg_type = config.get('cfg_type', "none")
+        use_lcm_lora = config.get('use_lcm_lora', False)
+        use_tiny_vae = config.get('use_tiny_vae', False)
     else:  # sd1.5
-        cfg_type = getattr(config, 'cfg_type', 'self')
-        use_lcm_lora = getattr(config, 'use_lcm_lora', True)
-        use_tiny_vae = getattr(config, 'use_tiny_vae', True)
+        cfg_type = config.get('cfg_type', 'self')
+        use_lcm_lora = config.get('use_lcm_lora', True)
+        use_tiny_vae = config.get('use_tiny_vae', True)
     
     # Create ControlNet configuration for wrapper
     controlnet_config = {
-        'model_id': config.controlnets[0].model_id,
-        'preprocessor': config.controlnets[0].preprocessor,
-        'conditioning_scale': config.controlnets[0].conditioning_scale,
-        'enabled': config.controlnets[0].enabled,
-        'preprocessor_params': getattr(config.controlnets[0], 'preprocessor_params', None),
+        'model_id': config['controlnets'][0]['model_id'],
+        'preprocessor': config['controlnets'][0]['preprocessor'],
+        'conditioning_scale': config['controlnets'][0]['conditioning_scale'],
+        'enabled': config['controlnets'][0]['enabled'],
+        'preprocessor_params': config['controlnets'][0].get('preprocessor_params', None),
         'pipeline_type': pipeline_type,  # Add pipeline_type for patching
     }
     
@@ -134,13 +134,13 @@ def main():
         width=args.resolution,
         height=args.resolution,
         warmup=10,
-        acceleration=getattr(config, 'acceleration', 'none'),  # RESTORED: Test TensorRT with fixed format
+        acceleration=config.get('acceleration', 'none'),  # RESTORED: Test TensorRT with fixed format
         do_add_noise=True,
         use_lcm_lora=use_lcm_lora,
         use_tiny_vae=use_tiny_vae,
         use_denoising_batch=True,
         cfg_type=cfg_type,
-        seed=getattr(config, 'seed', 2),
+        seed=config.get('seed', 2),
         use_safety_checker=False,
         # ControlNet options
         use_controlnet=True,
@@ -151,10 +151,10 @@ def main():
     
     wrapper.prepare(
         prompt=prompt,
-        negative_prompt=getattr(config, 'negative_prompt', ''),
-        num_inference_steps=getattr(config, 'num_inference_steps', 50),
-        guidance_scale=getattr(config, 'guidance_scale', 1.1 if cfg_type != "none" else 1.0),
-        delta=getattr(config, 'delta', 1.0),
+        negative_prompt=config.get('negative_prompt', ''),
+        num_inference_steps=config.get('num_inference_steps', 50),
+        guidance_scale=config.get('guidance_scale', 1.1 if cfg_type != "none" else 1.0),
+        delta=config.get('delta', 1.0),
     )
     
     print("DEBUGGING: Checking if TensorRT compilation succeeded...")

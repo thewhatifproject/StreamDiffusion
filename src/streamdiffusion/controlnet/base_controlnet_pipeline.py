@@ -8,7 +8,6 @@ from diffusers.models import ControlNetModel
 from diffusers.utils import load_image
 
 from ..pipeline import StreamDiffusion
-from .config import ControlNetConfig
 from .preprocessors import get_preprocessor
 
 
@@ -63,35 +62,35 @@ class BaseControlNetPipeline:
         self._active_indices_cache = []
     
     def add_controlnet(self, 
-                      controlnet_config: ControlNetConfig,
+                      controlnet_config: Dict[str, Any],
                       control_image: Optional[Union[str, Image.Image, np.ndarray, torch.Tensor]] = None) -> int:
         """
         Add a ControlNet to the pipeline
         
         Args:
-            controlnet_config: ControlNet configuration
+            controlnet_config: ControlNet configuration dictionary
             control_image: Control image (optional, can be set later)
             
         Returns:
             Index of the added ControlNet
         """
-        if not controlnet_config.enabled:
+        if not controlnet_config.get('enabled', True):
             return -1
         
         # Load ControlNet model
-        controlnet = self._load_controlnet_model(controlnet_config.model_id)
+        controlnet = self._load_controlnet_model(controlnet_config['model_id'])
         
         # Load preprocessor if specified
         preprocessor = None
-        if controlnet_config.preprocessor:
-            preprocessor = get_preprocessor(controlnet_config.preprocessor)
+        if controlnet_config.get('preprocessor'):
+            preprocessor = get_preprocessor(controlnet_config['preprocessor'])
             # Set preprocessor parameters including device and dtype
             preprocessor_params = {
                 'device': self.device,
                 'dtype': self.dtype
             }
-            if controlnet_config.preprocessor_params:
-                preprocessor_params.update(controlnet_config.preprocessor_params)
+            if controlnet_config.get('preprocessor_params'):
+                preprocessor_params.update(controlnet_config['preprocessor_params'])
             preprocessor.params.update(preprocessor_params)
             # Update device and dtype directly
             if hasattr(preprocessor, 'device'):
@@ -103,15 +102,15 @@ class BaseControlNetPipeline:
         processed_image = None
         if control_image is not None:
             processed_image = self._prepare_control_image(control_image, preprocessor)
-        elif controlnet_config.control_image_path:
+        elif controlnet_config.get('control_image_path'):
             # Load from configured path
-            control_image = load_image(controlnet_config.control_image_path)
+            control_image = load_image(controlnet_config['control_image_path'])
             processed_image = self._prepare_control_image(control_image, preprocessor)
         
         # Add to collections
         self.controlnets.append(controlnet)
         self.controlnet_images.append(processed_image)
-        self.controlnet_scales.append(controlnet_config.conditioning_scale)
+        self.controlnet_scales.append(controlnet_config.get('conditioning_scale', 1.0))
         self.preprocessors.append(preprocessor)
         
         # Patch the StreamDiffusion pipeline if this is the first ControlNet

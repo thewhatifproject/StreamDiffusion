@@ -889,15 +889,14 @@ class StreamDiffusionWrapper:
             preprocessor_params = config.get('preprocessor_params', None)
             
             try:
-                # Create ControlNetConfig object
-                from streamdiffusion.controlnet.config import ControlNetConfig
-                cn_config = ControlNetConfig(
-                    model_id=model_id,
-                    preprocessor=preprocessor,
-                    conditioning_scale=conditioning_scale,
-                    enabled=enabled,
-                    preprocessor_params=preprocessor_params or {}
-                )
+                # Pass config dictionary directly
+                cn_config = {
+                    'model_id': model_id,
+                    'preprocessor': preprocessor,
+                    'conditioning_scale': conditioning_scale,
+                    'enabled': enabled,
+                    'preprocessor_params': preprocessor_params or {}
+                }
                 
                 controlnet_pipeline.add_controlnet(cn_config)
             except Exception as e:
@@ -915,20 +914,19 @@ class StreamDiffusionWrapper:
                       preprocessor_params: Optional[Dict[str, Any]] = None) -> int:
         """Forward add_controlnet call to the underlying ControlNet pipeline"""
         if not self.use_controlnet:
-            raise RuntimeError("ControlNet support not enabled. Set use_controlnet=True in constructor.")
+            raise RuntimeError("add_controlnet: ControlNet support not enabled. Set use_controlnet=True in constructor.")
         
         if hasattr(self.stream, 'add_controlnet'):
-            from streamdiffusion.controlnet.config import ControlNetConfig
-            cn_config = ControlNetConfig(
-                model_id=model_id,
-                preprocessor=preprocessor,
-                conditioning_scale=conditioning_scale,
-                enabled=enabled,
-                preprocessor_params=preprocessor_params or {}
-            )
+            cn_config = {
+                'model_id': model_id,
+                'preprocessor': preprocessor,
+                'conditioning_scale': conditioning_scale,
+                'enabled': enabled,
+                'preprocessor_params': preprocessor_params or {}
+            }
             return self.stream.add_controlnet(cn_config, control_image)
         else:
-            raise RuntimeError("ControlNet functionality not available on this pipeline")
+            raise RuntimeError("add_controlnet: ControlNet functionality not available on this pipeline")
 
     def update_control_image(self, 
                            index: int, 

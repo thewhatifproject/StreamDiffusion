@@ -45,26 +45,26 @@ class ControlNetGUI:
         self.frame_count = 0
         
         # GUI variables
-        self.prompt_var = tk.StringVar(value=config.prompt if hasattr(config, 'prompt') else "")
-        self.negative_prompt_var = tk.StringVar(value=getattr(config, 'negative_prompt', ''))
-        self.guidance_scale_var = tk.DoubleVar(value=getattr(config, 'guidance_scale', 1.1))
-        self.num_steps_var = tk.IntVar(value=getattr(config, 'num_inference_steps', 50))
-        self.seed_var = tk.IntVar(value=getattr(config, 'seed', 2))
+        self.prompt_var = tk.StringVar(value=config['prompt'] if 'prompt' in config else "")
+        self.negative_prompt_var = tk.StringVar(value=config.get('negative_prompt', ''))
+        self.guidance_scale_var = tk.DoubleVar(value=config.get('guidance_scale', 1.1))
+        self.num_steps_var = tk.IntVar(value=config.get('num_inference_steps', 50))
+        self.seed_var = tk.IntVar(value=config.get('seed', 2))
         
         # Temporal consistency variables
-        self.frame_buffer_size_var = tk.IntVar(value=getattr(config, 'frame_buffer_size', 1))
-        self.delta_var = tk.DoubleVar(value=getattr(config, 'delta', 1.0))
-        self.cfg_type_var = tk.StringVar(value=getattr(config, 'cfg_type', 'self'))
+        self.frame_buffer_size_var = tk.IntVar(value=config.get('frame_buffer_size', 1))
+        self.delta_var = tk.DoubleVar(value=config.get('delta', 1.0))
+        self.cfg_type_var = tk.StringVar(value=config.get('cfg_type', 'self'))
         
         # ControlNet variables - support multiple ControlNets
         self.controlnet_vars = []
         self.controlnet_enabled_vars = []
         
         # Initialize ControlNet variables based on config
-        if hasattr(config, 'controlnets') and config.controlnets:
-            for i, cn_config in enumerate(config.controlnets):
-                scale_var = tk.DoubleVar(value=cn_config.conditioning_scale)
-                enabled_var = tk.BooleanVar(value=getattr(cn_config, 'enabled', True))
+        if 'controlnets' in config and config['controlnets']:
+            for i, cn_config in enumerate(config['controlnets']):
+                scale_var = tk.DoubleVar(value=cn_config['conditioning_scale'])
+                enabled_var = tk.BooleanVar(value=cn_config.get('enabled', True))
                 self.controlnet_vars.append(scale_var)
                 self.controlnet_enabled_vars.append(enabled_var)
         else:
@@ -196,9 +196,9 @@ class ControlNetGUI:
         info_frame = ttk.LabelFrame(parent, text="ControlNet Information", padding=10)
         info_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        if hasattr(self.config, 'controlnets') and self.config.controlnets:
-            for i, cn_config in enumerate(self.config.controlnets):
-                cn_info_text = f"ControlNet {i+1}: {cn_config.model_id.split('/')[-1]}\nPreprocessor: {cn_config.preprocessor}"
+        if 'controlnets' in self.config and self.config['controlnets']:
+            for i, cn_config in enumerate(self.config['controlnets']):
+                cn_info_text = f"ControlNet {i+1}: {cn_config['model_id'].split('/')[-1]}\nPreprocessor: {cn_config['preprocessor']}"
                 ttk.Label(info_frame, text=cn_info_text, font=('TkDefaultFont', 8)).pack(anchor=tk.W, pady=2)
         
         # ControlNet strength controls
@@ -216,8 +216,8 @@ class ControlNetGUI:
             header_frame.pack(fill=tk.X, pady=2)
             
             cn_name = f"ControlNet {i+1}"
-            if hasattr(self.config, 'controlnets') and i < len(self.config.controlnets):
-                preprocessor = self.config.controlnets[i].preprocessor
+            if 'controlnets' in self.config and i < len(self.config['controlnets']):
+                preprocessor = self.config['controlnets'][i]['preprocessor']
                 cn_name = f"ControlNet {i+1} ({preprocessor})"
             
             enabled_cb = ttk.Checkbutton(header_frame, text=cn_name, variable=enabled_var,
@@ -271,9 +271,9 @@ class ControlNetGUI:
         pipeline_frame = ttk.LabelFrame(parent, text="Pipeline Information", padding=10)
         pipeline_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        pipeline_type = getattr(self.config, 'pipeline_type', 'sd1.5')
-        model_id = self.config.model_id if hasattr(self.config, 'model_id') else "Unknown"
-        acceleration = getattr(self.config, 'acceleration', 'none')
+        pipeline_type = self.config.get('pipeline_type', 'sd1.5')
+        model_id = self.config['model_id'] if 'model_id' in self.config else "Unknown"
+        acceleration = self.config.get('acceleration', 'none')
         
         ttk.Label(pipeline_frame, text=f"Pipeline Type: {pipeline_type}").pack(anchor=tk.W)
         ttk.Label(pipeline_frame, text=f"Model: {model_id.split('/')[-1]}").pack(anchor=tk.W)
@@ -294,7 +294,7 @@ class ControlNetGUI:
         temporal_frame = ttk.LabelFrame(parent, text="Temporal Consistency", padding=10)
         temporal_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # Check if TensorRT is enabled (frame buffer changes not allowed)
+        # Check if TensorRT is enabled
         tensorrt_enabled = acceleration.lower() == 'tensorrt'
         
         # Frame Buffer Size
@@ -372,7 +372,7 @@ class ControlNetGUI:
                     print("Updating pipeline parameters...")
                     
                     # Check if TensorRT is enabled
-                    acceleration = getattr(self.config, 'acceleration', 'none')
+                    acceleration = self.config.get('acceleration', 'none')
                     tensorrt_enabled = acceleration.lower() == 'tensorrt'
                     
                     # Check if we need to recreate the entire pipeline (expensive operations)
@@ -459,18 +459,18 @@ class ControlNetGUI:
     def reset_defaults(self):
         """Reset all parameters to defaults"""
         # Reset prompts
-        self.prompt_var.set(getattr(self.config, 'prompt', ''))
-        self.negative_prompt_var.set(getattr(self.config, 'negative_prompt', ''))
+        self.prompt_var.set(self.config.get('prompt', ''))
+        self.negative_prompt_var.set(self.config.get('negative_prompt', ''))
         
         # Reset generation params
-        self.guidance_scale_var.set(getattr(self.config, 'guidance_scale', 1.1))
-        self.num_steps_var.set(getattr(self.config, 'num_inference_steps', 50))
-        self.seed_var.set(getattr(self.config, 'seed', 2))
+        self.guidance_scale_var.set(self.config.get('guidance_scale', 1.1))
+        self.num_steps_var.set(self.config.get('num_inference_steps', 50))
+        self.seed_var.set(self.config.get('seed', 2))
         
         # Reset temporal consistency variables
-        self.frame_buffer_size_var.set(getattr(self.config, 'frame_buffer_size', 1))
-        self.delta_var.set(getattr(self.config, 'delta', 1.0))
-        self.cfg_type_var.set(getattr(self.config, 'cfg_type', 'self'))
+        self.frame_buffer_size_var.set(self.config.get('frame_buffer_size', 1))
+        self.delta_var.set(self.config.get('delta', 1.0))
+        self.cfg_type_var.set(self.config.get('cfg_type', 'self'))
         
         # Reset ControlNet strengths
         self.reset_controlnet_strengths()
@@ -732,14 +732,14 @@ def main():
     print(f"Loaded configuration from {args.config}")
     
     # Detect pipeline type
-    pipeline_type = getattr(config, 'pipeline_type', 'sd1.5')
+    pipeline_type = config.get('pipeline_type', 'sd1.5')
     print(f"Pipeline type: {pipeline_type}")
     
     # Display ControlNet information
-    if hasattr(config, 'controlnets') and config.controlnets:
-        print(f"Found {len(config.controlnets)} ControlNet(s):")
-        for i, cn in enumerate(config.controlnets):
-            print(f"  {i+1}. {cn.model_id.split('/')[-1]} (preprocessor: {cn.preprocessor}, strength: {cn.conditioning_scale})")
+    if 'controlnets' in config and config['controlnets']:
+        print(f"Found {len(config['controlnets'])} ControlNet(s):")
+        for i, cn in enumerate(config['controlnets']):
+            print(f"  {i+1}. {cn['model_id'].split('/')[-1]} (preprocessor: {cn['preprocessor']}, strength: {cn['conditioning_scale']})")
     else:
         print("Warning: No ControlNets found in configuration")
     
@@ -751,41 +751,41 @@ def main():
             args.resolution = 512   # SD 1.5 and SD Turbo default
     
     # Override parameters if provided
-    model_id = args.model if args.model else config.model_id
-    prompt = args.prompt if args.prompt else config.prompt
+    model_id = args.model if args.model else config['model_id']
+    prompt = args.prompt if args.prompt else config['prompt']
     
-    # Update resolution in config
-    config.width = args.resolution
-    config.height = args.resolution
+    # Update resolution in config for GUI display
+    config['width'] = args.resolution
+    config['height'] = args.resolution
     
-    # Determine parameters based on pipeline type
-    t_index_list = getattr(config, 't_index_list', [0,16])
+    # Determine t_index_list and other parameters based on pipeline type
+    t_index_list = config.get('t_index_list', [0,16])
     if pipeline_type == 'sdturbo':
-        cfg_type = getattr(config, 'cfg_type', "none")
-        use_lcm_lora = getattr(config, 'use_lcm_lora', False)
-        use_tiny_vae = getattr(config, 'use_tiny_vae', True)
+        cfg_type = config.get('cfg_type', "none")
+        use_lcm_lora = config.get('use_lcm_lora', False)
+        use_tiny_vae = config.get('use_tiny_vae', True)
     elif pipeline_type == 'sdxlturbo':
-        cfg_type = getattr(config, 'cfg_type', "none")
-        use_lcm_lora = getattr(config, 'use_lcm_lora', False)
-        use_tiny_vae = getattr(config, 'use_tiny_vae', False)
+        cfg_type = config.get('cfg_type', "none")
+        use_lcm_lora = config.get('use_lcm_lora', False)
+        use_tiny_vae = config.get('use_tiny_vae', False)
     else:  # sd1.5
-        cfg_type = getattr(config, 'cfg_type', 'self')
-        use_lcm_lora = getattr(config, 'use_lcm_lora', True)
-        use_tiny_vae = getattr(config, 'use_tiny_vae', True)
+        cfg_type = config.get('cfg_type', 'self')
+        use_lcm_lora = config.get('use_lcm_lora', True)
+        use_tiny_vae = config.get('use_tiny_vae', True)
     
     # Create ControlNet configurations for wrapper - support multiple ControlNets
     controlnet_configs = []
-    if hasattr(config, 'controlnets') and config.controlnets:
-        for cn_config in config.controlnets:
+    if 'controlnets' in config and config['controlnets']:
+        for cn_config in config['controlnets']:
             controlnet_config = {
-                'model_id': cn_config.model_id,
-                'preprocessor': cn_config.preprocessor,
-                'conditioning_scale': cn_config.conditioning_scale,
-                'enabled': getattr(cn_config, 'enabled', True),
-                'preprocessor_params': getattr(cn_config, 'preprocessor_params', None),
+                'model_id': cn_config['model_id'],
+                'preprocessor': cn_config['preprocessor'],
+                'conditioning_scale': cn_config['conditioning_scale'],
+                'enabled': cn_config.get('enabled', True),
+                'preprocessor_params': cn_config.get('preprocessor_params', None),
                 'pipeline_type': pipeline_type,
-                'control_guidance_start': getattr(cn_config, 'control_guidance_start', 0.0),
-                'control_guidance_end': getattr(cn_config, 'control_guidance_end', 1.0),
+                'control_guidance_start': cn_config.get('control_guidance_start', 0.0),
+                'control_guidance_end': cn_config.get('control_guidance_end', 1.0),
             }
             controlnet_configs.append(controlnet_config)
     else:
@@ -813,31 +813,32 @@ def main():
         output_type="pil",
         device="cuda",
         dtype=torch.float16,
-        frame_buffer_size=getattr(config, 'frame_buffer_size', 1),
+        frame_buffer_size=config.get('frame_buffer_size', 1),
         width=args.resolution,
         height=args.resolution,
         warmup=10,
-        acceleration=getattr(config, 'acceleration', 'none'),
+        acceleration=config.get('acceleration', 'none'),
         do_add_noise=True,
         use_lcm_lora=use_lcm_lora,
         use_tiny_vae=use_tiny_vae,
         use_denoising_batch=True,
-        cfg_type=getattr(config, 'cfg_type', cfg_type),
-        seed=getattr(config, 'seed', 2),
+        cfg_type=config.get('cfg_type', cfg_type),
+        seed=config.get('seed', 2),
         use_safety_checker=False,
-        # ControlNet options - pass all ControlNet configs
+        # ControlNet options
         use_controlnet=True,
-        controlnet_config=controlnet_configs,  # Pass list of all ControlNet configs
+        controlnet_config=controlnet_configs,
     )
     
     print("Pipeline created successfully")
     
+    # Prepare pipeline
     wrapper.prepare(
         prompt=prompt,
-        negative_prompt=getattr(config, 'negative_prompt', ''),
-        num_inference_steps=getattr(config, 'num_inference_steps', 50),
-        guidance_scale=getattr(config, 'guidance_scale', 1.1 if cfg_type != "none" else 1.0),
-        delta=getattr(config, 'delta', 1.0),
+        negative_prompt=config.get('negative_prompt', ''),
+        num_inference_steps=config.get('num_inference_steps', 50),
+        guidance_scale=config.get('guidance_scale', 1.1 if cfg_type != "none" else 1.0),
+        delta=config.get('delta', 1.0),
     )
     
     print("Pipeline prepared successfully")
