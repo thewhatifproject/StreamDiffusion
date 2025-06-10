@@ -85,9 +85,6 @@ class Config:
 class MultiControlNetStreamDiffusionPipeline:
     """
     Multi-ControlNet StreamDiffusion pipeline.
-    
-    Demonstrates using multiple ControlNets simultaneously for enhanced control.
-    This class contains the essential logic needed for ai-runner integration.
     """
     
     def __init__(self, config: Config = None):
