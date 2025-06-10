@@ -1,74 +1,170 @@
-# WIP: ControlNet Support for StreamDiffusion
+# ControlNet Support for StreamDiffusion
 
 This implementation adds comprehensive ControlNet support to StreamDiffusion, enabling real-time image generation conditioned on various types of control inputs like edges, depth maps, pose information, and more.
 
+NOTE: SDXL Support is forthcoming
+
 ## Features
 
-- Chain multiple ControlNets for complex conditioning
-- Use YAML/JSON configs to define your ControlNet pipelines
+- Dynamic multi-controlnet support
+- Full tensorrt acceleration, with dynamic runtime conditioning strength
 - Extensible preprocessing system for different ControlNet types
 - Drop-in replacement for standard StreamDiffusion with ControlNet capabilities
-
-### Basic Setup
-
-1. Clone or navigate to your StreamDiffusion directory
-2. The ControlNet implementation is already included in `src/streamdiffusion/controlnet/`
-3. Import and use as shown in the examples below
+- Use YAML/JSON configs to define your ControlNet pipelines
 
 ## Quick Start
 
-### Method 1: Configuration-Based (Recommended)
+### Webcam Demo
+
+```bash
+
+# the depth trt examples assume you have a tensorrt engine for depthanything as seen in this repo
+# https://github.com/yuvraj108c/ComfyUI-Depth-Anything-Tensorrt
+# additionally, for all of the demo configs, they must be updated to suite your environment. 
+# the following demo, img2img with 2 steps and a depth controlnet, produced 34FPS on a 5090
+
+# test with simple gui
+python ./examples/controlnet/controlnet_webcam_gui_demo.py --config ./configs/controlnet_examples/sdturbo_depth_trt_example.yaml
+
+```
+Try the other example yaml files at will. 
+
+### Standalone Demo
+
+```bash
+# Production-ready standalone example
+python examples/controlnet/standalone_controlnet_pipeline.py
+```
+
+## Usage
+
+### Configuration-Based (Recommended)
 
 ```python
-from streamdiffusion.controlnet import load_controlnet_config, create_controlnet_pipeline
+from streamdiffusion.controlnet import load_controlnet_config
+from utils.wrapper import StreamDiffusionWrapper
+import torch
 
 # Load configuration
 config = load_controlnet_config("configs/controlnet_examples/canny_example.yaml")
 
-# Create pipeline
-pipeline = create_controlnet_pipeline(config)
+# Create wrapper with ControlNet support
+wrapper = StreamDiffusionWrapper(
+    model_id_or_path=config['model_id'],
+    t_index_list=config['t_index_list'],
+    mode="img2img",
+    output_type="pil",
+    device="cuda",
+    dtype=torch.float16,
+    width=config['width'],
+    height=config['height'],
+    frame_buffer_size=config.get('frame_buffer_size', 1),
+    acceleration=config.get('acceleration', 'none'),
+    use_lcm_lora=config.get('use_lcm_lora', True),
+    use_tiny_vae=config.get('use_tiny_vae', True),
+    cfg_type=config.get('cfg_type', 'self'),
+    seed=config.get('seed', 2),
+    use_safety_checker=False,
+    # ControlNet configuration
+    use_controlnet=True,
+    controlnet_config=config['controlnets'],
+)
 
-# Use with images
+# Prepare pipeline
+wrapper.prepare(
+    prompt=config['prompt'],
+    negative_prompt=config.get('negative_prompt', ''),
+    num_inference_steps=config.get('num_inference_steps', 50),
+    guidance_scale=config.get('guidance_scale', 1.0),
+    delta=config.get('delta', 1.0),
+)
+
+# Process images
 from PIL import Image
 input_image = Image.open("your_image.jpg")
-output = pipeline(input_image)
+
+# Update control image for all ControlNets
+wrapper.update_control_image_efficient(input_image)
+
+# Generate output
+output_image = wrapper(input_image)
 ```
 
-### Method 2: Programmatic Setup
+### Programmatic Setup
 
 ```python
-from streamdiffusion import StreamDiffusion
-from streamdiffusion.controlnet import ControlNetPipeline, ControlNetConfig
-from diffusers import StableDiffusionPipeline
+from utils.wrapper import StreamDiffusionWrapper
+import torch
 
-# Create base pipeline
-pipe = StableDiffusionPipeline.from_pretrained("stabilityai/sd-turbo")
-stream = StreamDiffusion(pipe, t_index_list=[32, 45])
+# Define ControlNet configurations
+controlnet_configs = [
+    {
+        'model_id': "lllyasviel/control_v11p_sd15_canny",
+        'conditioning_scale': 1.0,
+        'preprocessor': "canny",
+        'preprocessor_params': {
+            'low_threshold': 100,
+            'high_threshold': 200
+        },
+        'enabled': True,
+        'pipeline_type': 'sd1.5',
+        'control_guidance_start': 0.0,
+        'control_guidance_end': 1.0,
+    }
+]
 
-# Add ControlNet
-controlnet_pipeline = ControlNetPipeline(stream)
-controlnet_config = ControlNetConfig(
-    model_id="lllyasviel/control_v11p_sd15_canny",
-    conditioning_scale=1.0,
-    preprocessor="canny"
+# Create wrapper
+wrapper = StreamDiffusionWrapper(
+    model_id_or_path="stabilityai/sd-turbo",
+    t_index_list=[32, 45],
+    mode="img2img",
+    output_type="pil",
+    device="cuda",
+    dtype=torch.float16,
+    width=512,
+    height=512,
+    frame_buffer_size=1,
+    acceleration="none",
+    use_lcm_lora=False,
+    use_tiny_vae=True,
+    cfg_type="none",
+    seed=789,
+    use_safety_checker=False,
+    # ControlNet options
+    use_controlnet=True,
+    controlnet_config=controlnet_configs,
 )
-controlnet_pipeline.add_controlnet(controlnet_config)
 
 # Prepare and use
-controlnet_pipeline.prepare("a beautiful landscape")
-output = controlnet_pipeline(input_image)
+wrapper.prepare(
+    prompt="a beautiful landscape, highly detailed",
+    negative_prompt="blurry, low quality",
+    num_inference_steps=50,
+    guidance_scale=1.0,
+    delta=1.0,
+)
+
+# Process image
+wrapper.update_control_image_efficient(input_image)
+output = wrapper(input_image)
 ```
 
-## Configuration Files
+## Configuration Format
 
-### Example: Canny Edge ControlNet
+### Basic YAML Configuration
 
 ```yaml
-# configs/controlnet_examples/canny_example.yaml
+# Basic SD-Turbo + Canny ControlNet
 model_id: "stabilityai/sd-turbo"
-prompt: "a beautiful landscape, highly detailed"
+pipeline_type: "sdturbo"
+t_index_list: [32, 45]
 width: 512
 height: 512
+
+prompt: "a beautiful landscape, highly detailed"
+negative_prompt: "blurry, low quality"
+guidance_scale: 1.2
+num_inference_steps: 50
 
 controlnets:
   - model_id: "lllyasviel/control_v11p_sd15_canny"
@@ -80,138 +176,159 @@ controlnets:
     enabled: true
 ```
 
-### Example: Multiple ControlNets
+### Multi-ControlNet Configuration
 
 ```yaml
-# configs/controlnet_examples/multi_controlnet_example.yaml
+# Multiple ControlNets with different strengths
 model_id: "stabilityai/sd-turbo"
+pipeline_type: "sdturbo"
 prompt: "a person in a detailed environment"
 
 controlnets:
-  # Human pose detection
-  - model_id: "lllyasviel/control_v11p_sd15_openpose"
-    conditioning_scale: 0.8
-    preprocessor: "openpose"
+  - model_id: "thibaud/controlnet-sd21-depth-diffusers"
+    conditioning_scale: 0.5
+    preprocessor: "depth_tensorrt"
+    preprocessor_params:
+      engine_path: "path/to/depth_anything_vits14-fp16.engine"
+      detect_resolution: 518
+      image_resolution: 512
     enabled: true
     
-  # Depth information
-  - model_id: "lllyasviel/control_v11f1p_sd15_depth"
-    conditioning_scale: 0.6
-    preprocessor: "depth"
+  - model_id: "thibaud/controlnet-sd21-canny-diffusers"
+    conditioning_scale: 0.5
+    preprocessor: "canny"
+    preprocessor_params:
+      low_threshold: 50
+      high_threshold: 100
     enabled: true
 ```
 
-## 🎮 Example Scripts
+## Runtime Control
 
-### Webcam Demo
-
-```bash
-
-# the depth trt examples assume you have a tensorrt engine for depthanything as seen in this repo
-# https://github.com/yuvraj108c/ComfyUI-Depth-Anything-Tensorrt
-# additionally, for all of the demo configs, they must be updated to suite your environment. 
-
-# test with simple gui
-python ./examples/controlnet/controlnet_webcam_gui_demo.py --config ./configs/controlnet_examples/sdturbo_depth_trt_example.yaml
-
-# Basic webcam test with ControlNet (SD1.5 config)
-python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/depth_trt_example.yaml
-
-# Basic webcam test with ControlNet (SDTurbo config)
-python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/sdturbo_depth_trt_example.yaml
-
-# Basic webcam test with ControlNet (SDXL config)
-python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/sdxlturbo_depth_trt_example.yaml
-
-# Basic optimized webcam demo, lacking keyboard controls but slightly more performant 
-python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/depth_trt_example.yaml
-
-# Basic webcam test with ControlNet (SD1.5 config)
-python ./examples/controlnet/controlnet_webcam_demo.py --config ./configs/controlnet_examples/lineart_example.yaml
-
-```
-
-## 🔧 Supported ControlNets
-
-### Preprocessors
-
- - canny
- - depth (WIP)
- - depth tensorrt (WIP)
- - lineart
- - openpose 
-
-
-## Reference
-
-### ControlNetPipeline
+### Dynamic ControlNet Strength Adjustment
 
 ```python
-class ControlNetPipeline:
-    def add_controlnet(self, controlnet_config: ControlNetConfig, control_image=None) -> int
-    def remove_controlnet(self, index: int) -> None
-    def clear_controlnets(self) -> None
-    def update_control_image(self, index: int, control_image) -> None
-    def update_controlnet_scale(self, index: int, scale: float) -> None
+# Update ControlNet strength during runtime
+wrapper.update_controlnet_scale(0, 0.8)  # Set first ControlNet to 80% strength
+wrapper.update_controlnet_scale(1, 0.3)  # Set second ControlNet to 30% strength
 ```
 
-### ControlNetConfig
+### Efficient Control Image Updates
 
 ```python
-@dataclass
-class ControlNetConfig:
-    model_id: str                    # ControlNet model ID or path
-    conditioning_scale: float = 1.0  # Strength (0.0 to 5.0)
-    preprocessor: Optional[str] = None
-    preprocessor_params: Dict[str, Any] = field(default_factory=dict)
-    control_image_path: Optional[str] = None
-    enabled: bool = True
+# Update control images for all ControlNets efficiently
+# This processes the input through all preprocessors
+wrapper.update_control_image_efficient(new_input_image)
+
+# Then generate with current control conditioning
+output = wrapper(new_input_image)
 ```
 
-## Adding Preprocessors
+## Supported Architectures
 
-1. Create a new file in `src/streamdiffusion/controlnet/preprocessors/`
-2. Inherit from `BasePreprocessor`
-3. Implement the `process` method
-4. Add to `__init__.py` and register
+- **SD 1.5**: Full support with extensive ControlNet ecosystem
+- **SD 2.1**: Full support with TensorRT acceleration  
+- **SDXL**: Full support via `SDXLTurboControlNetPipeline` (forthcoming)
+
+## Supported Preprocessors
+
+| Preprocessor | Description | Parameters |
+|--------------|-------------|------------|
+| `canny` | Canny edge detection | `low_threshold`, `high_threshold` |
+| `depth` | MiDaS depth estimation | None |
+| `depth_tensorrt` | TensorRT-accelerated depth | `engine_path`, `detect_resolution`, `image_resolution` |
+| `openpose` | Human pose detection | None |
+| `lineart` | Line art extraction | None |
+| `passthrough` | No preprocessing (use raw image) | None |
+
+## API Reference
+
+### StreamDiffusionWrapper ControlNet Parameters
+
+```python
+StreamDiffusionWrapper(
+    # ... other parameters ...
+    use_controlnet=True,                    # Enable ControlNet support
+    controlnet_config=controlnet_configs,   # List of ControlNet configurations
+)
+```
+
+### Runtime Control Methods
+
+```python
+# Update ControlNet strength dynamically
+wrapper.update_controlnet_scale(index: int, scale: float)
+
+# Update control image for all ControlNets efficiently  
+wrapper.update_control_image_efficient(image: PIL.Image)
+
+# Main inference call
+output_image = wrapper(input_image: PIL.Image)
+```
+
+### Configuration Functions
+
+```python
+from streamdiffusion.controlnet import load_controlnet_config, save_controlnet_config
+
+# Load configuration from YAML/JSON
+config = load_controlnet_config("path/to/config.yaml")
+
+# Save configuration  
+save_controlnet_config(config, "path/to/save.yaml")
+```
+
+### ControlNet Configuration Dictionary
+
+```python
+controlnet_config = {
+    'model_id': str,                    # ControlNet model ID or path
+    'conditioning_scale': float,        # Strength (0.0 to 2.0)
+    'preprocessor': str,               # Preprocessor name
+    'preprocessor_params': dict,       # Preprocessor-specific parameters
+    'enabled': bool,                   # Enable/disable this ControlNet
+    'pipeline_type': str,              # Pipeline type (sd1.5, sdturbo, soon sdxlturbo)
+    'control_guidance_start': float,   # Guidance start timestep (0.0-1.0)
+    'control_guidance_end': float,     # Guidance end timestep (0.0-1.0)
+}
+```
+
+## Adding Custom Preprocessors
+
+1. Create a new preprocessor class inheriting from `BasePreprocessor`:
 
 ```python
 from streamdiffusion.controlnet.preprocessors import BasePreprocessor, register_preprocessor
 
 class MyCustomPreprocessor(BasePreprocessor):
-    def process(self, image):
-        # Your custom preprocessing logic
-        processed_image = your_processing_function(image)
+    def process(self, image, **params):
+        # Your preprocessing logic here
+        processed_image = your_processing_function(image, **params)
         return processed_image
 
-# Register your preprocessor
+# Register the preprocessor
 register_preprocessor("my_custom", MyCustomPreprocessor)
-
-# Use in configuration
-controlnet_config = ControlNetConfig(
-    model_id="your/controlnet",
-    preprocessor="my_custom"
-)
 ```
 
+2. Use in configuration:
 
-## Some Models 
+```yaml
+controlnets:
+  - model_id: "your/controlnet-model"
+    preprocessor: "my_custom"
+    preprocessor_params:
+      your_param: value
+```
 
-```python 
-"lllyasviel/control_v11p_sd15_canny",         
-        "lllyasviel/control_v11f1p_sd15_depth",       
-        "lllyasviel/control_v11p_sd15_openpose",      
-        "lllyasviel/control_v11p_sd15_scribble",      
-        "lllyasviel/sd-controlnet-hed",               
-        "lllyasviel/control_v11p_sd15_mlsd",          
-        "lllyasviel/control_v11p_sd15_normalbae",     
-        "lllyasviel/control_v11p_sd15_seg",           
-        "lllyasviel/control_v11p_sd15_lineart",       
-        "lllyasviel/control_v11p_sd15s2_lineart_anime", 
-        "monster-labs/control_v1p_sd15_qrcode_monster", 
-        "monster-labs/control_v1p_sd15_qrcode_monster/v2",  # QR code model v2 (in v2 subfolder)
-        "lllyasviel/control_v11p_sd15_inpaint",       
-        "lllyasviel/control_v11e_sd15_shuffle",       
-        "lllyasviel/control_v11e_sd15_ip2p",          
-        "lllyasviel/control_v11f1e_sd15_tile"         
-        ```
+## Performance Notes
+
+- **TensorRT**: Provides significant speedup but requires pre-built engines and fixed batch sizes
+- **Frame Buffer Size**: Higher values improve temporal consistency but use more VRAM
+- **Multiple ControlNets**: Each additional ControlNet increases memory usage and processing time
+- **Real-time Usage**: Use `update_control_image_efficient()` for optimal performance in video/webcam scenarios
+
+## Example Scripts
+
+- `examples/controlnet/controlnet_webcam_gui_demo.py` - Interactive GUI demo with real-time parameter adjustment
+- `examples/controlnet/standalone_controlnet_pipeline.py` - Production-ready reference implementation
+- `configs/controlnet_examples/` - Various configuration examples for different use cases
