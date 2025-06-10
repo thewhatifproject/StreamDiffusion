@@ -2,10 +2,10 @@
 """
 ControlNet Webcam Demo for StreamDiffusion
 
-This script demonstrates real-time image generation using webcam input with ControlNet.
-It uses the StreamDiffusionWrapper with ControlNet support for proper separation of concerns.
-Supports SD 1.5, SD Turbo, and SD-XL Turbo pipelines based on configuration.
+Legacy demo. Use the GUI demo instead.
 """
+
+#TODO: remove this file
 
 import cv2
 import torch
