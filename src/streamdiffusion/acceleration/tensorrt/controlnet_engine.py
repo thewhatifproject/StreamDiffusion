@@ -8,6 +8,7 @@ ControlNet-specific inputs and outputs.
 
 import torch
 import tensorrt as trt
+import traceback
 from typing import List, Optional, Tuple, Dict, Any
 from polygraphy import cuda
 
@@ -244,9 +245,9 @@ class HybridControlNet:
                 print(f"✅ DEBUG: TensorRT ControlNet engine loaded successfully for {self.model_id}")
                 return True
         except Exception as e:
-            print(f"❌ DEBUG: TensorRT ControlNet engine load failed for {self.model_id}: {e}")
+            print(f"_try_load_tensorrt_engine DEBUG: TensorRT ControlNet engine load failed for {self.model_id}: {e}")
+            print(f"_try_load_tensorrt_engine DEBUG: Full stack trace:\n{traceback.format_exc()}")
             self.fallback_reason = f"TensorRT engine load failed: {e}"
-            self.use_tensorrt = False
         
         return False
     
@@ -263,7 +264,8 @@ class HybridControlNet:
                 # print(f"⚡ DEBUG: Using TensorRT ControlNet for inference ({self.model_id})")
                 return self.trt_engine(*args, **kwargs)
             except Exception as e:
-                print(f"❌ DEBUG: TensorRT ControlNet failed ({e}), falling back to PyTorch for {self.model_id}")
+                print(f"__call__ DEBUG: TensorRT ControlNet failed ({e}), falling back to PyTorch for {self.model_id}")
+                print(f"__call__ DEBUG: Full stack trace:\n{traceback.format_exc()}")
                 self.use_tensorrt = False
                 self.fallback_reason = f"Runtime error: {e}"
         
