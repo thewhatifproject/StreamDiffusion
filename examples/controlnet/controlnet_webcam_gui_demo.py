@@ -29,6 +29,9 @@ class ControlNetGUI:
         self.config = config
         self.args = args
         
+        # Emergency shutdown flag
+        self.emergency_shutdown = False
+        
         # Create main window
         self.root = tk.Tk()
         self.root.title("ControlNet StreamDiffusion - GUI Demo")
@@ -367,10 +370,7 @@ class ControlNetGUI:
                     self.wrapper.stream.update_prompt(self.prompt_var.get())
                 
                 # For other parameters, we need to re-prepare the pipeline
-                # This is expensive but necessary for real-time parameter changes
                 if self.running:
-                    print("Updating pipeline parameters...")
-                    
                     # Check if TensorRT is enabled
                     acceleration = self.config.get('acceleration', 'none')
                     tensorrt_enabled = acceleration.lower() == 'tensorrt'
@@ -381,9 +381,9 @@ class ControlNetGUI:
                     if (hasattr(self.wrapper, 'frame_buffer_size') and 
                         self.wrapper.frame_buffer_size != self.frame_buffer_size_var.get()):
                         if tensorrt_enabled:
-                            print("ERROR: Cannot change frame buffer size with TensorRT acceleration!")
-                            print("TensorRT engines are compiled with fixed batch sizes.")
-                            print("Please update the config file and restart the application.")
+                            print("update_pipeline_params: Cannot change frame buffer size with TensorRT acceleration!")
+                            print("update_pipeline_params: TensorRT engines are compiled with fixed batch sizes.")
+                            print("update_pipeline_params: Please update the config file and restart the application.")
                             # Reset the GUI value to current wrapper value
                             self.frame_buffer_size_var.set(self.wrapper.frame_buffer_size)
                             return
@@ -395,8 +395,8 @@ class ControlNetGUI:
                         needs_pipeline_recreation = True
                     
                     if needs_pipeline_recreation:
-                        print("Warning: Frame buffer size or CFG type change requires pipeline recreation (expensive)")
-                        print("Consider restarting the application with new settings for optimal performance")
+                        print("update_pipeline_params: Warning - Frame buffer size or CFG type change requires pipeline recreation (expensive)")
+                        print("update_pipeline_params: Consider restarting the application with new settings for optimal performance")
                     
                     # Re-prepare with new parameters (works for most changes)
                     self.wrapper.prepare(
@@ -414,7 +414,7 @@ class ControlNetGUI:
                         self.wrapper.stream.set_seed(int(self.seed_var.get()))
                 
             except Exception as e:
-                print(f"Failed to update pipeline params: {e}")
+                print(f"update_pipeline_params: Failed to update pipeline params: {e}")
     
     def update_controlnet_strength(self, index, value):
         """Update ControlNet strength"""
@@ -422,8 +422,8 @@ class ControlNetGUI:
             new_value = float(value)
             if hasattr(self.wrapper, 'update_controlnet_scale'):
                 self.wrapper.update_controlnet_scale(index, new_value)
-        except Exception as e:
-            print(f"Failed to update ControlNet {index} strength: {e}")
+        except Exception:
+            pass
     
     def toggle_controlnet(self, index):
         """Toggle ControlNet on/off"""
@@ -432,8 +432,8 @@ class ControlNetGUI:
             strength = self.controlnet_vars[index].get() if enabled else 0.0
             if hasattr(self.wrapper, 'update_controlnet_scale'):
                 self.wrapper.update_controlnet_scale(index, strength)
-        except Exception as e:
-            print(f"Failed to toggle ControlNet {index}: {e}")
+        except Exception:
+            pass
     
     def enable_all_controlnets(self):
         """Enable all ControlNets"""
@@ -491,7 +491,8 @@ class ControlNetGUI:
         try:
             self.cap = cv2.VideoCapture(self.args.camera)
             if not self.cap.isOpened():
-                messagebox.showerror("Error", f"Could not open camera {self.args.camera}")
+                error_msg = f"Could not open camera {self.args.camera}"
+                messagebox.showerror("Error", error_msg)
                 return
             
             # Set camera resolution
@@ -512,30 +513,72 @@ class ControlNetGUI:
             self.display_thread.start()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to start camera: {str(e)}")
+            error_msg = f"Failed to start camera: {str(e)}"
+            messagebox.showerror("Error", error_msg)
     
     def stop_camera(self):
         """Stop camera capture"""
+        if not self.running:
+            return
+            
         self.running = False
-        if self.cap:
-            self.cap.release()
-        cv2.destroyAllWindows()
         
+        # Release camera first to stop capture thread quickly
+        if self.cap:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+            finally:
+                self.cap = None
+        
+        # Clear queues immediately to unblock processing threads
+        self._clear_queues()
+        
+        # Close OpenCV windows
+        try:
+            cv2.destroyAllWindows()
+            cv2.waitKey(1)  # Process any pending events
+        except Exception:
+            pass
+        
+        # Update GUI
         self.start_button.config(text="Start Camera")
         self.status_var.set("Stopped")
         
-        # Clear queues
-        while not self.frame_queue.empty():
-            try:
-                self.frame_queue.get_nowait()
-            except queue.Empty:
-                break
+        # Brief pause to allow threads to see the running=False state
+        import time
+        time.sleep(0.05)
+    
+    def _clear_queues(self):
+        """Clear all queues safely"""
+        # Clear frame queue
+        cleared_frames = 0
+        try:
+            while not self.frame_queue.empty():
+                try:
+                    self.frame_queue.get_nowait()
+                    cleared_frames += 1
+                    if cleared_frames > 100:  # Safety limit
+                        break
+                except queue.Empty:
+                    break
+        except Exception:
+            pass
         
-        while not self.result_queue.empty():
-            try:
-                self.result_queue.get_nowait()
-            except queue.Empty:
-                break
+        # Clear result queue
+        cleared_results = 0
+        try:
+            while not self.result_queue.empty():
+                try:
+                    self.result_queue.get_nowait()
+                    cleared_results += 1
+                    if cleared_results > 100:  # Safety limit
+                        break
+                except queue.Empty:
+                    break
+        except Exception:
+            pass
     
     def capture_frames(self):
         """Capture frames from camera"""
@@ -584,13 +627,25 @@ class ControlNetGUI:
             except queue.Empty:
                 continue
             except Exception as e:
-                print(f"Processing error: {e}")
+                print(f"process_frames: Processing error: {e}")
+                if not self.running:
+                    break
     
     def display_results(self):
         """Display results and update GUI"""
+        window_name = "ControlNet StreamDiffusion - GUI Demo"
+        window_created = False
+        
         while self.running:
             try:
-                frame, output_image, process_time = self.result_queue.get(timeout=0.1)
+                # Use short timeout and check running state frequently
+                try:
+                    frame, output_image, process_time = self.result_queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                
+                if not self.running:
+                    break
                 
                 # Update FPS counter
                 self.fps_counter.append(process_time)
@@ -598,7 +653,13 @@ class ControlNetGUI:
                 
                 if self.show_fps_var.get() and len(self.fps_counter) > 0:
                     avg_fps = len(self.fps_counter) / sum(self.fps_counter)
-                    self.fps_var.set(f"FPS: {avg_fps:.1f}")
+                    try:
+                        self.fps_var.set(f"FPS: {avg_fps:.1f}")
+                    except:
+                        pass  # GUI might be destroyed
+                
+                if not self.running:
+                    break
                 
                 # Convert output to display format
                 output_array = np.array(output_image)
@@ -612,19 +673,45 @@ class ControlNetGUI:
                 cv2.putText(combined, "Generated", (self.args.resolution + 10, 30), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 
-                # Show result
-                cv2.imshow("ControlNet StreamDiffusion - GUI Demo", combined)
+                if not self.running:
+                    break
                 
-                # Handle OpenCV window events
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    self.root.after(0, self.stop_camera)
+                # Show result
+                try:
+                    cv2.imshow(window_name, combined)
+                    window_created = True
+                    
+                    key = cv2.waitKey(1) & 0xFF
+                    
+                    if not self.running:
+                        break
+                    
+                    if key == ord('q'):
+                        self.root.after(0, self.stop_camera)
+                        break
+                    
+                    # Check if window was closed
+                    try:
+                        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                            self.root.after(0, self.stop_camera)
+                            break
+                    except:
+                        self.root.after(0, self.stop_camera)
+                        break
+                        
+                except Exception:
                     break
                     
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"Display error: {e}")
+            except Exception:
+                break
+        
+        # Cleanup
+        if window_created:
+            try:
+                cv2.destroyWindow(window_name)
+                cv2.waitKey(1)
+            except:
+                pass
     
     def save_output(self):
         """Save current output"""
@@ -665,37 +752,80 @@ class ControlNetGUI:
             self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
             self.root.mainloop()
         except KeyboardInterrupt:
-            print("Interrupted by user")
+            pass
+        except Exception as e:
+            print(f"run: Unexpected error in GUI: {e}")
         finally:
             self.cleanup()
     
     def on_closing(self):
         """Handle window closing"""
+        # Start emergency shutdown timer as absolute fallback
+        self.emergency_shutdown = True
+        emergency_thread = threading.Thread(target=self._emergency_exit, daemon=True)
+        emergency_thread.start()
+        
+        # Stop camera if running
         if self.running:
             self.stop_camera()
-        self.cleanup()
-        self.root.destroy()
-        # Force exit the entire application
-        sys.exit(0)
-    
-    def cleanup(self):
-        """Cleanup resources"""
-        self.running = False
-        if self.cap:
-            self.cap.release()
-        cv2.destroyAllWindows()
+            
+            # Very short wait
+            import time
+            time.sleep(0.3)
+            
+            # Nuclear option - destroy all OpenCV windows immediately
+            try:
+                cv2.destroyAllWindows()
+                for _ in range(3):  # Try multiple times quickly
+                    cv2.waitKey(1)
+            except:
+                pass
         
-        # Clear queues to prevent hanging
+        # Force destroying GUI
         try:
-            while not self.frame_queue.empty():
-                self.frame_queue.get_nowait()
+            self.root.quit()
+            self.root.destroy()
         except:
             pass
         
+        import os
+        os._exit(0)  # Nuclear option - immediate exit
+    
+    def _emergency_exit(self):
+        """Emergency exit thread - kills application after 2 seconds no matter what"""
+        import time
+        import os
+        time.sleep(2.0)  # Wait 2 seconds maximum
+        if self.emergency_shutdown:
+            os._exit(1)  # Force kill with error code
+    
+    def cleanup(self):
+        """Cleanup resources"""
+        # Ensure camera is stopped
+        if self.running:
+            self.running = False
+            
+        # Release camera if not already done
+        if self.cap:
+            try:
+                self.cap.release()
+                self.cap = None
+            except Exception:
+                self.cap = None  # Set to None anyway
+        
+        # Close all OpenCV windows aggressively
         try:
-            while not self.result_queue.empty():
-                self.result_queue.get_nowait()
-        except:
+            cv2.destroyAllWindows()
+            # Process any remaining events
+            for _ in range(5):  # Try a few times
+                cv2.waitKey(1)
+        except Exception:
+            pass
+        
+        # Clear queues to prevent hanging
+        try:
+            self._clear_queues()
+        except Exception:
             pass
 
 
@@ -725,21 +855,15 @@ def main():
     
     args = parser.parse_args()
     
-    print("Starting ControlNet Webcam GUI Demo")
-    
     # Load configuration
     config = load_controlnet_config(args.config)
-    print(f"Loaded configuration from {args.config}")
     
     # Detect pipeline type
     pipeline_type = config.get('pipeline_type', 'sd1.5')
-    print(f"Pipeline type: {pipeline_type}")
     
     # Display ControlNet information
     if 'controlnets' in config and config['controlnets']:
-        print(f"Found {len(config['controlnets'])} ControlNet(s):")
-        for i, cn in enumerate(config['controlnets']):
-            print(f"  {i+1}. {cn['model_id'].split('/')[-1]} (preprocessor: {cn['preprocessor']}, strength: {cn['conditioning_scale']})")
+        pass  # ControlNets found
     else:
         print("Warning: No ControlNets found in configuration")
     
@@ -801,10 +925,6 @@ def main():
             'control_guidance_end': 1.0,
         }]
     
-    print("Creating StreamDiffusion pipeline with ControlNet(s)...")
-    for i, cn_config in enumerate(controlnet_configs):
-        print(f"  ControlNet {i+1}: {cn_config['model_id']} (preprocessor: {cn_config['preprocessor']})")
-    
     # Create StreamDiffusionWrapper with ControlNet support
     wrapper = StreamDiffusionWrapper(
         model_id_or_path=model_id,
@@ -830,8 +950,6 @@ def main():
         controlnet_config=controlnet_configs,
     )
     
-    print("Pipeline created successfully")
-    
     # Prepare pipeline
     wrapper.prepare(
         prompt=prompt,
@@ -840,9 +958,6 @@ def main():
         guidance_scale=config.get('guidance_scale', 1.1 if cfg_type != "none" else 1.0),
         delta=config.get('delta', 1.0),
     )
-    
-    print("Pipeline prepared successfully")
-    print("Starting GUI...")
     
     # Create and run GUI
     gui = ControlNetGUI(wrapper, config, args)
