@@ -5,13 +5,20 @@ from .openpose import OpenPosePreprocessor
 from .lineart import LineartPreprocessor
 from .passthrough import PassthroughPreprocessor
 
-# Try to import TensorRT preprocessor - might not be available on all systems
+# Try to import TensorRT preprocessors - might not be available on all systems
 try:
     from .depth_tensorrt import DepthAnythingTensorrtPreprocessor
-    TENSORRT_AVAILABLE = True
+    DEPTH_TENSORRT_AVAILABLE = True
 except ImportError:
     DepthAnythingTensorrtPreprocessor = None
-    TENSORRT_AVAILABLE = False
+    DEPTH_TENSORRT_AVAILABLE = False
+
+try:
+    from .pose_tensorrt import YoloNasPoseTensorrtPreprocessor
+    POSE_TENSORRT_AVAILABLE = True
+except ImportError:
+    YoloNasPoseTensorrtPreprocessor = None
+    POSE_TENSORRT_AVAILABLE = False
 
 # Registry for easy lookup
 _preprocessor_registry = {
@@ -22,9 +29,12 @@ _preprocessor_registry = {
     "passthrough": PassthroughPreprocessor,
 }
 
-# Add TensorRT preprocessor if available
-if TENSORRT_AVAILABLE:
+# Add TensorRT preprocessors if available
+if DEPTH_TENSORRT_AVAILABLE:
     _preprocessor_registry["depth_tensorrt"] = DepthAnythingTensorrtPreprocessor
+
+if POSE_TENSORRT_AVAILABLE:
+    _preprocessor_registry["pose_tensorrt"] = YoloNasPoseTensorrtPreprocessor
 
 
 def get_preprocessor(name: str) -> BasePreprocessor:
@@ -75,5 +85,8 @@ __all__ = [
     "list_preprocessors",
 ]
 
-if TENSORRT_AVAILABLE:
-    __all__.append("DepthAnythingTensorrtPreprocessor") 
+if DEPTH_TENSORRT_AVAILABLE:
+    __all__.append("DepthAnythingTensorrtPreprocessor")
+
+if POSE_TENSORRT_AVAILABLE:
+    __all__.append("YoloNasPoseTensorrtPreprocessor") 
