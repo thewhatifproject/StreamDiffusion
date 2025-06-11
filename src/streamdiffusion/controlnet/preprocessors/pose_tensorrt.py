@@ -1,3 +1,5 @@
+#NOTE: ported from https://github.com/yuvraj108c/ComfyUI-YoloNasPose-Tensorrt
+
 import os
 import numpy as np
 import torch
