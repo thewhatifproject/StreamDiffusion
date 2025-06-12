@@ -20,6 +20,13 @@ except ImportError:
     YoloNasPoseTensorrtPreprocessor = None
     POSE_TENSORRT_AVAILABLE = False
 
+try:
+    from .mediapipe_pose import MediaPipePosePreprocessor
+    MEDIAPIPE_POSE_AVAILABLE = True
+except ImportError:
+    MediaPipePosePreprocessor = None
+    MEDIAPIPE_POSE_AVAILABLE = False
+
 # Registry for easy lookup
 _preprocessor_registry = {
     "canny": CannyPreprocessor,
@@ -35,6 +42,10 @@ if DEPTH_TENSORRT_AVAILABLE:
 
 if POSE_TENSORRT_AVAILABLE:
     _preprocessor_registry["pose_tensorrt"] = YoloNasPoseTensorrtPreprocessor
+
+# Add MediaPipe preprocessor if available
+if MEDIAPIPE_POSE_AVAILABLE:
+    _preprocessor_registry["mediapipe_pose"] = MediaPipePosePreprocessor
 
 
 def get_preprocessor(name: str) -> BasePreprocessor:
@@ -89,4 +100,7 @@ if DEPTH_TENSORRT_AVAILABLE:
     __all__.append("DepthAnythingTensorrtPreprocessor")
 
 if POSE_TENSORRT_AVAILABLE:
-    __all__.append("YoloNasPoseTensorrtPreprocessor") 
+    __all__.append("YoloNasPoseTensorrtPreprocessor")
+
+if MEDIAPIPE_POSE_AVAILABLE:
+    __all__.append("MediaPipePosePreprocessor") 
