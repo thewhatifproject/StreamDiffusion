@@ -123,7 +123,7 @@ def create_wrapper_from_config(config, resolution):
     return wrapper
 
 
-def process_video(config_path, input_video, output_dir, resolution=None):
+def process_video(config_path, input_video, output_dir, resolution=None, engine_only=False):
     """Process video through ControlNet pipeline"""
     print(f"process_video: Loading config from {config_path}")
     
@@ -159,6 +159,10 @@ def process_video(config_path, input_video, output_dir, resolution=None):
     
     # Create wrapper
     wrapper = create_wrapper_from_config(config, resolution)
+    
+    if engine_only:
+        print("Engine-only mode: TensorRT engines have been built (if needed). Exiting.")
+        return None
     
     # Open input video
     cap = cv2.VideoCapture(str(input_video))
@@ -293,6 +297,7 @@ def main():
                        help="Output directory for results (default: creates timestamped directory)")
     parser.add_argument("--resolution", type=int, default=None,
                        help="Video resolution (auto-detects from pipeline type if not specified)")
+    parser.add_argument("--engine-only", action="store_true", help="Only build TensorRT engines and exit (no video processing)")
     
     args = parser.parse_args()
     
@@ -319,7 +324,10 @@ def main():
     print(f"main: Output directory: {args.output_dir}")
     
     try:
-        metrics = process_video(args.config, args.input_video, args.output_dir, args.resolution)
+        metrics = process_video(args.config, args.input_video, args.output_dir, args.resolution, engine_only=args.engine_only)
+        if args.engine_only:
+            print("main: Engine-only mode completed successfully!")
+            return 0
         print("main: Video processing completed successfully!")
         return 0
     except Exception as e:

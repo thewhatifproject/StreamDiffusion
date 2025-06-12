@@ -14,6 +14,7 @@ import os
 import time
 from pathlib import Path
 from typing import List, Optional
+import argparse
 
 # Add StreamDiffusion to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -121,7 +122,6 @@ class MultiControlNetStreamDiffusionPipeline:
             t_index_list=self.config.T_INDEX_LIST,
             mode="img2img",
             output_type="pil",
-            device=self.config.DEVICE,
             dtype=torch.float16,
             frame_buffer_size=self.config.FRAME_BUFFER_SIZE,
             width=self.config.RESOLUTION,
@@ -215,7 +215,7 @@ def setup_output_directory():
     return output_dir
 
 
-def run_demo():
+def run_demo(engine_only=False):
     """
     Demonstration of the multi-ControlNet pipeline.
     Shows how depth + canny ControlNets work together.
@@ -241,8 +241,12 @@ def run_demo():
         print("Will build engine on first run (may take 5-10 minutes)")
     
     try:
-        # Initialize pipeline
+        # Initialize pipeline (this will trigger engine building if needed)
         pipeline = MultiControlNetStreamDiffusionPipeline(config)
+        
+        if engine_only:
+            print("Engine-only mode: TensorRT engines have been built (if needed). Exiting.")
+            return True
         
         # Load input image
         input_image = load_input_image(config.INPUT_IMAGE_PATH, config.RESOLUTION)
@@ -290,6 +294,10 @@ def run_demo():
 
 def main():
     """Main entry point"""
+    parser = argparse.ArgumentParser(description="Standalone Multi-ControlNet StreamDiffusion Pipeline")
+    parser.add_argument("--engine-only", action="store_true", help="Only build TensorRT engines and exit (no inference)")
+    args = parser.parse_args()
+
     print("=" * 70)
     print("Standalone Multi-ControlNet StreamDiffusion Pipeline")
     print("=" * 70)
@@ -305,7 +313,7 @@ def main():
     
     print("=" * 70)
     
-    success = run_demo()
+    success = run_demo(engine_only=args.engine_only)
     
     if success:
         print("\n✓ Multi-ControlNet demo completed successfully!")
