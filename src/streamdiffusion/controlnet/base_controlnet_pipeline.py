@@ -439,6 +439,7 @@ class BaseControlNetPipeline:
             # Default fallback
             return "canny"
     
+    #TODO: model detection module
     def _infer_model_type(self) -> str:
         """
         Infer base model type from StreamDiffusion configuration
