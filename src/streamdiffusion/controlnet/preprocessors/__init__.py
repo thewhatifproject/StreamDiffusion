@@ -27,6 +27,13 @@ except ImportError:
     MediaPipePosePreprocessor = None
     MEDIAPIPE_POSE_AVAILABLE = False
 
+try:
+    from .mediapipe_segmentation import MediaPipeSegmentationPreprocessor
+    MEDIAPIPE_SEGMENTATION_AVAILABLE = True
+except ImportError:
+    MediaPipeSegmentationPreprocessor = None
+    MEDIAPIPE_SEGMENTATION_AVAILABLE = False
+
 # Registry for easy lookup
 _preprocessor_registry = {
     "canny": CannyPreprocessor,
@@ -43,9 +50,12 @@ if DEPTH_TENSORRT_AVAILABLE:
 if POSE_TENSORRT_AVAILABLE:
     _preprocessor_registry["pose_tensorrt"] = YoloNasPoseTensorrtPreprocessor
 
-# Add MediaPipe preprocessor if available
+# Add MediaPipe preprocessors if available
 if MEDIAPIPE_POSE_AVAILABLE:
     _preprocessor_registry["mediapipe_pose"] = MediaPipePosePreprocessor
+
+if MEDIAPIPE_SEGMENTATION_AVAILABLE:
+    _preprocessor_registry["mediapipe_segmentation"] = MediaPipeSegmentationPreprocessor
 
 
 def get_preprocessor(name: str) -> BasePreprocessor:
@@ -103,4 +113,7 @@ if POSE_TENSORRT_AVAILABLE:
     __all__.append("YoloNasPoseTensorrtPreprocessor")
 
 if MEDIAPIPE_POSE_AVAILABLE:
-    __all__.append("MediaPipePosePreprocessor") 
+    __all__.append("MediaPipePosePreprocessor")
+
+if MEDIAPIPE_SEGMENTATION_AVAILABLE:
+    __all__.append("MediaPipeSegmentationPreprocessor") 
