@@ -294,7 +294,7 @@ class Engine:
         if not hasattr(self, '_last_device') or self._last_device != device:
             return False
         
-        # Check if shape_dict changed
+        # No cached shape_dict - need to allocate
         if not hasattr(self, '_last_shape_dict'):
             return False
             
@@ -304,19 +304,20 @@ class Engine:
         elif shape_dict is None or self._last_shape_dict is None:
             return False
         
-        # Compare shapes for all tensors
-        for name in self.tensors.keys():
-            if name in shape_dict:
-                new_shape = shape_dict[name]
-                cached_shape = self._last_shape_dict.get(name)
-                if cached_shape != new_shape:
-                    return False
-            else:
-                # Check engine default shape vs cached
-                default_shape = self.engine.get_tensor_shape(name)
-                cached_shape = self._last_shape_dict.get(name)
-                if cached_shape != default_shape:
-                    return False
+        # Quick check: if tensor counts differ, can't reuse
+        if len(shape_dict) != len(self._last_shape_dict):
+            return False
+        
+        # Compare shapes for all tensors in the new shape_dict
+        for name, new_shape in shape_dict.items():
+            # Check if tensor exists in cached shapes
+            cached_shape = self._last_shape_dict.get(name)
+            if cached_shape is None:
+                return False
+            
+            # Compare shapes (handle different types consistently)
+            if tuple(cached_shape) != tuple(new_shape):
+                return False
         
         return True
 
