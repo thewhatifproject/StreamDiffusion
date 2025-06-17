@@ -6,6 +6,7 @@
   import VideoInput from '$lib/components/VideoInput.svelte';
   import Button from '$lib/components/Button.svelte';
   import PipelineOptions from '$lib/components/PipelineOptions.svelte';
+  import ControlNetConfig from '$lib/components/ControlNetConfig.svelte';
   import Spinner from '$lib/icons/spinner.svelte';
   import Warning from '$lib/components/Warning.svelte';
   import { lcmLiveStatus, lcmLiveActions, LCMLiveStatus } from '$lib/lcmLive';
@@ -14,6 +15,7 @@
 
   let pipelineParams: Fields;
   let pipelineInfo: PipelineInfo;
+  let controlnetInfo: any = null;
   let pageContent: string;
   let isImageMode: boolean = false;
   let maxQueueSize: number = 0;
@@ -28,12 +30,20 @@
     const settings = await fetch('/api/settings').then((r) => r.json());
     pipelineParams = settings.input_params.properties;
     pipelineInfo = settings.info.properties;
+    controlnetInfo = settings.controlnet || null;
     isImageMode = pipelineInfo.input_mode.default === PipelineMode.IMAGE;
     maxQueueSize = settings.max_queue_size;
     pageContent = settings.page_content;
     console.log(pipelineParams);
+    console.log('ControlNet Info:', controlnetInfo);
     toggleQueueChecker(true);
   }
+
+  function handleControlNetUpdate(event: CustomEvent) {
+    controlnetInfo = event.detail;
+    console.log('ControlNet updated:', controlnetInfo);
+  }
+
   function toggleQueueChecker(start: boolean) {
     queueCheckerRunning = start && maxQueueSize > 0;
     if (start) {
@@ -134,6 +144,10 @@
           {/if}
         </Button>
         <PipelineOptions {pipelineParams}></PipelineOptions>
+      </div>
+      <!-- ControlNet Configuration Section -->
+      <div class="sm:col-span-2">
+        <ControlNetConfig {controlnetInfo} on:controlnetUpdated={handleControlNetUpdate}></ControlNetConfig>
       </div>
     </article>
   {:else}
