@@ -186,6 +186,16 @@ class App:
             if self.uploaded_controlnet_config and 'prompt' in self.uploaded_controlnet_config:
                 config_prompt = self.uploaded_controlnet_config['prompt']
             
+            # Get current t_index_list from pipeline or config
+            current_t_index_list = None
+            if self.pipeline and hasattr(self.pipeline.stream, 't_list'):
+                current_t_index_list = self.pipeline.stream.t_list
+            elif self.uploaded_controlnet_config and 't_index_list' in self.uploaded_controlnet_config:
+                current_t_index_list = self.uploaded_controlnet_config['t_index_list']
+            else:
+                # Default values
+                current_t_index_list = [35, 45]
+            
             return JSONResponse(
                 {
                     "info": info_schema,
@@ -194,6 +204,7 @@ class App:
                     "page_content": page_content if info.page_content else "",
                     "controlnet": controlnet_info,
                     "config_prompt": config_prompt,
+                    "t_index_list": current_t_index_list,
                 }
             )
 
@@ -262,6 +273,38 @@ class App:
             except Exception as e:
                 logging.error(f"update_controlnet_strength: Failed to update strength: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update strength: {str(e)}")
+
+        @self.app.post("/api/update-t-index-list")
+        async def update_t_index_list(request: Request):
+            """Update t_index_list values in real-time"""
+            try:
+                data = await request.json()
+                t_index_list = data.get("t_index_list")
+                
+                if t_index_list is None:
+                    raise HTTPException(status_code=400, detail="Missing t_index_list parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Validate that the list contains integers
+                if not all(isinstance(x, int) for x in t_index_list):
+                    raise HTTPException(status_code=400, detail="All t_index values must be integers")
+                
+                # Update t_index_list in the pipeline
+                if hasattr(self.pipeline.stream, 'update_t_index_list'):
+                    self.pipeline.stream.update_t_index_list(t_index_list)
+                    
+                    return JSONResponse({
+                        "status": "success",
+                        "message": f"Updated t_index_list to {t_index_list}"
+                    })
+                else:
+                    raise HTTPException(status_code=400, detail="Pipeline does not support t_index_list updates")
+                
+            except Exception as e:
+                logging.error(f"update_t_index_list: Failed to update t_index_list: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update t_index_list: {str(e)}")
 
         @self.app.get("/api/fps")
         async def get_fps():

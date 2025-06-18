@@ -16,6 +16,7 @@
   let pipelineParams: Fields;
   let pipelineInfo: PipelineInfo;
   let controlnetInfo: any = null;
+  let tIndexList: number[] = [35, 45];
   let pageContent: string;
   let isImageMode: boolean = false;
   let maxQueueSize: number = 0;
@@ -31,6 +32,7 @@
     pipelineParams = settings.input_params.properties;
     pipelineInfo = settings.info.properties;
     controlnetInfo = settings.controlnet || null;
+    tIndexList = settings.t_index_list || [35, 45];
     isImageMode = pipelineInfo.input_mode.default === PipelineMode.IMAGE;
     maxQueueSize = settings.max_queue_size;
     pageContent = settings.page_content;
@@ -45,6 +47,7 @@
     
     console.log(pipelineParams);
     console.log('ControlNet Info:', controlnetInfo);
+    console.log('T-Index List:', tIndexList);
     toggleQueueChecker(true);
   }
 
@@ -60,6 +63,30 @@
     }
     
     console.log('ControlNet updated:', controlnetInfo);
+  }
+
+  async function handleTIndexListUpdate(newTIndexList: number[]) {
+    try {
+      const response = await fetch('/api/update-t-index-list', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          t_index_list: newTIndexList
+        }),
+      });
+
+      if (response.ok) {
+        tIndexList = [...newTIndexList]; // Update local state
+        console.log('T-Index List updated:', tIndexList);
+      } else {
+        const result = await response.json();
+        console.error('Failed to update t_index_list:', result.detail);
+      }
+    } catch (error) {
+      console.error('Failed to update t_index_list:', error);
+    }
   }
 
   function toggleQueueChecker(start: boolean) {
@@ -165,7 +192,12 @@
       </div>
       <!-- ControlNet Configuration Section -->
       <div class="sm:col-span-2">
-        <ControlNetConfig {controlnetInfo} on:controlnetUpdated={handleControlNetUpdate}></ControlNetConfig>
+        <ControlNetConfig 
+          {controlnetInfo} 
+          {tIndexList} 
+          on:controlnetUpdated={handleControlNetUpdate}
+          on:tIndexListUpdated={(e) => handleTIndexListUpdate(e.detail)}
+        ></ControlNetConfig>
       </div>
     </article>
   {:else}

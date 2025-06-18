@@ -4,6 +4,7 @@
   import InputRange from './InputRange.svelte';
 
   export let controlnetInfo: any = null;
+  export let tIndexList: number[] = [35, 45];
 
   const dispatch = createEventDispatcher();
 
@@ -132,6 +133,21 @@
   function selectFile() {
     fileInput.click();
   }
+
+  function handleTIndexChange(index: number, event: Event) {
+    const target = event.target as HTMLInputElement;
+    const value = parseInt(target.value);
+    
+    // Update local tIndexList
+    const newTIndexList = [...tIndexList];
+    newTIndexList[index] = value;
+    
+    // Update local state immediately for UI responsiveness
+    tIndexList = newTIndexList;
+    
+    // Dispatch the update event
+    dispatch('tIndexListUpdated', newTIndexList);
+  }
 </script>
 
 <div class="controlnet-config space-y-4">
@@ -208,6 +224,38 @@
         Upload a YAML configuration file to enable ControlNet features. All pipelines load only when you start streaming.
       </p>
     {/if}
+
+    <!-- T-Index List Controls -->
+    <div class="space-y-3">
+      <h4 class="font-medium">Timestep Indices (t_index_list) <span class="text-sm text-gray-500">Controls denoising steps - lower = less denoising, higher = more denoising</span></h4>
+      <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 space-y-3">
+        <p class="text-xs text-gray-600 dark:text-gray-400">
+          These values control which timesteps are used for denoising. You can adjust the values but not the number of elements.
+        </p>
+        <div class="space-y-3">
+          {#each tIndexList as tIndex, index}
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium text-gray-600 dark:text-gray-400">Step {index + 1}</label>
+                <span class="text-sm text-gray-600 dark:text-gray-400">{tIndex}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="49"
+                step="1"
+                value={tIndex}
+                on:input={(e) => handleTIndexChange(index, e)}
+                class="w-full appearance-none cursor-pointer"
+              />
+            </div>
+          {/each}
+        </div>
+        <p class="text-xs text-gray-500">
+          Current: [{tIndexList.join(', ')}] | Range: 0-49 (50 total inference steps)
+        </p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -230,6 +278,8 @@
     border-radius: 50%;
     background: #3b82f6;
     cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
 
   input[type="range"]::-moz-range-thumb {
@@ -238,6 +288,28 @@
     border-radius: 50%;
     background: #3b82f6;
     cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  input[type="range"]::-webkit-slider-track {
+    height: 8px;
+    border-radius: 4px;
+    background: #e5e7eb;
+  }
+
+  input[type="range"]::-moz-range-track {
+    height: 8px;
+    border-radius: 4px;
+    background: #e5e7eb;
     border: none;
+  }
+
+  .dark input[type="range"]::-webkit-slider-track {
+    background: #4b5563;
+  }
+
+  .dark input[type="range"]::-moz-range-track {
+    background: #4b5563;
   }
 </style> 
