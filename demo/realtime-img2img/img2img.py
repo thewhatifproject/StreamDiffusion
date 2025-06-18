@@ -193,6 +193,26 @@ class Pipeline:
         )
 
     def predict(self, params: "Pipeline.InputParams") -> Image.Image:
+        # Update prompt if it has changed (for both controlnet and standard modes)
+        if hasattr(params, 'prompt') and params.prompt != self.last_prompt:
+            self.last_prompt = params.prompt
+            # Update the pipeline with new prompt
+            if self.use_controlnet:
+                negative_prompt = self.controlnet_config.get('negative_prompt', default_negative_prompt)
+                guidance_scale = self.controlnet_config.get('guidance_scale', 1.2)
+                num_inference_steps = self.controlnet_config.get('num_inference_steps', 50)
+            else:
+                negative_prompt = default_negative_prompt
+                guidance_scale = 1.2
+                num_inference_steps = 50
+            
+            self.stream.prepare(
+                prompt=params.prompt,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+            )
+
         if self.use_controlnet:
             # ControlNet mode: update control image and use PIL image
             self.stream.update_control_image_efficient(params.image)

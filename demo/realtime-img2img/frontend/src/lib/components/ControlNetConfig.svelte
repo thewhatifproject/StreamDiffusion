@@ -70,7 +70,11 @@
         if (result.controlnet) {
           controlnetInfo = result.controlnet;
           // Dispatch event to parent to update its controlnetInfo
-          dispatch('controlnetUpdated', result.controlnet);
+          // Include both controlnet info and config prompt if available
+          dispatch('controlnetUpdated', {
+            controlnet: result.controlnet,
+            config_prompt: result.config_prompt || null
+          });
         }
         
         // Clear status after a delay
@@ -122,6 +126,8 @@
     
     updateControlNetStrength(index, strength);
   }
+
+
 
   function selectFile() {
     fileInput.click();
@@ -178,14 +184,14 @@
                 {controlnet.name} ({controlnet.preprocessor})
               </span>
               <span class="text-sm text-gray-600 dark:text-gray-400">
-                {controlnet.strength.toFixed(2)}
+                {controlnet.strength.toFixed(3)}
               </span>
             </div>
             <input
               type="range"
               min="0"
               max="2"
-              step="0.1"
+              step="0.01"
               value={controlnet.strength}
               on:input={(e) => handleStrengthChange(controlnet.index, e)}
               class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600"

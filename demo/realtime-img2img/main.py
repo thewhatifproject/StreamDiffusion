@@ -181,6 +181,11 @@ class App:
             # Add ControlNet information 
             controlnet_info = self._get_controlnet_info()
             
+            # Include config prompt if available
+            config_prompt = None
+            if self.uploaded_controlnet_config and 'prompt' in self.uploaded_controlnet_config:
+                config_prompt = self.uploaded_controlnet_config['prompt']
+            
             return JSONResponse(
                 {
                     "info": info_schema,
@@ -188,6 +193,7 @@ class App:
                     "max_queue_size": self.args.max_queue_size,
                     "page_content": page_content if info.page_content else "",
                     "controlnet": controlnet_info,
+                    "config_prompt": config_prompt,
                 }
             )
 
@@ -211,10 +217,14 @@ class App:
                 self.uploaded_controlnet_config = config_data
                 self.config_needs_reload = True  # Mark that pipeline needs recreation
                 
+                # Get config prompt if available
+                config_prompt = config_data.get('prompt', None)
+                
                 return JSONResponse({
                     "status": "success",
                     "message": "ControlNet configuration uploaded successfully",
-                    "controlnet": self._get_controlnet_info()
+                    "controlnet": self._get_controlnet_info(),
+                    "config_prompt": config_prompt
                 })
                 
             except Exception as e:
@@ -323,8 +333,7 @@ class App:
                         "index": i,
                         "name": cn_config['model_id'].split('/')[-1],
                         "preprocessor": cn_config['preprocessor'],
-                        "strength": cn_config['conditioning_scale'],
-                        "enabled": cn_config.get('enabled', True)
+                        "strength": cn_config['conditioning_scale']
                     })
         # Otherwise check active pipeline
         elif self.pipeline and self.pipeline.use_controlnet and self.pipeline.controlnet_config:
@@ -336,8 +345,7 @@ class App:
                         "index": i,
                         "name": cn_config['model_id'].split('/')[-1],
                         "preprocessor": cn_config['preprocessor'],
-                        "strength": cn_config['conditioning_scale'],
-                        "enabled": cn_config.get('enabled', True)
+                        "strength": cn_config['conditioning_scale']
                     })
         
         return controlnet_info

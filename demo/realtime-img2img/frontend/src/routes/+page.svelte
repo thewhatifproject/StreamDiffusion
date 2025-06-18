@@ -11,7 +11,7 @@
   import Warning from '$lib/components/Warning.svelte';
   import { lcmLiveStatus, lcmLiveActions, LCMLiveStatus } from '$lib/lcmLive';
   import { mediaStreamActions, onFrameChangeStore } from '$lib/mediaStream';
-  import { getPipelineValues, deboucedPipelineValues } from '$lib/store';
+  import { getPipelineValues, deboucedPipelineValues, pipelineValues } from '$lib/store';
 
   let pipelineParams: Fields;
   let pipelineInfo: PipelineInfo;
@@ -34,13 +34,31 @@
     isImageMode = pipelineInfo.input_mode.default === PipelineMode.IMAGE;
     maxQueueSize = settings.max_queue_size;
     pageContent = settings.page_content;
+    
+    // Update prompt in store if config prompt is available
+    if (settings.config_prompt) {
+      pipelineValues.update(values => ({
+        ...values,
+        prompt: settings.config_prompt
+      }));
+    }
+    
     console.log(pipelineParams);
     console.log('ControlNet Info:', controlnetInfo);
     toggleQueueChecker(true);
   }
 
   function handleControlNetUpdate(event: CustomEvent) {
-    controlnetInfo = event.detail;
+    controlnetInfo = event.detail.controlnet;
+    
+    // Update prompt if config prompt is available
+    if (event.detail.config_prompt) {
+      pipelineValues.update(values => ({
+        ...values,
+        prompt: event.detail.config_prompt
+      }));
+    }
+    
     console.log('ControlNet updated:', controlnetInfo);
   }
 
