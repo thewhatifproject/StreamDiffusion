@@ -2,6 +2,7 @@
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import Button from './Button.svelte';
   import InputRange from './InputRange.svelte';
+  import PreprocessorDocs from './PreprocessorDocs.svelte';
 
   export let controlnetInfo: any = null;
   export let tIndexList: number[] = [35, 45];
@@ -13,6 +14,7 @@
   let uploadStatus = '';
   let fps = 0;
   let fpsInterval: NodeJS.Timeout | null = null;
+  let showDocs = false;
 
   // Initialize FPS tracking
   onMount(() => {
@@ -70,11 +72,16 @@
         // Update controlnet info from the response
         if (result.controlnet) {
           controlnetInfo = result.controlnet;
+          // Update t_index_list if provided in response
+          if (result.t_index_list) {
+            tIndexList = [...result.t_index_list];
+          }
           // Dispatch event to parent to update its controlnetInfo
-          // Include both controlnet info and config prompt if available
+          // Include both controlnet info, config prompt, and t_index_list if available
           dispatch('controlnetUpdated', {
             controlnet: result.controlnet,
-            config_prompt: result.config_prompt || null
+            config_prompt: result.config_prompt || null,
+            t_index_list: result.t_index_list || null
           });
         }
         
@@ -159,105 +166,121 @@
     </span>
   </div>
 
-  <!-- ControlNet Configuration Section -->
-  <div class="space-y-3">
-    <h3 class="text-lg font-semibold">ControlNet Configuration</h3>
+  <!-- Two Column Layout -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
     
-    <!-- File Upload -->
-    <div class="space-y-2">
-      <div class="flex items-center gap-2">
-        <Button on:click={selectFile} disabled={uploading} classList="text-sm">
-          {uploading ? 'Uploading...' : 'Load YAML Config'}
-        </Button>
-        <span class="text-sm text-gray-600 dark:text-gray-400">
-          {controlnetInfo?.enabled ? 'ControlNet Ready' : 'Standard Mode'}
-        </span>
-      </div>
-      
-      <input
-        bind:this={fileInput}
-        type="file"
-        accept=".yaml,.yml"
-        class="hidden"
-        on:change={uploadConfig}
-      />
-      
-      {#if uploadStatus}
-        <p class="text-sm {uploadStatus.includes('Error') || uploadStatus.includes('Please') ? 'text-red-600' : 'text-green-600'}">
-          {uploadStatus}
-        </p>
-      {/if}
-    </div>
-
-    <!-- ControlNet Strength Controls -->
-    {#if controlnetInfo?.enabled && controlnetInfo?.controlnets?.length > 0}
+          <!-- Left Column: ControlNet Configuration -->
       <div class="space-y-3">
-        <h4 class="font-medium">ControlNet Strengths <span class="text-sm text-gray-500">(Pipeline loads when you start streaming)</span></h4>
-        {#each controlnetInfo.controlnets as controlnet}
-          <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 space-y-2">
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-medium">
-                {controlnet.name} ({controlnet.preprocessor})
-              </span>
-              <span class="text-sm text-gray-600 dark:text-gray-400">
-                {controlnet.strength.toFixed(3)}
-              </span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="2"
-              step="0.01"
-              value={controlnet.strength}
-              on:input={(e) => handleStrengthChange(controlnet.index, e)}
-              class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600"
-            />
-          </div>
-        {/each}
+        <div class="flex justify-between items-center">
+          <h3 class="text-lg font-semibold">ControlNet Configuration</h3>
+          <Button on:click={() => showDocs = true} classList="text-sm">
+            📚 Help & Examples
+          </Button>
+        </div>
+      
+      <!-- File Upload -->
+      <div class="space-y-2">
+        <div class="flex items-center gap-2">
+          <Button on:click={selectFile} disabled={uploading} classList="text-sm">
+            {uploading ? 'Uploading...' : 'Load YAML Config'}
+          </Button>
+          <span class="text-sm text-gray-600 dark:text-gray-400">
+            {controlnetInfo?.enabled ? 'ControlNet Ready' : 'Standard Mode'}
+          </span>
+        </div>
+        
+        <input
+          bind:this={fileInput}
+          type="file"
+          accept=".yaml,.yml"
+          class="hidden"
+          on:change={uploadConfig}
+        />
+        
+        {#if uploadStatus}
+          <p class="text-sm {uploadStatus.includes('Error') || uploadStatus.includes('Please') ? 'text-red-600' : 'text-green-600'}">
+            {uploadStatus}
+          </p>
+        {/if}
       </div>
-    {:else if controlnetInfo?.enabled}
-      <p class="text-sm text-gray-600 dark:text-gray-400">
-        ControlNet enabled but no control networks found in configuration.
-      </p>
-    {:else}
-      <p class="text-sm text-gray-600 dark:text-gray-400">
-        Upload a YAML configuration file to enable ControlNet features. All pipelines load only when you start streaming.
-      </p>
-    {/if}
 
-    <!-- T-Index List Controls -->
-    <div class="space-y-3">
-      <h4 class="font-medium">Timestep Indices (t_index_list) <span class="text-sm text-gray-500">Controls denoising steps - lower = less denoising, higher = more denoising</span></h4>
-      <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 space-y-3">
-        <p class="text-xs text-gray-600 dark:text-gray-400">
-          These values control which timesteps are used for denoising. You can adjust the values but not the number of elements.
-        </p>
+      <!-- ControlNet Strength Controls -->
+      {#if controlnetInfo?.enabled && controlnetInfo?.controlnets?.length > 0}
         <div class="space-y-3">
-          {#each tIndexList as tIndex, index}
-            <div class="space-y-2">
+          <h4 class="font-medium">ControlNet Strengths <span class="text-sm text-gray-500">(Pipeline loads when you start streaming)</span></h4>
+          {#each controlnetInfo.controlnets as controlnet}
+            <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-medium text-gray-600 dark:text-gray-400">Step {index + 1}</label>
-                <span class="text-sm text-gray-600 dark:text-gray-400">{tIndex}</span>
+                <span class="text-sm font-medium">
+                  {controlnet.name} ({controlnet.preprocessor})
+                </span>
+                <span class="text-sm text-gray-600 dark:text-gray-400">
+                  {controlnet.strength.toFixed(3)}
+                </span>
               </div>
               <input
                 type="range"
                 min="0"
-                max="49"
-                step="1"
-                value={tIndex}
-                on:input={(e) => handleTIndexChange(index, e)}
-                class="w-full appearance-none cursor-pointer"
+                max="2"
+                step="0.01"
+                value={controlnet.strength}
+                on:input={(e) => handleStrengthChange(controlnet.index, e)}
+                class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600"
               />
             </div>
           {/each}
         </div>
-        <p class="text-xs text-gray-500">
-          Current: [{tIndexList.join(', ')}] | Range: 0-49 (50 total inference steps)
+      {:else if controlnetInfo?.enabled}
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          ControlNet enabled but no control networks found in configuration.
         </p>
+      {:else}
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          Upload a YAML configuration file to enable ControlNet features. All pipelines load only when you start streaming.
+        </p>
+      {/if}
+    </div>
+
+    <!-- Right Column: T-Index List Controls -->
+    <div class="space-y-3">
+      <h3 class="text-lg font-semibold">Timestep Configuration</h3>
+      
+      <div class="space-y-3">
+        <h4 class="font-medium">Timestep Indices (t_index_list) <span class="text-sm text-gray-500">Controls denoising steps - lower = less denoising, higher = more denoising</span></h4>
+        <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 space-y-3">
+          <p class="text-xs text-gray-600 dark:text-gray-400">
+            These values control which timesteps are used for denoising. The number of controls will adjust based on your configuration.
+          </p>
+          <div class="space-y-3">
+            {#each tIndexList as tIndex, index}
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <label class="text-sm font-medium text-gray-600 dark:text-gray-400">Step {index + 1}</label>
+                  <span class="text-sm text-gray-600 dark:text-gray-400">{tIndex}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="49"
+                  step="1"
+                  value={tIndex}
+                  on:input={(e) => handleTIndexChange(index, e)}
+                  class="w-full appearance-none cursor-pointer"
+                />
+              </div>
+            {/each}
+          </div>
+          <p class="text-xs text-gray-500">
+            Current: [{tIndexList.join(', ')}] | Range: 0-49 (50 total inference steps)
+          </p>
+        </div>
       </div>
     </div>
   </div>
 </div>
+
+<!-- Preprocessor Documentation Modal -->
+<PreprocessorDocs bind:visible={showDocs} />
 
 <style>
   .controlnet-config {

@@ -62,7 +62,13 @@
       }));
     }
     
+    // Update t_index_list if available
+    if (event.detail.t_index_list) {
+      tIndexList = [...event.detail.t_index_list];
+    }
+    
     console.log('ControlNet updated:', controlnetInfo);
+    console.log('T-Index List updated:', tIndexList);
   }
 
   async function handleTIndexListUpdate(newTIndexList: number[]) {
