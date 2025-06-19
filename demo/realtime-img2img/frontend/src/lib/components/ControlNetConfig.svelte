@@ -6,6 +6,9 @@
 
   export let controlnetInfo: any = null;
   export let tIndexList: number[] = [35, 45];
+  export let guidanceScale: number = 1.1;
+  export let delta: number = 0.7;
+  export let numInferenceSteps: number = 50;
 
   const dispatch = createEventDispatcher();
 
@@ -135,8 +138,6 @@
     updateControlNetStrength(index, strength);
   }
 
-
-
   function selectFile() {
     fileInput.click();
   }
@@ -154,6 +155,77 @@
     
     // Dispatch the update event
     dispatch('tIndexListUpdated', newTIndexList);
+  }
+
+  // Parameter controls - now props from parent
+
+  async function updateGuidanceScale(value: number) {
+    try {
+      guidanceScale = value;
+      const response = await fetch('/api/update-guidance-scale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guidance_scale: value })
+      });
+      if (!response.ok) {
+        const result = await response.json();
+        console.error('updateGuidanceScale: Failed to update guidance_scale:', result.detail);
+      }
+    } catch (error) {
+      console.error('updateGuidanceScale: Update failed:', error);
+    }
+  }
+
+  async function updateDelta(value: number) {
+    try {
+      delta = value;
+      const response = await fetch('/api/update-delta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delta: value })
+      });
+      if (!response.ok) {
+        const result = await response.json();
+        console.error('updateDelta: Failed to update delta:', result.detail);
+      }
+    } catch (error) {
+      console.error('updateDelta: Update failed:', error);
+    }
+  }
+
+  async function updateNumInferenceSteps(value: number) {
+    try {
+      numInferenceSteps = value;
+      const response = await fetch('/api/update-num-inference-steps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ num_inference_steps: value })
+      });
+      if (!response.ok) {
+        const result = await response.json();
+        console.error('updateNumInferenceSteps: Failed to update num_inference_steps:', result.detail);
+      }
+    } catch (error) {
+      console.error('updateNumInferenceSteps: Update failed:', error);
+    }
+  }
+
+  function handleGuidanceScaleChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const value = parseFloat(target.value);
+    updateGuidanceScale(value);
+  }
+
+  function handleDeltaChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const value = parseFloat(target.value);
+    updateDelta(value);
+  }
+
+  function handleNumInferenceStepsChange(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const value = parseInt(target.value);
+    updateNumInferenceSteps(value);
   }
 </script>
 
@@ -273,6 +345,68 @@
           <p class="text-xs text-gray-500">
             Current: [{tIndexList.join(', ')}] | Range: 0-49 (50 total inference steps)
           </p>
+        </div>
+      </div>
+
+      <!-- Streaming Parameters Controls -->
+      <div class="space-y-3">
+        <h4 class="font-medium">Streaming Parameters <span class="text-sm text-gray-500">Real-time adjustments</span></h4>
+        <div class="bg-gray-50 dark:bg-gray-700 rounded p-3 space-y-3">
+          <p class="text-xs text-gray-600 dark:text-gray-400">
+            Adjust these parameters in real-time during inference.
+          </p>
+          <div class="space-y-3">
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium text-gray-600 dark:text-gray-400">Guidance Scale</label>
+                <span class="text-sm text-gray-600 dark:text-gray-400">{guidanceScale.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="3.0"
+                step="0.01"
+                value={guidanceScale}
+                on:input={handleGuidanceScaleChange}
+                class="w-full appearance-none cursor-pointer"
+              />
+              <p class="text-xs text-gray-500">Controls CFG guidance strength</p>
+            </div>
+            
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium text-gray-600 dark:text-gray-400">Delta</label>
+                <span class="text-sm text-gray-600 dark:text-gray-400">{delta.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="1.0"
+                step="0.01"
+                value={delta}
+                on:input={handleDeltaChange}
+                class="w-full appearance-none cursor-pointer"
+              />
+              <p class="text-xs text-gray-500">Virtual residual noise multiplier</p>
+            </div>
+            
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium text-gray-600 dark:text-gray-400">Inference Steps</label>
+                <span class="text-sm text-gray-600 dark:text-gray-400">{numInferenceSteps}</span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="100"
+                step="1"
+                value={numInferenceSteps}
+                on:input={handleNumInferenceStepsChange}
+                class="w-full appearance-none cursor-pointer"
+              />
+              <p class="text-xs text-gray-500">Number of denoising steps</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

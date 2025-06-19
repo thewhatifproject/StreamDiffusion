@@ -201,6 +201,20 @@ class App:
             if self.uploaded_controlnet_config and 'acceleration' in self.uploaded_controlnet_config:
                 current_acceleration = self.uploaded_controlnet_config['acceleration']
             
+            # Get current streaming parameters (default values or from pipeline if available)
+            current_guidance_scale = 1.1
+            current_delta = 0.7
+            current_num_inference_steps = 50
+            
+            if self.pipeline:
+                current_guidance_scale = getattr(self.pipeline.stream, 'guidance_scale', 1.1)
+                current_delta = getattr(self.pipeline.stream, 'delta', 0.7)
+                current_num_inference_steps = getattr(self.pipeline.stream, 'num_inference_steps', 50)
+            elif self.uploaded_controlnet_config:
+                current_guidance_scale = self.uploaded_controlnet_config.get('guidance_scale', 1.1)
+                current_delta = self.uploaded_controlnet_config.get('delta', 0.7)
+                current_num_inference_steps = self.uploaded_controlnet_config.get('num_inference_steps', 50)
+            
             return JSONResponse(
                 {
                     "info": info_schema,
@@ -211,6 +225,9 @@ class App:
                     "config_prompt": config_prompt,
                     "t_index_list": current_t_index_list,
                     "acceleration": current_acceleration,
+                    "guidance_scale": current_guidance_scale,
+                    "delta": current_delta,
+                    "num_inference_steps": current_num_inference_steps,
                 }
             )
 
@@ -306,19 +323,91 @@ class App:
                     raise HTTPException(status_code=400, detail="All t_index values must be integers")
                 
                 # Update t_index_list in the pipeline
-                if hasattr(self.pipeline.stream, 'update_t_index_list'):
-                    self.pipeline.stream.update_t_index_list(t_index_list)
-                    
-                    return JSONResponse({
-                        "status": "success",
-                        "message": f"Updated t_index_list to {t_index_list}"
-                    })
-                else:
-                    raise HTTPException(status_code=400, detail="Pipeline does not support t_index_list updates")
+                self.pipeline.stream.update_stream_params(t_index_list=t_index_list)
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated t_index_list to {t_index_list}"
+                })
                 
             except Exception as e:
                 logging.error(f"update_t_index_list: Failed to update t_index_list: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update t_index_list: {str(e)}")
+
+        @self.app.post("/api/update-guidance-scale")
+        async def update_guidance_scale(request: Request):
+            """Update guidance_scale value in real-time"""
+            try:
+                data = await request.json()
+                guidance_scale = data.get("guidance_scale")
+                
+                if guidance_scale is None:
+                    raise HTTPException(status_code=400, detail="Missing guidance_scale parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Update guidance_scale in the pipeline
+                self.pipeline.stream.update_stream_params(guidance_scale=float(guidance_scale))
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated guidance_scale to {guidance_scale}"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_guidance_scale: Failed to update guidance_scale: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update guidance_scale: {str(e)}")
+
+        @self.app.post("/api/update-delta")
+        async def update_delta(request: Request):
+            """Update delta value in real-time"""
+            try:
+                data = await request.json()
+                delta = data.get("delta")
+                
+                if delta is None:
+                    raise HTTPException(status_code=400, detail="Missing delta parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Update delta in the pipeline
+                self.pipeline.stream.update_stream_params(delta=float(delta))
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated delta to {delta}"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_delta: Failed to update delta: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update delta: {str(e)}")
+
+        @self.app.post("/api/update-num-inference-steps")
+        async def update_num_inference_steps(request: Request):
+            """Update num_inference_steps value in real-time"""
+            try:
+                data = await request.json()
+                num_inference_steps = data.get("num_inference_steps")
+                
+                if num_inference_steps is None:
+                    raise HTTPException(status_code=400, detail="Missing num_inference_steps parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Update num_inference_steps in the pipeline
+                self.pipeline.stream.update_stream_params(num_inference_steps=int(num_inference_steps))
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated num_inference_steps to {num_inference_steps}"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_num_inference_steps: Failed to update num_inference_steps: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update num_inference_steps: {str(e)}")
 
         @self.app.get("/api/fps")
         async def get_fps():

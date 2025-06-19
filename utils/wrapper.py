@@ -226,8 +226,33 @@ class StreamDiffusionWrapper:
             delta=delta,
         )
 
-    def update_t_index_list(self, t_index_list: List[int]) -> None:
-        self.stream.update_t_index_list(t_index_list)
+    def update_stream_params(
+        self,
+        num_inference_steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
+        delta: Optional[float] = None,
+        t_index_list: Optional[List[int]] = None,
+    ) -> None:
+        """
+        Update streaming parameters efficiently in a single call.
+        
+        Parameters
+        ----------
+        num_inference_steps : Optional[int]
+            The number of inference steps to perform.
+        guidance_scale : Optional[float]
+            The guidance scale to use for CFG.
+        delta : Optional[float]
+            The delta multiplier of virtual residual noise.
+        t_index_list : Optional[List[int]]
+            The t_index_list to use for inference.
+        """
+        self.stream.update_stream_params(
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            delta=delta,
+            t_index_list=t_index_list,
+        )
 
     def __call__(
         self,
