@@ -196,6 +196,11 @@ class App:
                 # Default values
                 current_t_index_list = [35, 45]
             
+            # Get current acceleration setting
+            current_acceleration = self.args.acceleration
+            if self.uploaded_controlnet_config and 'acceleration' in self.uploaded_controlnet_config:
+                current_acceleration = self.uploaded_controlnet_config['acceleration']
+            
             return JSONResponse(
                 {
                     "info": info_schema,
@@ -205,6 +210,7 @@ class App:
                     "controlnet": controlnet_info,
                     "config_prompt": config_prompt,
                     "t_index_list": current_t_index_list,
+                    "acceleration": current_acceleration,
                 }
             )
 
@@ -234,12 +240,16 @@ class App:
                 # Get t_index_list from config if available
                 t_index_list = config_data.get('t_index_list', [35, 45])
                 
+                # Get acceleration from config if available
+                config_acceleration = config_data.get('acceleration', self.args.acceleration)
+                
                 return JSONResponse({
                     "status": "success",
                     "message": "ControlNet configuration uploaded successfully",
                     "controlnet": self._get_controlnet_info(),
                     "config_prompt": config_prompt,
-                    "t_index_list": t_index_list
+                    "t_index_list": t_index_list,
+                    "acceleration": config_acceleration
                 })
                 
             except Exception as e:
@@ -600,7 +610,14 @@ class App:
             temp_config_path = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
             yaml.dump(self.uploaded_controlnet_config, temp_config_path, default_flow_style=False)
             temp_config_path.close()
-            new_args = self.args._replace(controlnet_config=temp_config_path.name)
+            
+            # Merge YAML config values into args, respecting config overrides
+            # This ensures that acceleration settings from YAML config override command line args
+            config_acceleration = self.uploaded_controlnet_config.get('acceleration', self.args.acceleration)
+            new_args = self.args._replace(
+                controlnet_config=temp_config_path.name,
+                acceleration=config_acceleration
+            )
         else:
             new_args = self.args
         
