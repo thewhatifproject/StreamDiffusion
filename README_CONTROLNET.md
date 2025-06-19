@@ -14,20 +14,16 @@ NOTE: SDXL Support is forthcoming
 
 ## Quick Start
 
-### Webcam Demo
-
+### Web demo
 ```bash
-
-# the depth trt examples assume you have a tensorrt engine for depthanything as seen in this repo
-# https://github.com/yuvraj108c/ComfyUI-Depth-Anything-Tensorrt
-# additionally, for all of the demo configs, they must be updated to suite your environment. 
-# the following demo, img2img with 2 steps and a depth controlnet, produced 34FPS on a 5090
-
-# test with simple gui
-python ./examples/controlnet/controlnet_webcam_gui_demo.py --config ./configs/controlnet_examples/sdturbo_depth_trt_example.yaml
-
+cd demo/realtime-img2img
+python main.py
 ```
-Try the other example yaml files at will. 
+Select a YAML configuration file, and click start.  The demo is built upon the existing streamdiffusion demo, but now includes:
+- Real-time parameter adjustment
+- Multi-ControlNet strength sliders
+- Live performance monitoring
+- Side-by-side input/output display
 
 ### Standalone Demo
 
@@ -46,7 +42,7 @@ from utils.wrapper import StreamDiffusionWrapper
 import torch
 
 # Load configuration
-config = load_controlnet_config("configs/controlnet_examples/canny_example.yaml")
+config = load_controlnet_config("configs/my_config.yaml")
 
 # Create wrapper with ControlNet support
 wrapper = StreamDiffusionWrapper(
@@ -331,4 +327,4 @@ controlnets:
 
 - `examples/controlnet/controlnet_webcam_gui_demo.py` - Interactive GUI demo with real-time parameter adjustment
 - `examples/controlnet/standalone_controlnet_pipeline.py` - Production-ready reference implementation
-- `configs/controlnet_examples/` - Various configuration examples for different use cases
+- `configs/` - Various configuration examples for different use cases
