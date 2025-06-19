@@ -207,3 +207,7 @@ __pycache__/
 models/RealESR*
 *.safetensors
 *.onnx
+
+# Ignore user config files
+configs/*.yaml
+configs/*.yml

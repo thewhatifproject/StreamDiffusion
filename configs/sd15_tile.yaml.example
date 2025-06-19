@@ -1,14 +1,14 @@
 model_id: "C:\\_dev\\comfy\\ComfyUI\\models\\checkpoints\\kohaku-v2.1.safetensors"
-t_index_list: [32, 45]
+t_index_list: [0,16]
 width: 512
 height: 512
 device: "cuda"
 dtype: "float16"
 
 # Generation parameters
-prompt: "a beautiful landscape, highly detailed, masterpiece"
+prompt: "masterpiece, high quality, detailed"
 negative_prompt: "blurry, low quality, distorted"
-guidance_scale: 1.2
+guidance_scale: 1.1
 num_inference_steps: 50
 
 # Advanced parameters
@@ -17,14 +17,13 @@ use_lcm_lora: true
 use_tiny_vae: true
 acceleration: "xformers"
 cfg_type: "self"
-seed: 42
+seed: 456
 
-# ControlNet configurations
+# ControlNet configuration with Tile ControlNet
 controlnets:
-  - model_id: "lllyasviel/control_v11p_sd15_canny"
-    conditioning_scale: 1.0
-    preprocessor: "canny"
+  - model_id: "lllyasviel/control_v11f1e_sd15_tile"
+    conditioning_scale: 0.2
+    preprocessor: "passthrough"
     preprocessor_params:
-      low_threshold: 100
-      high_threshold: 200
+      image_resolution: 512
     enabled: true 
