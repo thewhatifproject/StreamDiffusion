@@ -4,7 +4,7 @@ import json
 from typing import Dict, List, Optional, Union, Any
 from pathlib import Path
 
-
+#TODO: move this file. The config system is no longer controlnet specific.
 def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Load StreamDiffusion configuration from YAML or JSON file
