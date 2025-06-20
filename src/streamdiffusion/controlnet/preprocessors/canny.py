@@ -41,8 +41,9 @@ class CannyPreprocessor(BasePreprocessor):
         # Validate and normalize input tensor
         image_tensor = self.validate_tensor_input(image_tensor)
         
-        # Resize to 512x512 first to ensure consistent output size
-        target_size = (512, 512)
+        # Use image_resolution parameter instead of hardcoded 512x512
+        image_resolution = self.params.get('image_resolution', 512)
+        target_size = (image_resolution, image_resolution)
         current_size = image_tensor.shape[-2:]
         if current_size != target_size:
             import torch.nn.functional as F
@@ -95,14 +96,16 @@ class CannyPreprocessor(BasePreprocessor):
             image: Input image
             
         Returns:
-            PIL Image with detected edges (black and white) resized to 512x512
+            PIL Image with detected edges (black and white) resized to target resolution
         """
         # Convert to PIL Image if needed
         image = self.validate_input(image)
         
-        # Resize to 512x512 first to ensure consistent output size
-        if image.size != (512, 512):
-            image = image.resize((512, 512), Image.LANCZOS)
+        # Use image_resolution parameter instead of hardcoded 512x512
+        image_resolution = self.params.get('image_resolution', 512)
+        target_size = (image_resolution, image_resolution)
+        if image.size != target_size:
+            image = image.resize(target_size, Image.LANCZOS)
         
         # Convert to numpy array
         image_np = np.array(image)
@@ -123,8 +126,8 @@ class CannyPreprocessor(BasePreprocessor):
         edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
         result = Image.fromarray(edges_rgb)
         
-        # Ensure final output is exactly 512x512
-        if result.size != (512, 512):
-            result = result.resize((512, 512), Image.LANCZOS)
+        # Ensure final output matches target resolution
+        if result.size != target_size:
+            result = result.resize(target_size, Image.LANCZOS)
         
         return result 
