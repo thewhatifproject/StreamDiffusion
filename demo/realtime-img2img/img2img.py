@@ -96,9 +96,12 @@ class Pipeline:
                 'use_safety_checker': args.safety_checker,
             }
             
-            # Override engine_dir if provided via args
-            if args.engine_dir:
-                overrides['engine_dir'] = args.engine_dir
+            # Determine engine_dir: use config value if available, otherwise use args
+            engine_dir = args.engine_dir  # Default to command-line/environment value
+            if 'engine_dir' in self.config:
+                engine_dir = self.config['engine_dir']
+            if engine_dir:
+                overrides['engine_dir'] = engine_dir
             
             # Override taesd if provided via args and not in config
             if args.taesd and 'use_tiny_vae' not in self.config:
