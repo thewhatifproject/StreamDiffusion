@@ -658,7 +658,8 @@ class StreamDiffusionWrapper:
                 except Exception as e:
                     print(f"ControlNet architecture detection failed: {e}, compiling without ControlNet support")
 
-                engine_dir = getattr(self, '_engine_dir', 'engines')
+                # Use the engine_dir parameter passed to this function, with fallback to instance variable
+                engine_dir = engine_dir if engine_dir else getattr(self, '_engine_dir', 'engines')
                 unet_path = os.path.join(
                     engine_dir,
                     create_prefix(
