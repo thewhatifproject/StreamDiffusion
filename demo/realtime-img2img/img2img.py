@@ -10,6 +10,8 @@ sys.path.append(
 )
 
 from utils.wrapper import StreamDiffusionWrapper
+# Import the config system functions
+from src.streamdiffusion.controlnet.config import load_config, create_wrapper_from_config
 
 import torch
 import yaml
@@ -40,19 +42,6 @@ Image to Image pipeline using configuration system.
 """
 
 
-def load_controlnet_config(config_path: str) -> dict:
-    """Load ControlNet configuration from YAML file"""
-    if not config_path or not Path(config_path).exists():
-        return None
-    
-    try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-        return config
-    except Exception as e:
-        return None
-
-
 class Pipeline:
     class Info(BaseModel):
         name: str = "StreamDiffusion img2img"
@@ -81,75 +70,56 @@ class Pipeline:
 
 #TODO update naming convention to reflect the controlnet agnostic nature of the config system (pipeline_config instead of controlnet_config for example)
     def __init__(self, args: Args, device: torch.device, torch_dtype: torch.dtype):
-        # Load ControlNet config if provided
-        self.controlnet_config = load_controlnet_config(args.controlnet_config) if args.controlnet_config else None
-        self.use_controlnet = self.controlnet_config is not None
+        # Load configuration if provided
+        self.config = None
+        self.use_config = False
+        
+        if args.controlnet_config:
+            try:
+                self.config = load_config(args.controlnet_config)
+                self.use_config = True
+                print("__init__: Using configuration file mode")
+            except Exception as e:
+                print(f"__init__: Failed to load config file {args.controlnet_config}: {e}")
+                print("__init__: Falling back to standard mode")
+                self.use_config = False
         
         params = self.InputParams()
         
-        # Determine engine_dir: use config value if available, otherwise use args
-        engine_dir = args.engine_dir  # Default to command-line/environment value
-        if self.use_controlnet and 'engine_dir' in self.controlnet_config:
-            engine_dir = self.controlnet_config['engine_dir']
-        
-        # Determine model and parameters based on config
-        if self.use_controlnet:
-            print("__init__: Using ControlNet mode")
-            model_id = self.controlnet_config.get('model_id', base_model)
-            pipeline_type = self.controlnet_config.get('pipeline_type', 'sd1.5')
-            t_index_list = self.controlnet_config.get('t_index_list', [35, 45])
-            frame_buffer_size = self.controlnet_config.get('frame_buffer_size', 1)
-            cfg_type = self.controlnet_config.get('cfg_type', 'none')
-            use_lcm_lora = self.controlnet_config.get('use_lcm_lora', False)
-            use_tiny_vae = self.controlnet_config.get('use_tiny_vae', args.taesd)
+        if self.use_config:
+            # Use config-based pipeline creation
+            # Set up runtime overrides for args that might differ from config
+            overrides = {
+                'device': device,
+                'dtype': torch_dtype,
+                'acceleration': args.acceleration,
+                'use_safety_checker': args.safety_checker,
+            }
             
-            # Prepare ControlNet configurations
-            controlnet_configs = []
-            if 'controlnets' in self.controlnet_config and self.controlnet_config['controlnets']:
-                for cn_config in self.controlnet_config['controlnets']:
-                    controlnet_config = {
-                        'model_id': cn_config['model_id'],
-                        'preprocessor': cn_config['preprocessor'],
-                        'conditioning_scale': cn_config['conditioning_scale'],
-                        'enabled': cn_config.get('enabled', True),
-                        'preprocessor_params': cn_config.get('preprocessor_params', None),
-                        'pipeline_type': pipeline_type,
-                        'control_guidance_start': cn_config.get('control_guidance_start', 0.0),
-                        'control_guidance_end': cn_config.get('control_guidance_end', 1.0),
-                    }
-                    controlnet_configs.append(controlnet_config)
+            # Override engine_dir if provided via args
+            if args.engine_dir:
+                overrides['engine_dir'] = args.engine_dir
             
-            # Update width/height from config
-            params.width = self.controlnet_config.get('width', 512)
-            params.height = self.controlnet_config.get('height', 512)
+            # Override taesd if provided via args and not in config
+            if args.taesd and 'use_tiny_vae' not in self.config:
+                overrides['use_tiny_vae'] = args.taesd
             
-            # Create StreamDiffusionWrapper with ControlNet
-            self.stream = StreamDiffusionWrapper(
-                model_id_or_path=model_id,
-                use_tiny_vae=use_tiny_vae,
-                device=device,
-                dtype=torch_dtype,
-                t_index_list=t_index_list,
-                frame_buffer_size=frame_buffer_size,
-                width=params.width,
-                height=params.height,
-                use_lcm_lora=use_lcm_lora,
-                output_type="pil",
-                warmup=10,
-                vae_id=None,
-                acceleration=args.acceleration,
-                mode="img2img",
-                use_denoising_batch=True,
-                cfg_type=cfg_type,
-                use_safety_checker=args.safety_checker,
-                engine_dir=engine_dir,
-                # ControlNet options
-                use_controlnet=True,
-                controlnet_config=controlnet_configs,
-            )
+            # Update params with config values
+            params.width = self.config.get('width', 512)
+            params.height = self.config.get('height', 512)
+            
+            # Create wrapper using config system
+            self.stream = create_wrapper_from_config(self.config, **overrides)
+            
+            # Store config values for later use
+            self.prompt = self.config.get('prompt', default_prompt)
+            self.negative_prompt = self.config.get('negative_prompt', default_negative_prompt)
+            self.guidance_scale = self.config.get('guidance_scale', 1.2)
+            self.num_inference_steps = self.config.get('num_inference_steps', 50)
+            
         else:
-            print("__init__: Using standard mode (no ControlNet)")
-            # Create StreamDiffusionWrapper without ControlNet (original behavior)
+            # Create StreamDiffusionWrapper without config (original behavior)
+            print("__init__: Using standard mode (no config)")
             self.stream = StreamDiffusionWrapper(
                 model_id_or_path=base_model,
                 use_tiny_vae=args.taesd,
@@ -168,51 +138,38 @@ class Pipeline:
                 use_denoising_batch=True,
                 cfg_type="none",
                 use_safety_checker=args.safety_checker,
-                engine_dir=engine_dir,
+                engine_dir=args.engine_dir,
+            )
+            
+            # Store default values for later use
+            self.prompt = default_prompt
+            self.negative_prompt = default_negative_prompt
+            self.guidance_scale = 1.2
+            self.num_inference_steps = 50
+            
+            # Prepare pipeline with default prompts
+            self.stream.prepare(
+                prompt=self.prompt,
+                negative_prompt=self.negative_prompt,
+                num_inference_steps=self.num_inference_steps,
+                guidance_scale=self.guidance_scale,
             )
 
-        # Prepare pipeline with appropriate prompts
-        if self.use_controlnet:
-            prompt = self.controlnet_config.get('prompt', default_prompt)
-            negative_prompt = self.controlnet_config.get('negative_prompt', default_negative_prompt)
-            guidance_scale = self.controlnet_config.get('guidance_scale', 1.2)
-            num_inference_steps = self.controlnet_config.get('num_inference_steps', 50)
-        else:
-            prompt = default_prompt
-            negative_prompt = default_negative_prompt
-            guidance_scale = 1.2
-            num_inference_steps = 50
-
-        self.last_prompt = prompt
-        self.stream.prepare(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-        )
+        self.last_prompt = self.prompt
 
     def predict(self, params: "Pipeline.InputParams") -> Image.Image:
-        # Update prompt if it has changed (for both controlnet and standard modes)
+        # Update prompt if it has changed
         if hasattr(params, 'prompt') and params.prompt != self.last_prompt:
             self.last_prompt = params.prompt
             # Update the pipeline with new prompt
-            if self.use_controlnet:
-                negative_prompt = self.controlnet_config.get('negative_prompt', default_negative_prompt)
-                guidance_scale = self.controlnet_config.get('guidance_scale', 1.2)
-                num_inference_steps = self.controlnet_config.get('num_inference_steps', 50)
-            else:
-                negative_prompt = default_negative_prompt
-                guidance_scale = 1.2
-                num_inference_steps = 50
-            
             self.stream.prepare(
                 prompt=params.prompt,
-                negative_prompt=negative_prompt,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
+                negative_prompt=self.negative_prompt,
+                num_inference_steps=self.num_inference_steps,
+                guidance_scale=self.guidance_scale,
             )
 
-        if self.use_controlnet:
+        if self.use_config and self.config and 'controlnets' in self.config:
             # ControlNet mode: update control image and use PIL image
             self.stream.update_control_image_efficient(params.image)
             output_image = self.stream(params.image)

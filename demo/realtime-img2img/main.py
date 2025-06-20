@@ -22,7 +22,7 @@ import yaml
 from config import config, Args
 from util import pil_to_frame, bytes_to_pil
 from connection_manager import ConnectionManager, ServerFullException
-from img2img import Pipeline, load_controlnet_config
+from img2img import Pipeline
 
 # fix mime error on windows
 mimetypes.add_type("application/javascript", ".js")
