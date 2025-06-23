@@ -697,61 +697,11 @@ class BaseControlNetPipeline:
         # Replace the method  
         self.stream.unet_step = patched_unet_step_pytorch
 
-    def _prepare_tensorrt_conditioning(self, x_t_latent, t_list) -> Dict[str, List[torch.Tensor]]:
-        """Prepare ControlNet conditioning in TensorRT format"""
-        # Get ControlNet conditioning using existing method
-        down_block_res_samples, mid_block_res_sample = self._get_controlnet_conditioning(
-            x_t_latent, t_list, self.stream.prompt_embeds
-        )
-        
-        conditioning_dict = {'input': [], 'output': [], 'middle': []}
-        
-        if down_block_res_samples is not None:
-            # Down block residuals become input controls (reversed)
-            conditioning_dict['input'] = list(reversed(down_block_res_samples))
-        
-        if mid_block_res_sample is not None:
-            conditioning_dict['middle'] = [mid_block_res_sample]
-        
-        # Note: output controls are typically not used at runtime in diffusers
-        # They're mainly for shape specification during compilation
-        
-        return conditioning_dict
-
     def _unpatch_stream_diffusion(self) -> None:
         """Restore original StreamDiffusion unet_step method"""
         if self._is_patched and self._original_unet_step is not None:
             self.stream.unet_step = self._original_unet_step
             self._is_patched = False
-
-    def _tensor_to_pil_fallback(self, tensor: torch.Tensor) -> Image.Image:
-        """Fallback method to convert tensor to PIL"""
-        # Handle batch dimension
-        if tensor.dim() == 4:
-            tensor = tensor[0]
-        
-        # Convert CHW to HWC
-        if tensor.dim() == 3 and tensor.shape[0] in [1, 3]:
-            tensor = tensor.permute(1, 2, 0)
-        
-        # Move to CPU and convert to numpy
-        if tensor.is_cuda:
-            tensor = tensor.cpu()
-        
-        # Convert to uint8
-        if tensor.max() <= 1.0:
-            tensor = (tensor * 255).clamp(0, 255).to(torch.uint8)
-        else:
-            tensor = tensor.clamp(0, 255).to(torch.uint8)
-        
-        array = tensor.numpy()
-        
-        if array.shape[-1] == 3:
-            return Image.fromarray(array, 'RGB')
-        elif array.shape[-1] == 1:
-            return Image.fromarray(array.squeeze(-1), 'L')
-        else:
-            return Image.fromarray(array)
 
     def __call__(self, *args, **kwargs):
         """Forward calls to the underlying StreamDiffusion instance"""
