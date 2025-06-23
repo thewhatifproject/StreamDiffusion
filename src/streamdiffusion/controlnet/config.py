@@ -4,17 +4,8 @@ import json
 from typing import Dict, List, Optional, Union, Any
 from pathlib import Path
 
-#TODO: move this file. The config system is no longer controlnet specific.
 def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
-    """
-    Load StreamDiffusion configuration from YAML or JSON file
-    
-    Args:
-        config_path: Path to configuration file
-        
-    Returns:
-        Configuration dictionary
-    """
+    """Load StreamDiffusion configuration from YAML or JSON file"""
     config_path = Path(config_path)
     
     if not config_path.exists():
@@ -28,26 +19,16 @@ def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
         else:
             raise ValueError(f"load_config: Unsupported configuration file format: {config_path.suffix}")
     
-    # Basic validation
     _validate_config(config_data)
     
     return config_data
 
 
 def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
-    """
-    Save StreamDiffusion configuration to YAML or JSON file
-    
-    Args:
-        config: Configuration dictionary to save
-        config_path: Path where to save the configuration
-    """
+    """Save StreamDiffusion configuration to YAML or JSON file"""
     config_path = Path(config_path)
     
-    # Basic validation before saving
     _validate_config(config)
-    
-    # Ensure directory exists
     config_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(config_path, 'w', encoding='utf-8') as f:
@@ -60,61 +41,25 @@ def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
 
 
 def load_controlnet_config(config_path: Union[str, Path]) -> Dict[str, Any]:
-    """
-    Load ControlNet configuration from YAML or JSON file
-    
-    DEPRECATED: Use load_config() instead. This function is kept for backward compatibility.
-    
-    Args:
-        config_path: Path to configuration file
-        
-    Returns:
-        Configuration dictionary
-    """
+    """DEPRECATED: Use load_config() instead"""
     return load_config(config_path)
 
 
 def save_controlnet_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
-    """
-    Save ControlNet configuration to YAML or JSON file
-    
-    DEPRECATED: Use save_config() instead. This function is kept for backward compatibility.
-    
-    Args:
-        config: Configuration dictionary to save
-        config_path: Path where to save the configuration
-    """
+    """DEPRECATED: Use save_config() instead"""
     save_config(config, config_path)
 
 
 def create_wrapper_from_config(config: Dict[str, Any], **overrides) -> Any:
-    """
-    Create StreamDiffusionWrapper from configuration dictionary
-    
-    Args:
-        config: Configuration dictionary loaded from config file
-        **overrides: Override any config parameters at runtime
-        
-    Returns:
-        Configured StreamDiffusionWrapper instance
-    """
-    # Import here to avoid circular imports
+    """Create StreamDiffusionWrapper from configuration dictionary"""
     from utils.wrapper import StreamDiffusionWrapper
     import torch
     
-    # Merge config with overrides
     final_config = {**config, **overrides}
-    
-    # Extract wrapper initialization parameters
     wrapper_params = _extract_wrapper_params(final_config)
-    
-    # Create wrapper
     wrapper = StreamDiffusionWrapper(**wrapper_params)
-    
-    # Extract prepare() parameters
     prepare_params = _extract_prepare_params(final_config)
     
-    # Prepare if prompt is provided
     if prepare_params.get('prompt'):
         wrapper.prepare(**prepare_params)
     
@@ -125,7 +70,6 @@ def _extract_wrapper_params(config: Dict[str, Any]) -> Dict[str, Any]:
     """Extract parameters for StreamDiffusionWrapper.__init__() from config"""
     import torch
     
-    # Define parameter mapping and defaults
     param_map = {
         'model_id_or_path': config.get('model_id', 'stabilityai/sd-turbo'),
         't_index_list': config.get('t_index_list', [0, 16, 32, 45]),
@@ -155,7 +99,6 @@ def _extract_wrapper_params(config: Dict[str, Any]) -> Dict[str, Any]:
         'engine_dir': config.get('engine_dir', 'engines'),
     }
     
-    # Handle ControlNet parameters
     if 'controlnets' in config and config['controlnets']:
         param_map['use_controlnet'] = True
         param_map['controlnet_config'] = _prepare_controlnet_configs(config)
@@ -163,7 +106,6 @@ def _extract_wrapper_params(config: Dict[str, Any]) -> Dict[str, Any]:
         param_map['use_controlnet'] = config.get('use_controlnet', False)
         param_map['controlnet_config'] = config.get('controlnet_config')
     
-    # Remove None values
     return {k: v for k, v in param_map.items() if v is not None}
 
 
@@ -216,20 +158,13 @@ def _parse_dtype(dtype_str: str) -> Any:
 
 
 def _validate_config(config: Dict[str, Any]) -> None:
-    """
-    Basic validation of configuration dictionary
-    
-    Args:
-        config: Configuration to validate
-    """
+    """Basic validation of configuration dictionary"""
     if not isinstance(config, dict):
         raise ValueError("_validate_config: Configuration must be a dictionary")
     
-    # Check required fields (only model_id is truly required)
     if 'model_id' not in config:
         raise ValueError("_validate_config: Missing required field: model_id")
     
-    # Validate controlnets if present
     if 'controlnets' in config:
         if not isinstance(config['controlnets'], list):
             raise ValueError("_validate_config: 'controlnets' must be a list")
@@ -242,18 +177,8 @@ def _validate_config(config: Dict[str, Any]) -> None:
                 raise ValueError(f"_validate_config: ControlNet {i} missing required 'model_id'")
 
 
-# For backwards compatibility, provide simple functions that match expected usage patterns
 def get_controlnet_config(config_dict: Dict[str, Any], index: int = 0) -> Dict[str, Any]:
-    """
-    Get a specific ControlNet configuration by index
-    
-    Args:
-        config_dict: Full configuration dictionary
-        index: Index of the ControlNet to get
-        
-    Returns:
-        ControlNet configuration dictionary
-    """
+    """Get a specific ControlNet configuration by index"""
     if 'controlnets' not in config_dict or index >= len(config_dict['controlnets']):
         raise IndexError(f"get_controlnet_config: ControlNet index {index} out of range")
     
@@ -261,13 +186,5 @@ def get_controlnet_config(config_dict: Dict[str, Any], index: int = 0) -> Dict[s
 
 
 def get_pipeline_type(config_dict: Dict[str, Any]) -> str:
-    """
-    Get pipeline type from configuration, with fallback to SD 1.5
-    
-    Args:
-        config_dict: Configuration dictionary
-        
-    Returns:
-        Pipeline type string
-    """
+    """Get pipeline type from configuration, with fallback to SD 1.5"""
     return config_dict.get('pipeline_type', 'sd1.5') 
