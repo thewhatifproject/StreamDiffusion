@@ -111,18 +111,6 @@ class ControlNetModelEngine:
         
         return down_blocks, mid_block
     
-    def get_input_names(self) -> List[str]:
-        """Get input names for this engine"""
-        if self._input_names is None:
-            self._input_names = ["sample", "timestep", "encoder_hidden_states", "controlnet_cond"]
-        return self._input_names
-    
-    def get_output_names(self) -> List[str]:
-        """Get output names for this engine"""
-        if self._output_names is None:
-            down_names = [f"down_block_{i:02d}" for i in range(12)]
-            self._output_names = down_names + ["mid_block"]
-        return self._output_names
 
 
 class HybridControlNet:
