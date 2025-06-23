@@ -39,11 +39,6 @@ def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
         else:
             raise ValueError(f"save_config: Unsupported configuration file format: {config_path.suffix}")
 
-def save_controlnet_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
-    """DEPRECATED: Use save_config() instead"""
-    save_config(config, config_path)
-
-
 def create_wrapper_from_config(config: Dict[str, Any], **overrides) -> Any:
     """Create StreamDiffusionWrapper from configuration dictionary"""
     from utils.wrapper import StreamDiffusionWrapper
