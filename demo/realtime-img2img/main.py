@@ -124,7 +124,7 @@ class App:
                     print("stream: Pipeline created successfully")
                 
                 # Recreate pipeline if config changed
-                elif self.config_needs_reload or (self.uploaded_controlnet_config and not self.pipeline.use_controlnet):
+                elif self.config_needs_reload or (self.uploaded_controlnet_config and not (self.pipeline.use_config and self.pipeline.config and 'controlnets' in self.pipeline.config)):
                     if self.config_needs_reload:
                         print("stream: Recreating pipeline with new ControlNet config...")
                     else:
@@ -289,7 +289,16 @@ class App:
                 if controlnet_index is None or strength is None:
                     raise HTTPException(status_code=400, detail="Missing index or strength parameter")
                 
-                if not self.pipeline or not self.pipeline.use_controlnet:
+                # Check if ControlNet is enabled using config system
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Check if we're using config mode and have controlnets configured
+                controlnet_enabled = (self.pipeline.use_config and 
+                                    self.pipeline.config and 
+                                    'controlnets' in self.pipeline.config)
+                
+                if not controlnet_enabled:
                     raise HTTPException(status_code=400, detail="ControlNet is not enabled")
                 
                 # Update ControlNet strength in the pipeline
@@ -742,11 +751,11 @@ class App:
                         "strength": cn_config['conditioning_scale']
                     })
         # Otherwise check active pipeline
-        elif self.pipeline and self.pipeline.use_controlnet and self.pipeline.controlnet_config:
+        elif self.pipeline and self.pipeline.use_config and self.pipeline.config and 'controlnets' in self.pipeline.config:
             controlnet_info["enabled"] = True
             controlnet_info["config_loaded"] = True
-            if 'controlnets' in self.pipeline.controlnet_config:
-                for i, cn_config in enumerate(self.pipeline.controlnet_config['controlnets']):
+            if 'controlnets' in self.pipeline.config:
+                for i, cn_config in enumerate(self.pipeline.config['controlnets']):
                     controlnet_info["controlnets"].append({
                         "index": i,
                         "name": cn_config['model_id'].split('/')[-1],
