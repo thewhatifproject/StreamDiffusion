@@ -1,10 +1,4 @@
-"""
-ControlNet TensorRT Engine
-
-This module provides TensorRT-accelerated ControlNet inference engines,
-following the same patterns as the UNet engine but optimized for
-ControlNet-specific inputs and outputs.
-"""
+"""ControlNet TensorRT Engine with PyTorch fallback"""
 
 import torch
 import tensorrt as trt
@@ -19,36 +13,19 @@ class ControlNetModelEngine:
     """TensorRT-accelerated ControlNet inference engine"""
     
     def __init__(self, engine_path: str, stream: cuda.Stream, use_cuda_graph: bool = False):
-        """
-        Initialize ControlNet TensorRT engine
-        
-        Args:
-            engine_path: Path to the compiled TensorRT engine
-            stream: CUDA stream for inference
-            use_cuda_graph: Whether to use CUDA graphs for optimization
-        """
+        """Initialize ControlNet TensorRT engine"""
         self.engine = Engine(engine_path)
         self.stream = stream
         self.use_cuda_graph = use_cuda_graph
         
-        # Load and activate the engine
         self.engine.load()
         self.engine.activate()
         
-        # Cache for input/output names
         self._input_names = None
         self._output_names = None
     
     def _resolve_output_shapes(self, batch_size: int) -> Dict[str, Tuple[int, ...]]:
-        """
-        Resolve dynamic output shapes from TensorRT engine by replacing -1 with actual batch size
-        
-        Args:
-            batch_size: Actual batch size from input tensors
-            
-        Returns:
-            Dictionary of resolved output shapes
-        """
+        """Resolve dynamic output shapes from TensorRT engine"""
         output_shapes = {}
         
         # Iterate through all engine tensors to find outputs
@@ -79,27 +56,10 @@ class ControlNetModelEngine:
                  text_embeds: Optional[torch.Tensor] = None,
                  time_ids: Optional[torch.Tensor] = None,
                  **kwargs) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        """
-        Forward pass through TensorRT ControlNet engine
-        
-        Args:
-            sample: Latent sample tensor (B, 4, H//8, W//8)
-            timestep: Timestep tensor (B,)
-            encoder_hidden_states: Text embeddings (B, 77, 768/1024/2048)
-            controlnet_cond: Control conditioning image (B, 3, H, W)
-            conditioning_scale: Scale factor for ControlNet conditioning
-            text_embeds: Pooled text embeddings for SDXL (B, 1280)
-            time_ids: Time/resolution conditioning for SDXL (B, 6)
-            **kwargs: Additional arguments (ignored)
-            
-        Returns:
-            Tuple of (down_block_residuals, mid_block_residual)
-        """
-        # Ensure timestep is float32
+        """Forward pass through TensorRT ControlNet engine"""
         if timestep.dtype != torch.float32:
             timestep = timestep.float()
         
-        # Prepare input dictionary
         input_dict = {
             "sample": sample,
             "timestep": timestep,
@@ -108,21 +68,17 @@ class ControlNetModelEngine:
             "conditioning_scale": torch.tensor(conditioning_scale, dtype=torch.float32, device=sample.device)
         }
         
-        # Add SDXL-specific inputs if provided
         if text_embeds is not None:
             input_dict["text_embeds"] = text_embeds
         if time_ids is not None:
             input_dict["time_ids"] = time_ids
         
-        # Prepare shape dictionary for buffer allocation
         shape_dict = {name: tensor.shape for name, tensor in input_dict.items()}
         
-        # Add resolved output shapes to prevent -1 dimension errors
         batch_size = sample.shape[0]
         output_shapes = self._resolve_output_shapes(batch_size)
         shape_dict.update(output_shapes)
         
-        # Allocate buffers and run inference
         self.engine.allocate_buffers(shape_dict=shape_dict, device=sample.device)
         
         outputs = self.engine.infer(
@@ -131,30 +87,17 @@ class ControlNetModelEngine:
             use_cuda_graph=self.use_cuda_graph,
         )
         
-        # CRITICAL: Synchronize the TensorRT CUDA stream to ensure inference completes
-        # This prevents race conditions that cause black/corrupted frames
         if hasattr(self.stream, 'synchronize'):
             self.stream.synchronize()
         else:
-            # Fallback to current stream sync
             torch.cuda.current_stream().synchronize()
         
-        # Extract and organize outputs (creates copies to prevent buffer corruption)
         down_blocks, mid_block = self._extract_controlnet_outputs(outputs)
         
         return down_blocks, mid_block
     
     def _extract_controlnet_outputs(self, outputs: Dict[str, torch.Tensor]) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        """
-        Extract and organize ControlNet outputs from engine results
-        
-        Args:
-            outputs: Raw outputs from TensorRT engine
-            
-        Returns:
-            Tuple of (down_block_residuals, mid_block_residual)
-        """
-        # Extract down block outputs (12 total)
+        """Extract and organize ControlNet outputs from engine results"""
         down_blocks = []
         for i in range(12):
             output_name = f"down_block_{i:02d}"
@@ -162,7 +105,6 @@ class ControlNetModelEngine:
                 tensor = outputs[output_name]
                 down_blocks.append(tensor)
         
-        # Extract middle block output
         mid_block = None
         if "mid_block" in outputs:
             mid_block = outputs["mid_block"]
@@ -172,137 +114,74 @@ class ControlNetModelEngine:
     def get_input_names(self) -> List[str]:
         """Get input names for this engine"""
         if self._input_names is None:
-            # Extract from engine metadata if available
-            # Fallback to standard names
             self._input_names = ["sample", "timestep", "encoder_hidden_states", "controlnet_cond"]
         return self._input_names
     
     def get_output_names(self) -> List[str]:
         """Get output names for this engine"""
         if self._output_names is None:
-            # 12 down blocks + 1 middle block
             down_names = [f"down_block_{i:02d}" for i in range(12)]
             self._output_names = down_names + ["mid_block"]
         return self._output_names
-    
-    def to(self, *args, **kwargs):
-        """Compatibility method - TensorRT engines don't need device movement"""
-        pass
-
-    def forward(self, *args, **kwargs):
-        """Compatibility method - redirect to __call__"""
-        return self.__call__(*args, **kwargs)
 
 
 class HybridControlNet:
-    """
-    Wrapper that handles TensorRT/PyTorch fallback for ControlNet
-    
-    This wrapper attempts to use TensorRT when available and falls back
-    to PyTorch ControlNet if TensorRT fails or is unavailable.
-    """
+    """Wrapper that handles TensorRT/PyTorch fallback for ControlNet"""
     
     def __init__(self, 
                  model_id: str,
                  engine_path: Optional[str] = None,
                  pytorch_model: Optional[Any] = None,
                  stream: Optional[cuda.Stream] = None):
-        """
-        Initialize hybrid ControlNet wrapper
-        
-        Args:
-            model_id: ControlNet model identifier
-            engine_path: Path to TensorRT engine (if available)
-            pytorch_model: Fallback PyTorch ControlNet model
-            stream: CUDA stream for TensorRT engine
-        """
+        """Initialize hybrid ControlNet wrapper"""
         self.model_id = model_id
         self.engine_path = engine_path
         self.pytorch_model = pytorch_model
         self.stream = stream
         
-        # Engine state
         self.trt_engine: Optional[ControlNetModelEngine] = None
         self.use_tensorrt = False
         self.fallback_reason = None
         
-        # Try to load TensorRT engine if path provided
         if engine_path:
             self._try_load_tensorrt_engine()
     
     def _try_load_tensorrt_engine(self) -> bool:
-        """
-        Attempt to load TensorRT engine
-        
-        Returns:
-            True if successfully loaded, False otherwise
-        """
+        """Attempt to load TensorRT engine"""
         try:
             if self.engine_path and self.stream:
-                print(f"🚀 DEBUG: Loading TensorRT ControlNet engine from {self.engine_path}")
                 self.trt_engine = ControlNetModelEngine(self.engine_path, self.stream)
                 self.use_tensorrt = True
-                print(f"✅ DEBUG: TensorRT ControlNet engine loaded successfully for {self.model_id}")
                 return True
         except Exception as e:
-            print(f"_try_load_tensorrt_engine DEBUG: TensorRT ControlNet engine load failed for {self.model_id}: {e}")
-            print(f"_try_load_tensorrt_engine DEBUG: Full stack trace:\n{traceback.format_exc()}")
             self.fallback_reason = f"TensorRT engine load failed: {e}"
         
         return False
     
     def __call__(self, *args, **kwargs) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        """
-        Forward pass with automatic TensorRT/PyTorch fallback
-        
-        Returns:
-            Tuple of (down_block_residuals, mid_block_residual)
-        """
-        # Try TensorRT first if available
+        """Forward pass with automatic TensorRT/PyTorch fallback"""
         if self.use_tensorrt and self.trt_engine:
             try:
-                # print(f"⚡ DEBUG: Using TensorRT ControlNet for inference ({self.model_id})")
                 return self.trt_engine(*args, **kwargs)
             except Exception as e:
-                print(f"__call__ DEBUG: TensorRT ControlNet failed ({e}), falling back to PyTorch for {self.model_id}")
-                print(f"__call__ DEBUG: Full stack trace:\n{traceback.format_exc()}")
                 self.use_tensorrt = False
                 self.fallback_reason = f"Runtime error: {e}"
         
-        # Fallback to PyTorch
         if self.pytorch_model is None:
-            # print(f"💥 DEBUG: No PyTorch fallback available for ControlNet {self.model_id}")
             raise RuntimeError(f"No PyTorch fallback available for ControlNet {self.model_id}")
         
-        # print(f"🐍 DEBUG: Using PyTorch ControlNet for inference ({self.model_id})")
-        # Call PyTorch model - this should return the same format
         return self._call_pytorch_model(*args, **kwargs)
     
     def _call_pytorch_model(self, *args, **kwargs) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        """
-        Call PyTorch ControlNet model with proper output formatting
-        
-        This method ensures the PyTorch model returns the same output format
-        as the TensorRT engine.
-        """
-        # print(f"🐍 DEBUG: Calling PyTorch ControlNet model ({self.model_id})")
-        
-        # Call the PyTorch ControlNet
+        """Call PyTorch ControlNet model with proper output formatting"""
         result = self.pytorch_model(*args, **kwargs)
         
-        # print(f"🐍 DEBUG: PyTorch ControlNet inference completed, result type: {type(result)}")
-        
-        # Handle different PyTorch ControlNet output formats
         if isinstance(result, tuple) and len(result) == 2:
-            # Already in the expected format
             return result
         elif hasattr(result, 'down_block_res_samples') and hasattr(result, 'mid_block_res_sample'):
-            # Diffusers ControlNet output format
             return result.down_block_res_samples, result.mid_block_res_sample
         else:
-            # Try to extract from result
             if isinstance(result, (list, tuple)) and len(result) >= 13:
-                # Assume first 12 are down blocks, last is middle
                 return list(result[:12]), result[12]
             else:
                 raise ValueError(f"Unexpected PyTorch ControlNet output format: {type(result)}")
