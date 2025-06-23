@@ -1,10 +1,4 @@
-"""
-ControlNet TensorRT Model Definitions
-
-This module provides TensorRT model definitions for ControlNet compilation,
-following the same patterns as the base UNet models but optimized for
-ControlNet-specific inputs and outputs.
-"""
+"""ControlNet TensorRT model definitions for compilation"""
 
 from typing import List, Dict, Optional
 from .models import BaseModel
@@ -38,30 +32,24 @@ class ControlNetTRT(BaseModel):
     def get_input_names(self) -> List[str]:
         """Get input names for ControlNet TensorRT engine"""
         return [
-            "sample",                    # Latent input (B, 4, H//8, W//8)
-            "timestep",                  # Timestep tensor (B,)
-            "encoder_hidden_states",     # Text embeddings (B, 77, 768/1024)
-            "controlnet_cond"           # Control conditioning image (B, 3, H, W)
+            "sample",
+            "timestep",
+            "encoder_hidden_states",
+            "controlnet_cond"
         ]
         
     def get_output_names(self) -> List[str]:
         """Get output names for ControlNet TensorRT engine"""
-        # 12 down block outputs + 1 middle block output
         down_names = [f"down_block_{i:02d}" for i in range(12)]
         return down_names + ["mid_block"]
         
     def get_dynamic_axes(self) -> Dict[str, Dict[int, str]]:
         """Get dynamic axes configuration for variable input shapes"""
         return {
-            # Base inputs
             "sample": {0: "B", 2: "H", 3: "W"},
             "encoder_hidden_states": {0: "B"},
             "timestep": {0: "B"},
-            
-            # Control conditioning can be different resolution
             "controlnet_cond": {0: "B", 2: "H_ctrl", 3: "W_ctrl"},
-            
-            # All outputs have dynamic batch and spatial dims
             **{f"down_block_{i:02d}": {0: "B"} for i in range(12)},
             "mid_block": {0: "B"}
         }
@@ -72,13 +60,11 @@ class ControlNetTRT(BaseModel):
         min_batch = batch_size if static_batch else self.min_batch
         max_batch = batch_size if static_batch else self.max_batch
         
-        # Control image can be different resolution than latent
         min_ctrl_h = 256 if not static_shape else image_height
         max_ctrl_h = 1024 if not static_shape else image_height
         min_ctrl_w = 256 if not static_shape else image_width  
         max_ctrl_w = 1024 if not static_shape else image_width
         
-        # Latent dimensions (always 1/8 of image size)
         latent_h = image_height // 8
         latent_w = image_width // 8
         min_latent_h = min_ctrl_h // 8
@@ -128,7 +114,7 @@ class ControlNetSDXLTRT(ControlNetTRT):
     """SDXL-specific ControlNet TensorRT model definition"""
     
     def __init__(self, **kwargs):
-        kwargs.setdefault('embedding_dim', 2048)  # SDXL uses larger embeddings
+        kwargs.setdefault('embedding_dim', 2048)
         super().__init__(**kwargs)
         self.name = f"ControlNet-SDXL-{self.controlnet_type}"
     
@@ -136,8 +122,8 @@ class ControlNetSDXLTRT(ControlNetTRT):
         """SDXL ControlNet has additional conditioning inputs"""
         base_inputs = super().get_input_names()
         return base_inputs + [
-            "text_embeds",              # Pooled text embeddings
-            "time_ids"                  # Time/resolution conditioning
+            "text_embeds",
+            "time_ids"
         ]
     
     def get_dynamic_axes(self) -> Dict[str, Dict[int, str]]:
@@ -159,7 +145,6 @@ class ControlNetSDXLTRT(ControlNetTRT):
         min_batch = batch_size if static_batch else self.min_batch
         max_batch = batch_size if static_batch else self.max_batch
         
-        # Add SDXL-specific inputs
         base_profile.update({
             "text_embeds": [
                 (min_batch, 1280), (batch_size, 1280), (max_batch, 1280)
@@ -173,15 +158,13 @@ class ControlNetSDXLTRT(ControlNetTRT):
     
     def get_sample_input(self, batch_size, image_height, image_width):
         """Generate sample inputs for SDXL ControlNet ONNX export"""
-        # Get base inputs from parent
         base_inputs = super().get_sample_input(batch_size, image_height, image_width)
         
-        # Add SDXL-specific inputs
         dtype = torch.float16 if self.fp16 else torch.float32
         
         sdxl_inputs = (
-            torch.randn(batch_size, 1280, dtype=dtype, device=self.device),  # text_embeds
-            torch.randn(batch_size, 6, dtype=dtype, device=self.device)      # time_ids
+            torch.randn(batch_size, 1280, dtype=dtype, device=self.device),
+            torch.randn(batch_size, 6, dtype=dtype, device=self.device)
         )
         
         return base_inputs + sdxl_inputs
@@ -190,17 +173,7 @@ class ControlNetSDXLTRT(ControlNetTRT):
 def create_controlnet_model(model_type: str = "sd15", 
                            controlnet_type: str = "canny",
                            **kwargs) -> ControlNetTRT:
-    """
-    Factory function to create appropriate ControlNet TensorRT model
-    
-    Args:
-        model_type: Base model type ("sd15", "sdxl", "turbo")
-        controlnet_type: ControlNet type ("canny", "depth", "pose", etc.)
-        **kwargs: Additional model parameters
-        
-    Returns:
-        Appropriate ControlNet TensorRT model instance
-    """
+    """Factory function to create appropriate ControlNet TensorRT model"""
     if model_type.lower() in ["sdxl", "sdxl-turbo"]:
         return ControlNetSDXLTRT(controlnet_type=controlnet_type, **kwargs)
     else:
