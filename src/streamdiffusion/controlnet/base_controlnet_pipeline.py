@@ -237,13 +237,6 @@ class BaseControlNetPipeline:
                 for index in indices:
                     self.controlnet_images[index] = processed_image
     
-    def update_controlnet_scale(self, index: int, scale: float) -> None:
-        """Update the conditioning scale for a specific ControlNet"""
-        if 0 <= index < len(self.controlnets):
-            self.controlnet_scales[index] = scale
-        else:
-            raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
-    
     def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
         """Get the last processed control image for display purposes"""
         if not (0 <= index < len(self.controlnets)):
