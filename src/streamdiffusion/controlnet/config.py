@@ -164,16 +164,3 @@ def _validate_config(config: Dict[str, Any]) -> None:
             
             if 'model_id' not in controlnet:
                 raise ValueError(f"_validate_config: ControlNet {i} missing required 'model_id'")
-
-
-def get_controlnet_config(config_dict: Dict[str, Any], index: int = 0) -> Dict[str, Any]:
-    """Get a specific ControlNet configuration by index"""
-    if 'controlnets' not in config_dict or index >= len(config_dict['controlnets']):
-        raise IndexError(f"get_controlnet_config: ControlNet index {index} out of range")
-    
-    return config_dict['controlnets'][index]
-
-
-def get_pipeline_type(config_dict: Dict[str, Any]) -> str:
-    """Get pipeline type from configuration, with fallback to SD 1.5"""
-    return config_dict.get('pipeline_type', 'sd1.5') 
