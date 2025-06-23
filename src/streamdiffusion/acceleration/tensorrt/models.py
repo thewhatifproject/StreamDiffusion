@@ -205,14 +205,14 @@ class CLIP(BaseModel):
     def optimize(self, onnx_graph):
         opt = Optimizer(onnx_graph)
         opt.info(self.name + ": original")
-        opt.select_outputs([0])  # delete graph output#1
+        opt.select_outputs([0])
         opt.cleanup()
         opt.info(self.name + ": remove output[1]")
         opt.fold_constants()
         opt.info(self.name + ": fold constants")
         opt.infer_shapes()
         opt.info(self.name + ": shape inference")
-        opt.select_outputs([0], names=["text_embeddings"])  # rename network output
+        opt.select_outputs([0], names=["text_embeddings"])
         opt.info(self.name + ": remove output[0]")
         opt_onnx_graph = opt.cleanup(return_onnx=True)
         opt.info(self.name + ": finished")
@@ -243,11 +243,9 @@ class UNet(BaseModel):
         self.unet_dim = unet_dim
         self.name = "UNet"
         
-        # ControlNet support
         self.use_control = use_control
         self.unet_arch = unet_arch or {}
         
-        # Initialize ControlNet input configurations
         if self.use_control and self.unet_arch:
             self.control_inputs = self.get_control()
             self._add_control_inputs()
@@ -255,52 +253,18 @@ class UNet(BaseModel):
             self.control_inputs = {}
 
     def get_control(self) -> dict:
-        """
-        Generate ControlNet input configurations with CORRECT spatial dimensions
-        
-        FIXED: Generate control tensors at their natural multi-resolution sizes
-        This eliminates the need for expensive runtime interpolation in the wrapper.
-        
-        FORMAT:
-        - Position 0-2:  320ch @ 64×64  (Down block 0 - 3 ResNet layers)
-        - Position 3-5:  320/640ch @ 32×32  (Down block 1 - 3 ResNet layers)  
-        - Position 6-8:  640/1280ch @ 16×16  (Down block 2 - 3 ResNet layers)
-        - Position 9-11: 1280ch @ 8×8   (Down block 3 - 3 ResNet layers)
-        - Middle:        1280ch @ 8×8   (1 middle block tensor)
-        
-        Total: 13 control inputs (12 down + 1 middle)
-        """
-        # Get UNet architecture
+        """Generate ControlNet input configurations with multi-resolution spatial dimensions."""
         block_out_channels = self.unet_arch.get('block_out_channels', (320, 640, 1280, 1280))
         
         control_inputs = {}
         
-      
-        
-        # Generate control tensors with CORRECT spatial dimensions
         control_configs = [
-            # Down block 0: 3 tensors @ 64x64 (correct size)
-            (320, 64),   # Position 0: First ResNet in down block 0
-            (320, 64),   # Position 1: Second ResNet in down block 0  
-            (320, 64),   # Position 2: Third ResNet in down block 0
-            
-            # Down block 1: 3 tensors @ 32x32 (CORRECT SIZE - was 64x64)
-            (320, 32),   # Position 3: First ResNet in down block 1 
-            (640, 32),   # Position 4: Second ResNet in down block 1
-            (640, 32),   # Position 5: Third ResNet in down block 1
-            
-            # Down block 2: 3 tensors @ 16x16 (CORRECT SIZE - was 64x64)
-            (640, 16),   # Position 6: First ResNet in down block 2
-            (1280, 16),  # Position 7: Second ResNet in down block 2
-            (1280, 16),  # Position 8: Third ResNet in down block 2
-            
-            # Down block 3: 3 tensors @ 8x8 (CORRECT SIZE - was 64x64)
-            (1280, 8),   # Position 9: First ResNet in down block 3
-            (1280, 8),   # Position 10: Second ResNet in down block 3
-            (1280, 8),   # Position 11: Third ResNet in down block 3
+            (320, 64), (320, 64), (320, 64),     # Down block 0
+            (320, 32), (640, 32), (640, 32),     # Down block 1
+            (640, 16), (1280, 16), (1280, 16),   # Down block 2
+            (1280, 8), (1280, 8), (1280, 8),     # Down block 3
         ]
         
-        # Generate down block control inputs with CORRECT sizes
         for i, (channels, spatial_size) in enumerate(control_configs):
             input_name = f"input_control_{i:02d}"
             control_inputs[input_name] = {
@@ -308,22 +272,16 @@ class UNet(BaseModel):
                 'channels': channels,
                 'height': spatial_size,
                 'width': spatial_size,
-                'downsampling_factor': 1  # No downsampling needed!
+                'downsampling_factor': 1
             }
-            # print(f"   {input_name}: {channels}ch @ {spatial_size}x{spatial_size}")
         
-        # Add middle block control with CORRECT size
         control_inputs["input_control_middle"] = {
             'batch': self.min_batch,
             'channels': 1280,
-            'height': 8,      # CORRECT SIZE: 8x8 (was 64x64)
+            'height': 8,
             'width': 8,
             'downsampling_factor': 1
         }
-        # print(f"   input_control_middle: 1280ch @ 8x8 (CORRECT SIZE)")
-        
-        # print(f"   TOTAL: {len(control_inputs)} control inputs at CORRECT multi-resolution sizes")
- 
         
         return control_inputs
 
@@ -332,7 +290,6 @@ class UNet(BaseModel):
         if not self.control_inputs:
             return
         
-        # Store original methods
         self._original_get_input_names = self.get_input_names
         self._original_get_dynamic_axes = self.get_dynamic_axes
         self._original_get_input_profile = self.get_input_profile
@@ -343,7 +300,6 @@ class UNet(BaseModel):
         """Get input names including ControlNet inputs"""
         base_names = ["sample", "timestep", "encoder_hidden_states"]
         if self.use_control and self.control_inputs:
-            # Add control input names in the correct order
             control_names = sorted(self.control_inputs.keys())
             return base_names + control_names
         return base_names
@@ -360,14 +316,9 @@ class UNet(BaseModel):
         }
         
         if self.use_control and self.control_inputs:
-            # Add dynamic axes for ControlNet inputs with UNIQUE spatial dimension names
-            # This prevents TensorRT conflicts when inputs have different spatial sizes
             for name, shape_spec in self.control_inputs.items():
                 height = shape_spec["height"]
                 width = shape_spec["width"]
-                
-                # Use unique spatial dimension names based on actual size
-                # This tells TensorRT that 64x64, 32x32, 16x16, 8x8 are different
                 spatial_suffix = f"{height}x{width}"
                 base_axes[name] = {
                     0: "2B", 
@@ -407,16 +358,15 @@ class UNet(BaseModel):
         }
         
         if self.use_control and self.control_inputs:
-            # Add ControlNet input profiles using EXACT specifications
             for name, shape_spec in self.control_inputs.items():
                 channels = shape_spec["channels"]
-                height = shape_spec["height"]  # Use EXACT height from config
-                width = shape_spec["width"]    # Use EXACT width from config
+                height = shape_spec["height"]
+                width = shape_spec["width"]
                 
                 profile[name] = [
-                    (min_batch, channels, height, width),      # Use exact dimensions
-                    (batch_size, channels, height, width),     # Use exact dimensions  
-                    (max_batch, channels, height, width),      # Use exact dimensions
+                    (min_batch, channels, height, width),
+                    (batch_size, channels, height, width),
+                    (max_batch, channels, height, width),
                 ]
         
         return profile
@@ -431,13 +381,12 @@ class UNet(BaseModel):
         }
         
         if self.use_control and self.control_inputs:
-            # Add ControlNet input shapes using EXACT specifications
             for name, shape_spec in self.control_inputs.items():
                 channels = shape_spec["channels"]
-                height = shape_spec["height"]  # Use EXACT height from config
-                width = shape_spec["width"]    # Use EXACT width from config
+                height = shape_spec["height"]
+                width = shape_spec["width"]
                 
-                shape_dict[name] = (2 * batch_size, channels, height, width)  # Use exact dimensions
+                shape_dict[name] = (2 * batch_size, channels, height, width)
         
         return shape_dict
 
@@ -454,13 +403,12 @@ class UNet(BaseModel):
         ]
         
         if self.use_control and self.control_inputs:
-            # Add ControlNet sample inputs using EXACT specifications
             control_inputs = []
             for name in sorted(self.control_inputs.keys()):
                 shape_spec = self.control_inputs[name]
                 channels = shape_spec["channels"]
-                height = shape_spec["height"]  # Use the EXACT height from our config
-                width = shape_spec["width"]    # Use the EXACT width from our config
+                height = shape_spec["height"]
+                width = shape_spec["width"]
                 
                 control_input = torch.randn(
                     2 * batch_size, channels, height, width, 
