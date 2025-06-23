@@ -237,33 +237,7 @@ class BaseControlNetPipeline:
                 for index in indices:
                     self.controlnet_images[index] = processed_image
     
-    def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
-        """Get the last processed control image for display purposes"""
-        if not (0 <= index < len(self.controlnets)):
-            return None
-        
-        preprocessor = self.preprocessors[index]
-        if preprocessor is None:
-            return None
-            
-        preprocessor_type = type(preprocessor).__name__
-        cached_result = self._preprocessed_cache.get(preprocessor_type)
-        
-        if cached_result is None:
-            return None
-        
-        # Handle tensor results from GPU processing
-        if isinstance(cached_result, torch.Tensor):
-            # Convert tensor back to PIL for display
-            if hasattr(preprocessor, 'tensor_to_pil'):
-                return preprocessor.tensor_to_pil(cached_result)
-            else:
-                # Fallback tensor to PIL conversion
-                return self._tensor_to_pil_fallback(cached_result)
-        
-        # Already a PIL image
-        return cached_result
-    
+
     def _load_controlnet_model(self, model_id: str):
         """Load a ControlNet model with TensorRT acceleration support"""
         # First load the PyTorch model as fallback
