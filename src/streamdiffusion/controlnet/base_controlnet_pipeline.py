@@ -16,71 +16,39 @@ from .preprocessors import get_preprocessor
 logger = logging.getLogger(__name__)
 
 class BaseControlNetPipeline:
-    """
-    Base ControlNet-enabled StreamDiffusion pipeline
-    
-    This base class contains all the common functionality shared across
-    SD1.5, SDTurbo, and SDXL ControlNet implementations.
-    """
+    """Base ControlNet-enabled StreamDiffusion pipeline"""
     
     def __init__(self, 
                  stream_diffusion: StreamDiffusion,
                  device: str = "cuda",
                  dtype: torch.dtype = torch.float16):
-        """
-        Initialize base ControlNet pipeline
-        
-        Args:
-            stream_diffusion: Base StreamDiffusion instance
-            device: Device to run ControlNets on
-            dtype: Data type for ControlNet models
-        """
+        """Initialize base ControlNet pipeline"""
         self.stream = stream_diffusion
         self.device = device
         self.dtype = dtype
         self.model_type = getattr(self, 'model_type', 'ControlNet')  # Default fallback
         
-        # ControlNet storage
         self.controlnets: List[ControlNetModel] = []
         self.controlnet_images: List[Optional[torch.Tensor]] = []
         self.controlnet_scales: List[float] = []
         self.preprocessors: List[Optional[Any]] = []
         
-        # Store original unet_step method for patching
         self._original_unet_step = None
         self._is_patched = False
         
-        # Cache transforms and reusable tensors
         import torchvision.transforms as transforms
         self._cached_transform = transforms.ToTensor()
         self._temp_tensor_cache = {}
-        
-        # Cache for preprocessed images to eliminate redundant processing
         self._preprocessed_cache = {}
         self._last_input_frame = None
-        
-        # Cache preprocessor type names to avoid expensive type() calls
         self._preprocessor_type_cache = {}
-        
-        # Pre-allocate active indices list to avoid repeated allocations
         self._active_indices_cache = []
-        
-        # Thread pool for parallel preprocessor execution
         self._preprocessor_executor = ThreadPoolExecutor(max_workers=4)
     
     def add_controlnet(self, 
                       controlnet_config: Dict[str, Any],
                       control_image: Optional[Union[str, Image.Image, np.ndarray, torch.Tensor]] = None) -> int:
-        """
-        Add a ControlNet to the pipeline
-        
-        Args:
-            controlnet_config: ControlNet configuration dictionary
-            control_image: Control image (optional, can be set later)
-            
-        Returns:
-            Index of the added ControlNet
-        """
+        """Add a ControlNet to the pipeline"""
         if not controlnet_config.get('enabled', True):
             return -1
         
@@ -128,12 +96,7 @@ class BaseControlNetPipeline:
         return len(self.controlnets) - 1
     
     def remove_controlnet(self, index: int) -> None:
-        """
-        Remove a ControlNet by index
-        
-        Args:
-            index: Index of the ControlNet to remove
-        """
+        """Remove a ControlNet by index"""
         if 0 <= index < len(self.controlnets):
             self.controlnets.pop(index)
             self.controlnet_images.pop(index)
@@ -191,19 +154,11 @@ class BaseControlNetPipeline:
             return preprocessor_key, group['indices'], None
 
     def update_control_image_efficient(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor], index: Optional[int] = None) -> None:
-        """
-        Efficiently update ControlNet(s) with cache-aware preprocessing
-        
-        Args:
-            control_image: New control image
-            index: Optional ControlNet index. If None, updates all ControlNets
-        """
-        # Handle single ControlNet update
+        """Efficiently update ControlNet(s) with cache-aware preprocessing"""
         if index is not None:
             if not (0 <= index < len(self.controlnets)):
                 raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
             
-            # Skip processing if scale is 0 
             if self.controlnet_scales[index] == 0:
                 return
                 
@@ -211,49 +166,38 @@ class BaseControlNetPipeline:
             processed_image = self._prepare_control_image(control_image, preprocessor)
             self.controlnet_images[index] = processed_image
             return
-        # Early exit: check for active ControlNets first
+            
         if not any(scale > 0 for scale in self.controlnet_scales):
             return
         
-        # Check if we need to reprocess (use id comparison for objects, content hash for simple types)
         if (self._last_input_frame is not None and 
             isinstance(control_image, (torch.Tensor, np.ndarray, Image.Image)) and 
             control_image is self._last_input_frame):
-            return  # Same object, use cached results
+            return
         
         self._last_input_frame = control_image
-        
-        # Clear cache for new frame
         self._preprocessed_cache.clear()
         
-        # Convert to tensor early for GPU processing (optimized)
         control_tensor = None
         if isinstance(control_image, torch.Tensor):
             control_tensor = control_image.to(device=self.device, dtype=self.dtype)
         elif isinstance(control_image, str):
             control_image = load_image(control_image)
-            # Convert loaded image to tensor for GPU processing
             import torchvision.transforms as transforms
             to_tensor = transforms.ToTensor()
             control_tensor = to_tensor(control_image).unsqueeze(0).to(device=self.device, dtype=self.dtype)
         elif isinstance(control_image, Image.Image):
-            # Convert PIL Image to tensor for GPU processing
             import torchvision.transforms as transforms
             to_tensor = transforms.ToTensor()
             control_tensor = to_tensor(control_image).unsqueeze(0).to(device=self.device, dtype=self.dtype)
         
-        # Clear and rebuild active indices efficiently
         self._active_indices_cache.clear()
         active_controlnets = []
-        
-        # Group ControlNets by preprocessor to avoid duplicate processing
         preprocessor_groups = {}
         for i, scale in enumerate(self.controlnet_scales):
-            if scale > 0:  # Only process active ones
+            if scale > 0:
                 self._active_indices_cache.append(i)
                 preprocessor = self.preprocessors[i]
-                
-                # Group by preprocessor object identity (faster than type name)
                 preprocessor_key = id(preprocessor) if preprocessor is not None else 'passthrough'
                 
                 if preprocessor_key not in preprocessor_groups:
@@ -263,13 +207,10 @@ class BaseControlNetPipeline:
                     }
                 preprocessor_groups[preprocessor_key]['indices'].append(i)
         
-        # Early exit if no active ControlNets
         if not self._active_indices_cache:
             return
         
-        # PARALLEL EXECUTION: Use ThreadPoolExecutor for preprocessors
         if len(preprocessor_groups) > 1:
-            # Submit all preprocessor tasks to thread pool
             futures = [
                 self._preprocessor_executor.submit(
                     self._process_single_preprocessor_sync, 
@@ -278,19 +219,15 @@ class BaseControlNetPipeline:
                 for prep_key, group in preprocessor_groups.items()
             ]
             
-            # Wait for all to complete and apply results
             for future in futures:
-                result = future.result()  # Blocks until completion
-                if result[2] is not None:  # processed_image exists
+                result = future.result()
+                if result[2] is not None:
                     prep_key, indices, processed_image = result
-                    # Cache the result
                     cache_key = f"prep_{prep_key}"
                     self._preprocessed_cache[cache_key] = processed_image
-                    # Apply to all ControlNets using this preprocessor
                     for index in indices:
                         self.controlnet_images[index] = processed_image
         else:
-            # Single preprocessor - no threading overhead needed
             prep_key, group = next(iter(preprocessor_groups.items()))
             result = self._process_single_preprocessor_sync(prep_key, group, control_image, control_tensor)
             if result[2] is not None:
@@ -301,28 +238,14 @@ class BaseControlNetPipeline:
                     self.controlnet_images[index] = processed_image
     
     def update_controlnet_scale(self, index: int, scale: float) -> None:
-        """
-        Update the conditioning scale for a specific ControlNet
-        
-        Args:
-            index: Index of the ControlNet
-            scale: New conditioning scale
-        """
+        """Update the conditioning scale for a specific ControlNet"""
         if 0 <= index < len(self.controlnets):
             self.controlnet_scales[index] = scale
         else:
             raise IndexError(f"{self.model_type} ControlNet index {index} out of range")
     
     def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
-        """
-        Get the last processed control image for display purposes (avoids reprocessing)
-        
-        Args:
-            index: Index of the ControlNet
-            
-        Returns:
-            Last processed PIL Image, or None if not available
-        """
+        """Get the last processed control image for display purposes"""
         if not (0 <= index < len(self.controlnets)):
             return None
         
@@ -349,15 +272,7 @@ class BaseControlNetPipeline:
         return cached_result
     
     def _load_controlnet_model(self, model_id: str):
-        """
-        Load a ControlNet model with TensorRT acceleration support
-        
-        Args:
-            model_id: Model ID or path
-            
-        Returns:
-            Hybrid ControlNet (TensorRT if available, PyTorch fallback)
-        """
+        """Load a ControlNet model with TensorRT acceleration support"""
         # First load the PyTorch model as fallback
         pytorch_controlnet = self._load_pytorch_controlnet_model(model_id)
         
@@ -372,12 +287,6 @@ class BaseControlNetPipeline:
             
             # Debug: Check what batch size we're getting
             detected_batch_size = getattr(self.stream, 'trt_unet_batch_size', 1)
-            # print(f"🔍 DEBUG: Detected UNet batch size: {detected_batch_size}")
-            # print(f"🔍 DEBUG: Stream object has trt_unet_batch_size: {hasattr(self.stream, 'trt_unet_batch_size')}")
-            # if hasattr(self.stream, 'trt_unet_batch_size'):
-                # print(f"🔍 DEBUG: Stream.trt_unet_batch_size = {self.stream.trt_unet_batch_size}")
-            
-            # Get hybrid ControlNet from engine pool (auto-compiles if needed)
             return self.stream.controlnet_engine_pool.get_or_load_engine(
                 model_id=model_id,
                 pytorch_model=pytorch_controlnet,
@@ -391,15 +300,7 @@ class BaseControlNetPipeline:
             return pytorch_controlnet
     
     def _load_pytorch_controlnet_model(self, model_id: str):
-        """
-        Load a ControlNet model from HuggingFace or local path
-        
-        Args:
-            model_id: Model ID or path
-            
-        Returns:
-            Loaded ControlNet model
-        """
+        """Load a ControlNet model from HuggingFace or local path"""
         try:
             # Check if it's a local path
             if Path(model_id).exists():
@@ -434,15 +335,7 @@ class BaseControlNetPipeline:
             raise ValueError(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
     
     def _infer_controlnet_type(self, model_id: str) -> str:
-        """
-        Infer ControlNet type from model ID
-        
-        Args:
-            model_id: ControlNet model identifier
-            
-        Returns:
-            Inferred ControlNet type
-        """
+        """Infer ControlNet type from model ID"""
         model_lower = model_id.lower()
         
         # Common ControlNet type mappings
@@ -472,12 +365,7 @@ class BaseControlNetPipeline:
     
     #TODO: model detection module
     def _infer_model_type(self) -> str:
-        """
-        Infer base model type from StreamDiffusion configuration
-        
-        Returns:
-            Inferred model type (sd15, sdxl, turbo)
-        """
+        """Infer base model type from StreamDiffusion configuration"""
         # Check UNet configuration to determine model type
         if hasattr(self.stream, 'unet') and hasattr(self.stream.unet, 'config'):
             unet_config = self.stream.unet.config
@@ -509,16 +397,7 @@ class BaseControlNetPipeline:
     def _prepare_control_image(self, 
                               control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
                               preprocessor: Optional[Any] = None) -> torch.Tensor:
-        """
-        Prepare a control image for ControlNet input (optimized version)
-        
-        Args:
-            control_image: Input control image
-            preprocessor: Optional preprocessor to apply
-            
-        Returns:
-            Processed control image tensor
-        """
+        """Prepare a control image for ControlNet input"""
         # Load image if path
         if isinstance(control_image, str):
             control_image = load_image(control_image)
@@ -597,23 +476,68 @@ class BaseControlNetPipeline:
         
         raise ValueError(f"Unsupported control image type: {type(control_image)}")
     
+    def _process_cfg_and_predict(self, model_pred: torch.Tensor, x_t_latent: torch.Tensor, idx=None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Process CFG logic and scheduler step (shared between TensorRT and PyTorch modes)"""
+        # CFG processing
+        if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
+            noise_pred_text = model_pred[1:]
+            self.stream.stock_noise = torch.concat(
+                [model_pred[0:1], self.stream.stock_noise[1:]], dim=0
+            )
+        elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
+            noise_pred_uncond, noise_pred_text = model_pred.chunk(2)
+        else:
+            noise_pred_text = model_pred
+        
+        if self.stream.guidance_scale > 1.0 and (
+            self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize"
+        ):
+            noise_pred_uncond = self.stream.stock_noise * self.stream.delta
+        
+        if self.stream.guidance_scale > 1.0 and self.stream.cfg_type != "none":
+            model_pred = noise_pred_uncond + self.stream.guidance_scale * (
+                noise_pred_text - noise_pred_uncond
+            )
+        else:
+            model_pred = noise_pred_text
+        
+        # Scheduler step
+        if self.stream.use_denoising_batch:
+            denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
+            if self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize":
+                scaled_noise = self.stream.beta_prod_t_sqrt * self.stream.stock_noise
+                delta_x = self.stream.scheduler_step_batch(model_pred, scaled_noise, idx)
+                alpha_next = torch.concat(
+                    [
+                        self.stream.alpha_prod_t_sqrt[1:],
+                        torch.ones_like(self.stream.alpha_prod_t_sqrt[0:1]),
+                    ],
+                    dim=0,
+                )
+                delta_x = alpha_next * delta_x
+                beta_next = torch.concat(
+                    [
+                        self.stream.beta_prod_t_sqrt[1:],
+                        torch.ones_like(self.stream.beta_prod_t_sqrt[0:1]),
+                    ],
+                    dim=0,
+                )
+                delta_x = delta_x / beta_next
+                init_noise = torch.concat(
+                    [self.stream.init_noise[1:], self.stream.init_noise[0:1]], dim=0
+                )
+                self.stream.stock_noise = init_noise + delta_x
+        else:
+            denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
+        
+        return denoised_batch, model_pred
+
     def _get_controlnet_conditioning(self, 
                                    x_t_latent: torch.Tensor,
                                    timestep: torch.Tensor,
                                    encoder_hidden_states: torch.Tensor,
                                    **kwargs) -> Tuple[Optional[List[torch.Tensor]], Optional[torch.Tensor]]:
-        """
-        Get combined conditioning from all active ControlNets (OPTIMIZED VERSION)
-        
-        Args:
-            x_t_latent: Latent input
-            timestep: Current timestep
-            encoder_hidden_states: Text embeddings
-            **kwargs: Additional arguments (e.g., added_cond_kwargs for SDXL)
-            
-        Returns:
-            Tuple of (down_block_res_samples, mid_block_res_sample)
-        """
+        """Get combined conditioning from all active ControlNets"""
         if not self.controlnets:
             return None, None
         
@@ -742,18 +666,7 @@ class BaseControlNetPipeline:
                 x_t_latent_plus_uc, t_list_expanded, self.stream.prompt_embeds, **conditioning_context
             )
             
-            # FIXED: TensorRT engine now expects CORRECT varying spatial dimensions
-            # No upsampling needed - tensors are passed through at their native sizes
-            if down_block_res_samples is not None:
-                for i, tensor in enumerate(down_block_res_samples):
-                    pass
-            
-            if mid_block_res_sample is not None:
-                pass
-            
-            # Call TensorRT engine with ControlNet inputs (using diffusers-style interface)
-            # print(f"🚀 DEBUG: Calling TensorRT UNet with ControlNet conditioning - down_blocks: {len(down_block_res_samples) if down_block_res_samples else 0}, mid_block: {'Yes' if mid_block_res_sample is not None else 'No'}")
-            
+            # Call TensorRT engine with ControlNet inputs
             model_pred = self.stream.unet(
                 x_t_latent_plus_uc,
                 t_list_expanded,
@@ -762,61 +675,8 @@ class BaseControlNetPipeline:
                 mid_block_additional_residual=mid_block_res_sample,
             ).sample
             
-            # print(f"✅ DEBUG: TensorRT UNet with ControlNet completed successfully")
-            
-            # Continue with original CFG logic
-            if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
-                noise_pred_text = model_pred[1:]
-                self.stream.stock_noise = torch.concat(
-                    [model_pred[0:1], self.stream.stock_noise[1:]], dim=0
-                )
-            elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
-                noise_pred_uncond, noise_pred_text = model_pred.chunk(2)
-            else:
-                noise_pred_text = model_pred
-            
-            if self.stream.guidance_scale > 1.0 and (
-                self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize"
-            ):
-                noise_pred_uncond = self.stream.stock_noise * self.stream.delta
-            
-            if self.stream.guidance_scale > 1.0 and self.stream.cfg_type != "none":
-                model_pred = noise_pred_uncond + self.stream.guidance_scale * (
-                    noise_pred_text - noise_pred_uncond
-                )
-            else:
-                model_pred = noise_pred_text
-            
-            # Compute the previous noisy sample x_t -> x_t-1
-            if self.stream.use_denoising_batch:
-                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
-                if self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize":
-                    scaled_noise = self.stream.beta_prod_t_sqrt * self.stream.stock_noise
-                    delta_x = self.stream.scheduler_step_batch(model_pred, scaled_noise, idx)
-                    alpha_next = torch.concat(
-                        [
-                            self.stream.alpha_prod_t_sqrt[1:],
-                            torch.ones_like(self.stream.alpha_prod_t_sqrt[0:1]),
-                        ],
-                        dim=0,
-                    )
-                    delta_x = alpha_next * delta_x
-                    beta_next = torch.concat(
-                        [
-                            self.stream.beta_prod_t_sqrt[1:],
-                            torch.ones_like(self.stream.beta_prod_t_sqrt[0:1]),
-                        ],
-                        dim=0,
-                    )
-                    delta_x = delta_x / beta_next
-                    init_noise = torch.concat(
-                        [self.stream.init_noise[1:], self.stream.init_noise[0:1]], dim=0
-                    )
-                    self.stream.stock_noise = init_noise + delta_x
-            else:
-                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
-            
-            return denoised_batch, model_pred
+            # Use shared CFG processing
+            return self._process_cfg_and_predict(model_pred, x_t_latent, idx)
         
         # Replace the method
         self.stream.unet_step = patched_unet_step_tensorrt
@@ -864,77 +724,14 @@ class BaseControlNetPipeline:
             # Call UNet with ControlNet conditioning
             model_pred = self.stream.unet(**unet_kwargs)[0]
             
-            # Continue with original CFG logic (same as TensorRT version)
-            if self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "initialize"):
-                noise_pred_text = model_pred[1:]
-                self.stream.stock_noise = torch.concat(
-                    [model_pred[0:1], self.stream.stock_noise[1:]], dim=0
-                )
-            elif self.stream.guidance_scale > 1.0 and (self.stream.cfg_type == "full"):
-                noise_pred_uncond, noise_pred_text = model_pred.chunk(2)
-            else:
-                noise_pred_text = model_pred
-            
-            if self.stream.guidance_scale > 1.0 and (
-                self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize"
-            ):
-                noise_pred_uncond = self.stream.stock_noise * self.stream.delta
-            
-            if self.stream.guidance_scale > 1.0 and self.stream.cfg_type != "none":
-                model_pred = noise_pred_uncond + self.stream.guidance_scale * (
-                    noise_pred_text - noise_pred_uncond
-                )
-            else:
-                model_pred = noise_pred_text
-            
-            # Compute the previous noisy sample x_t -> x_t-1
-            if self.stream.use_denoising_batch:
-                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
-                if self.stream.cfg_type == "self" or self.stream.cfg_type == "initialize":
-                    scaled_noise = self.stream.beta_prod_t_sqrt * self.stream.stock_noise
-                    delta_x = self.stream.scheduler_step_batch(model_pred, scaled_noise, idx)
-                    alpha_next = torch.concat(
-                        [
-                            self.stream.alpha_prod_t_sqrt[1:],
-                            torch.ones_like(self.stream.alpha_prod_t_sqrt[0:1]),
-                        ],
-                        dim=0,
-                    )
-                    delta_x = alpha_next * delta_x
-                    beta_next = torch.concat(
-                        [
-                            self.stream.beta_prod_t_sqrt[1:],
-                            torch.ones_like(self.stream.beta_prod_t_sqrt[0:1]),
-                        ],
-                        dim=0,
-                    )
-                    delta_x = delta_x / beta_next
-                    init_noise = torch.concat(
-                        [self.stream.init_noise[1:], self.stream.init_noise[0:1]], dim=0
-                    )
-                    self.stream.stock_noise = init_noise + delta_x
-            else:
-                denoised_batch = self.stream.scheduler_step_batch(model_pred, x_t_latent, idx)
-            
-            return denoised_batch, model_pred
+            # Use shared CFG processing
+            return self._process_cfg_and_predict(model_pred, x_t_latent, idx)
         
         # Replace the method  
         self.stream.unet_step = patched_unet_step_pytorch
 
     def _prepare_tensorrt_conditioning(self, x_t_latent, t_list) -> Dict[str, List[torch.Tensor]]:
-        """
-        Prepare ControlNet conditioning in TensorRT format
-        
-        Organizes control tensors to match TensorRT engine input expectations.
-        This method would be used for direct TensorRT conditioning dict format if needed.
-        
-        Args:
-            x_t_latent: Latent input tensor
-            t_list: Timestep list
-            
-        Returns:
-            Dictionary with 'input', 'output', 'middle' keys containing organized tensors
-        """
+        """Prepare ControlNet conditioning in TensorRT format"""
         # Get ControlNet conditioning using existing method
         down_block_res_samples, mid_block_res_sample = self._get_controlnet_conditioning(
             x_t_latent, t_list, self.stream.prompt_embeds
@@ -960,60 +757,8 @@ class BaseControlNetPipeline:
             self.stream.unet_step = self._original_unet_step
             self._is_patched = False
 
-    def _convert_to_tensor_early(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor]) -> torch.Tensor:
-        """
-        Convert input to tensor as early as possible to maximize GPU utilization
-        
-        Args:
-            control_image: Input control image
-            
-        Returns:
-            Tensor on GPU
-        """
-        # Load image if path
-        if isinstance(control_image, str):
-            control_image = load_image(control_image)
-        
-        # Convert to tensor early
-        if isinstance(control_image, Image.Image):
-            # Convert PIL to tensor directly
-            import torchvision.transforms as transforms
-            to_tensor = transforms.ToTensor()
-            tensor = to_tensor(control_image)
-            return tensor.to(device=self.device, dtype=self.dtype)
-        
-        elif isinstance(control_image, np.ndarray):
-            # Convert numpy to tensor
-            if control_image.max() <= 1.0:
-                tensor = torch.from_numpy(control_image).float()
-            else:
-                tensor = torch.from_numpy(control_image).float() / 255.0
-            
-            # Handle dimensions
-            if len(tensor.shape) == 3 and tensor.shape[-1] in [1, 3]:
-                tensor = tensor.permute(2, 0, 1)  # HWC to CHW
-            elif len(tensor.shape) == 2:
-                tensor = tensor.unsqueeze(0)  # Add channel dim
-                
-            return tensor.to(device=self.device, dtype=self.dtype)
-        
-        elif isinstance(control_image, torch.Tensor):
-            # Already a tensor, just ensure correct device/dtype
-            return control_image.to(device=self.device, dtype=self.dtype)
-        
-        else:
-            raise ValueError(f"Unsupported control image type: {type(control_image)}")
-
     def _tensor_to_pil_fallback(self, tensor: torch.Tensor) -> Image.Image:
-        """
-        Fallback method to convert tensor to PIL when preprocessor doesn't have tensor_to_pil
-        
-        Args:
-            tensor: Input tensor
-            
-        Returns:
-            PIL Image
-        """
+        """Fallback method to convert tensor to PIL"""
         # Handle batch dimension
         if tensor.dim() == 4:
             tensor = tensor[0]
@@ -1049,46 +794,15 @@ class BaseControlNetPipeline:
         """Forward attribute access to the underlying StreamDiffusion instance"""
         return getattr(self.stream, name)
 
-    # Abstract/hook methods for subclasses to override
-    def _post_process_control_image(self, control_tensor: torch.Tensor) -> torch.Tensor:
-        """
-        Post-process control image tensor (hook for subclasses to add specific handling)
-        
-        Args:
-            control_tensor: Processed control image tensor
-            
-        Returns:
-            Final control image tensor
-        """
-        return control_tensor
-
+    # Hook methods for subclasses to override
     def _get_conditioning_context(self, x_t_latent: torch.Tensor, t_list: torch.Tensor) -> Dict[str, Any]:
-        """
-        Get conditioning context for this pipeline type (hook for subclasses)
-        
-        Args:
-            x_t_latent: Latent input
-            t_list: Timestep list
-            
-        Returns:
-            Dictionary of conditioning context
-        """
+        """Get conditioning context for this pipeline type (hook for subclasses)"""
         return {}
 
     def _get_additional_controlnet_kwargs(self, **kwargs) -> Dict[str, Any]:
-        """
-        Get additional kwargs for ControlNet calls (hook for subclasses)
-        
-        Returns:
-            Dictionary of additional kwargs
-        """
+        """Get additional kwargs for ControlNet calls (hook for subclasses)"""
         return {}
 
     def _get_additional_unet_kwargs(self, **kwargs) -> Dict[str, Any]:
-        """
-        Get additional kwargs for UNet calls (hook for subclasses)
-        
-        Returns:
-            Dictionary of additional kwargs
-        """
+        """Get additional kwargs for UNet calls (hook for subclasses)"""
         return {} 
