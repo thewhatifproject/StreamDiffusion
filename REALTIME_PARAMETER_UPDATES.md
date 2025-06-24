@@ -38,7 +38,7 @@ output = wrapper(input_image)
 ```python
 # Update single parameters as needed
 wrapper.update_stream_params(guidance_scale=2.0)  # Only guidance scale
-wrapper.update_stream_params(num_inference_steps=4)  # Only inference steps
+wrapper.update_stream_params(num_inference_steps=50)  # Only inference steps
 wrapper.update_stream_params(delta=1.2)  # Only delta
 ```
 
