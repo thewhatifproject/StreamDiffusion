@@ -28,7 +28,7 @@ Select a YAML configuration file, and click start.  The demo is built upon the e
 ### Standalone Demo
 
 ```bash
-# Production-ready standalone example
+# Standalone example
 python examples/controlnet/standalone_controlnet_pipeline.py --config "../../configs/sd15_depth_trt_example.yaml" --input-image "../../assets/img2img_example.png"
 ```
 
