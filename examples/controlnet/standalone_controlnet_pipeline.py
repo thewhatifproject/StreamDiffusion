@@ -146,7 +146,7 @@ def run_demo(config_file: str, input_image_path: str, engine_only: bool = False)
     
     try:
         # Load configuration to get actual dimensions
-        
+        from streamdiffusion.controlnet.config import load_config
         config_data = load_config(config_file)
         target_width = config_data.get('width', 512)
         target_height = config_data.get('height', 512)
