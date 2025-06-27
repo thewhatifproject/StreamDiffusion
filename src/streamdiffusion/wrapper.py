@@ -169,8 +169,6 @@ class StreamDiffusionWrapper:
             model_id_or_path=model_id_or_path,
             width=width,
             height=height,
-            width=width,
-            height=height,
             lora_dict=lora_dict,
             lcm_lora_id=lcm_lora_id,
             vae_id=vae_id,
@@ -198,9 +196,6 @@ class StreamDiffusionWrapper:
             )
 
         if enable_similar_image_filter:
-            self.stream.enable_similar_image_filter(
-                similar_image_filter_threshold, similar_image_filter_max_skip_frame
-            )
             self.stream.enable_similar_image_filter(
                 similar_image_filter_threshold, similar_image_filter_max_skip_frame
             )
@@ -378,7 +373,6 @@ class StreamDiffusionWrapper:
         return image
 
     def preprocess_image(self, image: Union[str, Image.Image, torch.Tensor]) -> torch.Tensor:
-    def preprocess_image(self, image: Union[str, Image.Image, torch.Tensor]) -> torch.Tensor:
         """
         Preprocesses the image.
 
@@ -509,8 +503,6 @@ class StreamDiffusionWrapper:
     def _load_model(
         self,
         model_id_or_path: str,
-        width: int,
-        height: int,
         width: int,
         height: int,
         t_index_list: List[int],
@@ -685,8 +677,6 @@ class StreamDiffusionWrapper:
                     min_batch_size: int,
                     width: int,
                     height: int,
-                    width: int,
-                    height: int,
                 ):
                     maybe_path = Path(model_id_or_path)
                     if maybe_path.exists():
@@ -734,8 +724,6 @@ class StreamDiffusionWrapper:
                         else stream.frame_bff_size,
                         width=self.width,
                         height=self.height,
-                        width=self.width,
-                        height=self.height,
                     ),
                     "vae_encoder.engine",
                 )
@@ -749,8 +737,6 @@ class StreamDiffusionWrapper:
                         min_batch_size=self.batch_size
                         if self.mode == "txt2img"
                         else stream.frame_bff_size,
-                        width=self.width,
-                        height=self.height,
                         width=self.width,
                         height=self.height,
                     ),
@@ -778,26 +764,6 @@ class StreamDiffusionWrapper:
                         error_msg += f"\nTo build engines, set build_engines_if_missing=True or run the build script manually."
                         raise RuntimeError(error_msg)
 
-                # Check if all required engines exist
-                missing_engines = []
-                if not os.path.exists(unet_path):
-                    missing_engines.append(f"UNet engine: {unet_path}")
-                if not os.path.exists(vae_decoder_path):
-                    missing_engines.append(f"VAE decoder engine: {vae_decoder_path}")
-                if not os.path.exists(vae_encoder_path):
-                    missing_engines.append(f"VAE encoder engine: {vae_encoder_path}")
-
-                if missing_engines:
-                    if build_engines_if_missing:
-                        print(f"Missing TensorRT engines, building them...")
-                        for engine in missing_engines:
-                            print(f"  - {engine}")
-                    else:
-                        error_msg = f"Required TensorRT engines are missing and build_engines_if_missing=False:\n"
-                        for engine in missing_engines:
-                            error_msg += f"  - {engine}\n"
-                        error_msg += f"\nTo build engines, set build_engines_if_missing=True or run the build script manually."
-                        raise RuntimeError(error_msg)
 
                 if not os.path.exists(unet_path):
                     os.makedirs(os.path.dirname(unet_path), exist_ok=True)
@@ -876,10 +842,6 @@ class StreamDiffusionWrapper:
                             'opt_image_height': self.height,
                             'opt_image_width': self.width,
                         },
-                        engine_build_options={
-                            'opt_image_height': self.height,
-                            'opt_image_width': self.width,
-                        },
                     )
                     delattr(stream.vae, "forward")
 
@@ -904,10 +866,6 @@ class StreamDiffusionWrapper:
                         opt_batch_size=self.batch_size
                         if self.mode == "txt2img"
                         else stream.frame_bff_size,
-                        engine_build_options={
-                            'opt_image_height': self.height,
-                            'opt_image_width': self.width,
-                        },
                         engine_build_options={
                             'opt_image_height': self.height,
                             'opt_image_width': self.width,
@@ -976,11 +934,9 @@ class StreamDiffusionWrapper:
                 StableDiffusionSafetyChecker,
             )
             from transformers.models.clip import CLIPFeatureExtractor
-            from transformers.models.clip import CLIPFeatureExtractor
 
             self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
                 "CompVis/stable-diffusion-safety-checker"
-            ).to(device=pipe.device)
             ).to(device=pipe.device)
             self.feature_extractor = CLIPFeatureExtractor.from_pretrained(
                 "openai/clip-vit-base-patch32"
@@ -1091,8 +1047,6 @@ class StreamDiffusionWrapper:
             raise RuntimeError("add_controlnet: ControlNet support not enabled. Set use_controlnet=True in constructor.")
 
         if self._stream_has_controlnet_methods:
-
-        if hasattr(self.stream, 'add_controlnet'):
             cn_config = {
                 'model_id': model_id,
                 'preprocessor': preprocessor,
