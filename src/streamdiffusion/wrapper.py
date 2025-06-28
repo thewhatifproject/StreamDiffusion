@@ -52,6 +52,7 @@ class StreamDiffusionWrapper:
         use_safety_checker: bool = False,
         engine_dir: Optional[Union[str, Path]] = "engines",
         build_engines_if_missing: bool = True,
+        normalize_weights: bool = True,
         # ControlNet options
         use_controlnet: bool = False,
         controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
@@ -121,6 +122,9 @@ class StreamDiffusionWrapper:
             The seed, by default 2.
         use_safety_checker : bool, optional
             Whether to use safety checker or not, by default False.
+        normalize_weights : bool, optional
+            Whether to normalize weights in prompt and seed blending to sum to 1,
+            by default True. When False, weights > 1 will amplify embeddings/noise.
         use_controlnet : bool, optional
             Whether to enable ControlNet support, by default False.
         controlnet_config : Optional[Union[Dict[str, Any], List[Dict[str, Any]]]], optional
@@ -182,6 +186,7 @@ class StreamDiffusionWrapper:
             seed=seed,
             engine_dir=engine_dir,
             build_engines_if_missing=build_engines_if_missing,
+            normalize_weights=normalize_weights,
             use_controlnet=use_controlnet,
             controlnet_config=controlnet_config,
         )
@@ -272,6 +277,14 @@ class StreamDiffusionWrapper:
             t_index_list=t_index_list,
             seed=seed,
         )
+
+    def set_normalize_weights(self, normalize: bool) -> None:
+        """Set whether to normalize weights in prompt and seed blending operations."""
+        self.stream.set_normalize_weights(normalize)
+        
+    def get_normalize_weights(self) -> bool:
+        """Get the current weight normalization setting."""
+        return self.stream.get_normalize_weights()
 
     def __call__(
         self,
@@ -518,6 +531,7 @@ class StreamDiffusionWrapper:
         seed: int = 2,
         engine_dir: Optional[Union[str, Path]] = "engines",
         build_engines_if_missing: bool = True,
+        normalize_weights: bool = True,
         use_controlnet: bool = False,
         controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
     ) -> StreamDiffusion:
@@ -616,6 +630,7 @@ class StreamDiffusionWrapper:
             frame_buffer_size=self.frame_buffer_size,
             use_denoising_batch=self.use_denoising_batch,
             cfg_type=cfg_type,
+            normalize_weights=normalize_weights,
         )
         if not self.sd_turbo:
             if use_lcm_lora:

@@ -26,6 +26,7 @@ class StreamDiffusion:
         use_denoising_batch: bool = True,
         frame_buffer_size: int = 1,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
+        normalize_weights: bool = True,
     ) -> None:
         self.device = pipe.device
         self.dtype = torch_dtype
@@ -78,7 +79,7 @@ class StreamDiffusion:
         self.inference_time_ema = 0
         
         # Initialize parameter updater
-        self._param_updater = StreamParameterUpdater(self)
+        self._param_updater = StreamParameterUpdater(self, normalize_weights)
 
     def load_lcm_lora(
         self,
@@ -298,6 +299,14 @@ class StreamDiffusion:
             t_index_list=t_index_list,
             seed=seed,
         )
+
+    def set_normalize_weights(self, normalize: bool) -> None:
+        """Set whether to normalize weights in prompt and seed blending operations."""
+        self._param_updater.set_normalize_weights(normalize)
+        
+    def get_normalize_weights(self) -> bool:
+        """Get the current weight normalization setting."""
+        return self._param_updater.get_normalize_weights()
 
 
 

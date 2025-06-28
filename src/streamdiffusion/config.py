@@ -121,6 +121,7 @@ def _extract_wrapper_params(config: Dict[str, Any]) -> Dict[str, Any]:
         'seed': config.get('seed', 2),
         'use_safety_checker': config.get('use_safety_checker', False),
         'engine_dir': config.get('engine_dir', 'engines'),
+        'normalize_weights': config.get('normalize_weights', True),
     }
 
 
@@ -218,6 +219,15 @@ def create_seed_blending_config(
     
     return config
 
+def set_normalize_weights_config(
+    base_config: Dict[str, Any],
+    normalize_weights: bool = True
+) -> Dict[str, Any]:
+    """Create a configuration with normalize_weights setting"""
+    config = base_config.copy()
+    config['normalize_weights'] = normalize_weights
+    return config
+
 def _parse_dtype(dtype_str: str) -> Any:
     """Parse dtype string to torch dtype"""
     import torch
@@ -309,3 +319,9 @@ def _validate_config(config: Dict[str, Any]) -> None:
         interpolation_method = seed_blend_config.get('interpolation_method', 'linear')
         if interpolation_method not in ['linear', 'slerp']:
             raise ValueError("_validate_config: seed blending interpolation_method must be 'linear' or 'slerp'")
+
+    # Validate normalize_weights if present
+    if 'normalize_weights' in config:
+        normalize_weights = config['normalize_weights']
+        if not isinstance(normalize_weights, bool):
+            raise ValueError("_validate_config: 'normalize_weights' must be a boolean value")

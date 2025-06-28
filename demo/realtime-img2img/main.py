@@ -252,6 +252,18 @@ class App:
                 if 'seed_blending' in self.uploaded_controlnet_config:
                     seed_blending_config = self.uploaded_controlnet_config['seed_blending']
             
+            # Get current normalize weights settings
+            normalize_prompt_weights = True  # default
+            normalize_seed_weights = True    # default
+            
+            if self.pipeline:
+                current_normalize = self.pipeline.stream.get_normalize_weights()
+                normalize_prompt_weights = current_normalize
+                normalize_seed_weights = current_normalize
+            elif self.uploaded_controlnet_config:
+                normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
+                normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
+            
             return JSONResponse(
                 {
                     "info": info_schema,
@@ -268,6 +280,8 @@ class App:
                     "seed": current_seed,
                     "prompt_blending": prompt_blending_config,
                     "seed_blending": seed_blending_config,
+                    "normalize_prompt_weights": normalize_prompt_weights,
+                    "normalize_seed_weights": normalize_seed_weights,
                 }
             )
 
@@ -482,6 +496,58 @@ class App:
             except Exception as e:
                 logging.error(f"update_seed: Failed to update seed: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update seed: {str(e)}")
+
+        @self.app.post("/api/update-normalize-prompt-weights")
+        async def update_normalize_prompt_weights(request: Request):
+            """Update normalize weights flag for prompt blending in real-time"""
+            try:
+                data = await request.json()
+                normalize = data.get("normalize")
+                
+                if normalize is None:
+                    raise HTTPException(status_code=400, detail="Missing normalize parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Update normalize weights setting for prompt blending
+                # For now, use the existing single flag (this can be enhanced later with separate flags)
+                self.pipeline.stream.set_normalize_weights(bool(normalize))
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated prompt weight normalization to {normalize}"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_normalize_prompt_weights: Failed to update normalize prompt weights: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update normalize prompt weights: {str(e)}")
+
+        @self.app.post("/api/update-normalize-seed-weights")
+        async def update_normalize_seed_weights(request: Request):
+            """Update normalize weights flag for seed blending in real-time"""
+            try:
+                data = await request.json()
+                normalize = data.get("normalize")
+                
+                if normalize is None:
+                    raise HTTPException(status_code=400, detail="Missing normalize parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Update normalize weights setting for seed blending
+                # For now, use the existing single flag (this can be enhanced later with separate flags)
+                self.pipeline.stream.set_normalize_weights(bool(normalize))
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated seed weight normalization to {normalize}"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_normalize_seed_weights: Failed to update normalize seed weights: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update normalize seed weights: {str(e)}")
 
         @self.app.post("/api/prompt-blending/update")
         async def update_prompt_blending(request: Request):

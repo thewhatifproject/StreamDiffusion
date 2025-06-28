@@ -3,6 +3,7 @@
   import Button from './Button.svelte';
 
   export let seedBlendingConfig: any = null;
+  export let normalizeSeedWeights: boolean = true;
 
   const dispatch = createEventDispatcher();
 
@@ -47,6 +48,25 @@
   function updateSeedInterpolationMethod(value: string) {
     seedInterpolationMethod = value;
     updateBlending();
+  }
+
+  async function updateNormalizeWeights(normalize: boolean) {
+    try {
+      const response = await fetch('/api/update-normalize-seed-weights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ normalize })
+      });
+
+      if (!response.ok) {
+        const result = await response.json();
+        console.error('updateNormalizeWeights: Failed to update normalize seed weights:', result.detail);
+      } else {
+        normalizeSeedWeights = normalize;
+      }
+    } catch (error) {
+      console.error('updateNormalizeWeights: Update failed:', error);
+    }
   }
 
   function normalizeWeights() {
@@ -94,6 +114,22 @@
   </div>
 
   <div class="space-y-3">
+    <!-- Normalize Weights Checkbox -->
+    <div class="bg-gray-50 dark:bg-gray-700 rounded p-3">
+      <label class="flex items-center gap-2 text-sm font-medium">
+        <input
+          type="checkbox"
+          bind:checked={normalizeSeedWeights}
+          on:change={() => updateNormalizeWeights(normalizeSeedWeights)}
+          class="cursor-pointer"
+        />
+        Normalize Seed Weights
+      </label>
+      <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+        When enabled, weights are normalized to sum to 1. When disabled, weights > 1 amplify noise.
+      </p>
+    </div>
+
     <!-- Interpolation Method -->
     <div class="bg-gray-50 dark:bg-gray-700 rounded p-3">
       <label class="block text-sm font-medium mb-2">Interpolation Method</label>

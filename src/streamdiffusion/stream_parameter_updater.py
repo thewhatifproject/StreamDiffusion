@@ -4,8 +4,9 @@ import torch.nn.functional as F
 
 
 class StreamParameterUpdater:
-    def __init__(self, stream_diffusion):
+    def __init__(self, stream_diffusion, normalize_weights: bool = True):
         self.stream = stream_diffusion
+        self.normalize_weights = normalize_weights
         # Prompt blending caches
         self._prompt_cache: Dict[int, Dict] = {}
         self._current_prompt_list: List[Tuple[str, float]] = []
@@ -52,6 +53,15 @@ class StreamParameterUpdater:
         self._current_seed_list.clear()
         self._seed_cache_hits = 0
         self._seed_cache_misses = 0
+
+    def set_normalize_weights(self, normalize: bool) -> None:
+        """Set whether to normalize weights in blending operations."""
+        self.normalize_weights = normalize
+        print(f"set_normalize_weights: Weight normalization set to {normalize}")
+        
+    def get_normalize_weights(self) -> bool:
+        """Get the current weight normalization setting."""
+        return self.normalize_weights
 
     @torch.no_grad()
     def update_stream_params(
@@ -218,7 +228,8 @@ class StreamParameterUpdater:
         
         # Normalize weights
         weights = torch.tensor(weights, device=self.stream.device, dtype=self.stream.dtype)
-        weights = weights / weights.sum()
+        if self.normalize_weights:
+            weights = weights / weights.sum()
         
         # Apply interpolation
         if interpolation_method == "slerp" and len(embeddings) == 2:
@@ -346,7 +357,8 @@ class StreamParameterUpdater:
         
         # Normalize weights
         weights = torch.tensor(weights, device=self.stream.device, dtype=self.stream.dtype)
-        weights = weights / weights.sum()
+        if self.normalize_weights:
+            weights = weights / weights.sum()
         
         # Apply interpolation
         if interpolation_method == "slerp" and len(noise_tensors) == 2:

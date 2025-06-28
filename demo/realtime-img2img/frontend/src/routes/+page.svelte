@@ -25,6 +25,8 @@
   let seed: number = 2;
   let promptBlendingConfig: any = null;
   let seedBlendingConfig: any = null;
+  let normalizePromptWeights: boolean = true;
+  let normalizeSeedWeights: boolean = true;
   let pageContent: string;
   let isImageMode: boolean = false;
   let maxQueueSize: number = 0;
@@ -66,6 +68,8 @@
     seed = settings.seed || 2;
     promptBlendingConfig = settings.prompt_blending || null;
     seedBlendingConfig = settings.seed_blending || null;
+    normalizePromptWeights = settings.normalize_prompt_weights ?? true;
+    normalizeSeedWeights = settings.normalize_seed_weights ?? true;
     isImageMode = pipelineInfo.input_mode.default === PipelineMode.IMAGE;
     maxQueueSize = settings.max_queue_size;
     pageContent = settings.page_content;
@@ -366,7 +370,7 @@
             </button>
             {#if showPromptBlending}
               <div class="p-4 pt-0">
-                <PromptBlendingControl {promptBlendingConfig} />
+                <PromptBlendingControl {promptBlendingConfig} {normalizePromptWeights} />
               </div>
             {/if}
           </div>
@@ -382,7 +386,7 @@
             </button>
             {#if showSeedBlending}
               <div class="p-4 pt-0">
-                <SeedBlendingControl {seedBlendingConfig} />
+                <SeedBlendingControl {seedBlendingConfig} {normalizeSeedWeights} />
               </div>
             {/if}
           </div>
