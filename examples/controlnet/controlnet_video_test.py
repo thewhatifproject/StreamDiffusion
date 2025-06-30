@@ -21,7 +21,7 @@ import json
 from collections import deque
 
 
-def process_video(config_path, input_video, output_dir, resolution=None, engine_only=False):
+def process_video(config_path, input_video, output_dir, engine_only=False):
     """Process video through ControlNet pipeline"""
     print(f"process_video: Loading config from {config_path}")
     
@@ -32,13 +32,11 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
     # Load configuration
     config = load_config(config_path)
     
-    # Set default resolution if not specified
-    if resolution is None:
-        # Default to 512x512 - user can override with --resolution if needed
-        resolution = 512
-
+    # Get width and height from config (with defaults)
+    width = config.get('width', 512)
+    height = config.get('height', 512)
     
-    print(f"process_video: Using resolution: {resolution}x{resolution}")
+    print(f"process_video: Using dimensions: {width}x{height}")
     
     # Create output directory
     output_dir = Path(output_dir)
@@ -53,8 +51,8 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
     shutil.copy2(input_video, input_copy_path)
     print(f"process_video: Copied input video to {input_copy_path}")
     
-    # Create wrapper using the built-in function
-    wrapper = create_wrapper_from_config(config, width=resolution, height=resolution)
+    # Create wrapper using the built-in function (width/height from config)
+    wrapper = create_wrapper_from_config(config)
     
     if engine_only:
         print("Engine-only mode: TensorRT engines have been built (if needed). Exiting.")
@@ -74,7 +72,7 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
     # Setup output video writer
     output_video_path = output_dir / "output_video.mp4"
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_video_path), fourcc, fps, (resolution * 2, resolution))
+    out = cv2.VideoWriter(str(output_video_path), fourcc, fps, (width + width, height))
     
     # Performance tracking
     frame_times = []
@@ -91,7 +89,7 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
         frame_start_time = time.time()
         
         # Resize frame
-        frame_resized = cv2.resize(frame, (resolution, resolution))
+        frame_resized = cv2.resize(frame, (width, height))
         
         # Convert frame to PIL
         frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
@@ -110,7 +108,7 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
         
         # Add labels
         cv2.putText(combined, "Input", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(combined, "Generated", (resolution + 10, 30), 
+        cv2.putText(combined, "Generated", (width + 10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         # Write frame
@@ -146,7 +144,8 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
     metrics = {
         "input_video": str(input_video),
         "config_file": str(config_path),
-        "resolution": f"{resolution}x{resolution}",
+        "width": width,
+        "height": height,
         "total_frames": frame_idx,
         "total_time_seconds": total_time,
         "avg_fps": avg_fps,
@@ -176,7 +175,6 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
     
     return metrics
 
-#TODO get rid of resolution and use width and height
 def main():
     parser = argparse.ArgumentParser(description="ControlNet Video Test Demo")
     
@@ -190,8 +188,6 @@ def main():
                        help="Path to input video file")
     parser.add_argument("--output-dir", type=str, default=None,
                        help="Output directory for results (default: creates timestamped directory)")
-    parser.add_argument("--resolution", type=int, default=None,
-                       help="Video resolution (auto-detects from pipeline type if not specified)")
     parser.add_argument("--engine-only", action="store_true", help="Only build TensorRT engines and exit (no video processing)")
     
     args = parser.parse_args()
@@ -219,7 +215,7 @@ def main():
     print(f"main: Output directory: {args.output_dir}")
     
     try:
-        metrics = process_video(args.config, args.input_video, args.output_dir, args.resolution, engine_only=args.engine_only)
+        metrics = process_video(args.config, args.input_video, args.output_dir, engine_only=args.engine_only)
         if args.engine_only:
             print("main: Engine-only mode completed successfully!")
             return 0
