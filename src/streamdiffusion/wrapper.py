@@ -552,12 +552,11 @@ class StreamDiffusionWrapper:
             The loaded model (potentially wrapped with ControlNet pipeline).
         """
 
-        # Try different loading methods in order
-        from diffusers import StableDiffusionXLPipeline
+        # Try different loading methods in order - prioritize AutoPipeline for safety
+        from diffusers import StableDiffusionXLPipeline, AutoPipelineForText2Image
         
         loading_methods = [
-            (StableDiffusionPipeline.from_pretrained, "SD from_pretrained"),
-            (StableDiffusionXLPipeline.from_pretrained, "SDXL from_pretrained"), 
+            (AutoPipelineForText2Image.from_pretrained, "AutoPipeline from_pretrained"),
             (StableDiffusionPipeline.from_single_file, "SD from_single_file"),
             (StableDiffusionXLPipeline.from_single_file, "SDXL from_single_file")
         ]
