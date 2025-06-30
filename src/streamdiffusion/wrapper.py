@@ -942,7 +942,7 @@ class StreamDiffusionWrapper:
         use_controlnet_tensorrt = (acceleration == "tensorrt")
         
         # Set the detected model type to avoid re-detection from TensorRT engine
-        controlnet_pipeline._detected_model_type = model_type.lower()
+        controlnet_pipeline._detected_model_type = model_type
 
         # Initialize ControlNet engine pool if using TensorRT acceleration
         if use_controlnet_tensorrt:
