@@ -32,13 +32,11 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
     # Load configuration
     config = load_config(config_path)
     
-    # Set default resolution based on pipeline type if not specified
+    # Set default resolution if not specified
     if resolution is None:
-        pipeline_type = config.get('pipeline_type', 'sd1.5')
-        if pipeline_type == 'sdxlturbo':
-            resolution = 1024
-        else:
-            resolution = 512
+        # Default to 512x512 - user can override with --resolution if needed
+        resolution = 512
+
     
     print(f"process_video: Using resolution: {resolution}x{resolution}")
     
@@ -157,7 +155,6 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
         "avg_frame_time_seconds": avg_frame_time,
         "min_frame_time_seconds": min_frame_time,
         "max_frame_time_seconds": max_frame_time,
-        "pipeline_type": config.get('pipeline_type', 'sd1.5'),
         "model_id": config['model_id'],
         "acceleration": config.get('acceleration', 'none'),
         "frame_buffer_size": config.get('frame_buffer_size', 1),
@@ -179,7 +176,7 @@ def process_video(config_path, input_video, output_dir, resolution=None, engine_
     
     return metrics
 
-
+#TODO get rid of resolution and use width and height
 def main():
     parser = argparse.ArgumentParser(description="ControlNet Video Test Demo")
     
