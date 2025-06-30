@@ -337,35 +337,20 @@ class BaseControlNetPipeline:
             # Default fallback
             return "canny"
     
-    #TODO: model detection module
     def _infer_model_type(self) -> str:
-        """Infer base model type from StreamDiffusion configuration"""
-        # Check UNet configuration to determine model type
+        """Infer base model type using provided detection or fallback"""
+        # Use pre-detected model type if available (avoids TensorRT engine issues)
+        if hasattr(self, '_detected_model_type'):
+            return self._detected_model_type
+        
+        # Fallback to detection (only works with original UNet, not TensorRT engine)
+        from ..acceleration.tensorrt.model_detection import detect_model_from_diffusers_unet
+        
         if hasattr(self.stream, 'unet') and hasattr(self.stream.unet, 'config'):
-            unet_config = self.stream.unet.config
-            
-            # Check for SDXL characteristics
-            if hasattr(unet_config, 'projection_class_embeddings_input_dim'):
-                return "sdxl"
-            elif hasattr(unet_config, 'time_cond_proj_dim'):
-                return "sdxl"
-            # Check cross attention dimension for SDXL
-            elif hasattr(unet_config, 'cross_attention_dim') and unet_config.cross_attention_dim == 2048:
-                return "sdxl"
+            model_type = detect_model_from_diffusers_unet(self.stream.unet)
+            return model_type.lower()
         
-        # Check text encoder for SDXL
-        if hasattr(self.stream, 'text_encoder') and hasattr(self.stream.text_encoder, 'config'):
-            text_config = self.stream.text_encoder.config
-            if hasattr(text_config, 'hidden_size') and text_config.hidden_size == 1024:
-                return "sdxl"
-        
-        # Check model type from pipeline
-        if hasattr(self.stream, 'pipe'):
-            pipe_class_name = self.stream.pipe.__class__.__name__
-            if "SDXL" in pipe_class_name or "Turbo" in pipe_class_name:
-                return "sdxl"
-        
-        # Default to SD 1.5
+        # Final fallback to sd15
         return "sd15"
     
     def _prepare_control_image(self, 

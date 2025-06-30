@@ -9,6 +9,7 @@ import torch
 from diffusers import AutoencoderTiny, StableDiffusionPipeline
 from PIL import Image
 
+from .acceleration.tensorrt.model_detection import detect_model_from_diffusers_unet
 from .pipeline import StreamDiffusion
 from .image_utils import postprocess_image
 
@@ -551,35 +552,36 @@ class StreamDiffusionWrapper:
             The loaded model (potentially wrapped with ControlNet pipeline).
         """
 
-        # Determine if this should be an SDXL pipeline from controlnet config
-        pipeline_type = self._get_pipeline_type_from_config(controlnet_config)
-        is_sdxl = pipeline_type == "sdxlturbo"
+        # Try different loading methods in order
+        from diffusers import StableDiffusionXLPipeline
+        
+        loading_methods = [
+            (StableDiffusionPipeline.from_pretrained, "SD from_pretrained"),
+            (StableDiffusionXLPipeline.from_pretrained, "SDXL from_pretrained"), 
+            (StableDiffusionPipeline.from_single_file, "SD from_single_file"),
+            (StableDiffusionXLPipeline.from_single_file, "SDXL from_single_file")
+        ]
 
-        try:  # Load from local directory
-            if is_sdxl:
-                from diffusers import StableDiffusionXLPipeline
-                pipe = StableDiffusionXLPipeline.from_pretrained(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
-            else:
-                pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_pretrained(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
-
-        except ValueError:  # Load from huggingface
-            if is_sdxl:
-                from diffusers import StableDiffusionXLPipeline
-                pipe = StableDiffusionXLPipeline.from_single_file(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
-            else:
-                pipe: StableDiffusionPipeline = StableDiffusionPipeline.from_single_file(
-                    model_id_or_path,
-                ).to(device=self.device, dtype=self.dtype)
-        except Exception:  # No model found
+        pipe = None
+        for method, method_name in loading_methods:
+            try:
+                pipe = method(model_id_or_path).to(device=self.device, dtype=self.dtype)
+                print(f"_load_model: Successfully loaded using {method_name}")
+                break
+            except Exception as e:
+                continue
+        
+        if pipe is None:
             traceback.print_exc()
-            print("Model load has failed. Doesn't exist.")
+            print("_load_model: All loading methods failed. Model doesn't exist or is incompatible.")
             exit()
+
+        # Use existing model detection instead of guessing from config
+        model_type = detect_model_from_diffusers_unet(pipe.unet)
+        is_sdxl = model_type == "SDXL"
+        
+        # Store model info for later use (after TensorRT conversion)
+        self._detected_model_type = model_type
 
         stream = StreamDiffusion(
             pipe=pipe,
@@ -641,7 +643,6 @@ class StreamDiffusionWrapper:
                 )
                 # Add ControlNet detection and support
                 from streamdiffusion.acceleration.tensorrt.model_detection import (
-                    detect_model_from_diffusers_unet,
                     extract_unet_architecture,
                     validate_architecture
                 )
@@ -854,9 +855,9 @@ class StreamDiffusionWrapper:
 
                 # Always set ControlNet support to True for universal TensorRT engines
                 # This allows the engine to accept dummy inputs when no ControlNets are used
-                setattr(stream.unet, 'use_control', True)
+                stream.unet.use_control = True
                 if use_controlnet_trt and unet_arch:
-                    setattr(stream.unet, 'unet_arch', unet_arch)
+                    stream.unet.unet_arch = unet_arch
 
                 stream.vae = AutoencoderKLEngine(
                     vae_encoder_path,
@@ -865,8 +866,8 @@ class StreamDiffusionWrapper:
                     stream.pipe.vae_scale_factor,
                     use_cuda_graph=False,
                 )
-                setattr(stream.vae, "config", vae_config)
-                setattr(stream.vae, "dtype", vae_dtype)
+                stream.vae.config = vae_config
+                stream.vae.dtype = vae_dtype
 
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -913,40 +914,35 @@ class StreamDiffusionWrapper:
 
         # Apply ControlNet patch if needed
         if use_controlnet and controlnet_config:
-            stream = self._apply_controlnet_patch(stream, controlnet_config, acceleration, engine_dir)
+            stream = self._apply_controlnet_patch(stream, controlnet_config, acceleration, engine_dir, self._detected_model_type)
 
         return stream
 
-    def _apply_controlnet_patch(self, stream: StreamDiffusion, controlnet_config: Union[Dict[str, Any], List[Dict[str, Any]]], acceleration: str = "none", engine_dir: str = "engines") -> Any:
+    def _apply_controlnet_patch(self, stream: StreamDiffusion, controlnet_config: Union[Dict[str, Any], List[Dict[str, Any]]], acceleration: str = "none", engine_dir: str = "engines", model_type: str = "SD15") -> Any:
         """
-        Apply ControlNet patch to StreamDiffusion based on pipeline_type
+        Apply ControlNet patch to StreamDiffusion using detected model type
 
         Args:
             stream: Base StreamDiffusion instance
             controlnet_config: ControlNet configuration(s)
+            model_type: Detected model type from original UNet
 
         Returns:
             ControlNet-enabled pipeline (ControlNetPipeline or SDXLTurboControlNetPipeline)
         """
-        # Extract pipeline_type from controlnet_config if it's in there
-        if isinstance(controlnet_config, list):
-            config_dict = controlnet_config[0] if controlnet_config else {}
-        else:
-            config_dict = controlnet_config
-
-        pipeline_type = config_dict.get('pipeline_type', 'sd1.5')
+        # Use provided model type (detected before TensorRT conversion)
+        if model_type == "SDXL":
+            from streamdiffusion.controlnet.controlnet_sdxlturbo_pipeline import SDXLTurboControlNetPipeline
+            controlnet_pipeline = SDXLTurboControlNetPipeline(stream, self.device, self.dtype)
+        else:  # SD15, SD21, etc. all use same ControlNet pipeline
+            from streamdiffusion.controlnet.controlnet_pipeline import ControlNetPipeline
+            controlnet_pipeline = ControlNetPipeline(stream, self.device, self.dtype)
 
         # Check if we should use TensorRT ControlNet acceleration
         use_controlnet_tensorrt = (acceleration == "tensorrt")
-
-        if pipeline_type == "sdxlturbo":
-            from streamdiffusion.controlnet.controlnet_sdxlturbo_pipeline import SDXLTurboControlNetPipeline
-            controlnet_pipeline = SDXLTurboControlNetPipeline(stream, self.device, self.dtype)
-        elif pipeline_type in ["sd1.5", "sdturbo"]:
-            from streamdiffusion.controlnet.controlnet_pipeline import ControlNetPipeline
-            controlnet_pipeline = ControlNetPipeline(stream, self.device, self.dtype)
-        else:
-            raise ValueError(f"Unsupported pipeline_type: {pipeline_type}")
+        
+        # Set the detected model type to avoid re-detection from TensorRT engine
+        controlnet_pipeline._detected_model_type = model_type.lower()
 
         # Initialize ControlNet engine pool if using TensorRT acceleration
         if use_controlnet_tensorrt:
@@ -958,13 +954,13 @@ class StreamDiffusionWrapper:
             controlnet_pool = ControlNetEnginePool(engine_dir, stream_cuda, self.width, self.height)
 
             # Store pool on the pipeline for later use
-            setattr(controlnet_pipeline, '_controlnet_pool', controlnet_pool)
-            setattr(controlnet_pipeline, '_use_tensorrt', True)
+            controlnet_pipeline._controlnet_pool = controlnet_pool
+            controlnet_pipeline._use_tensorrt = True
             # Also set on stream where ControlNet pipeline expects to find it
-            setattr(stream, 'controlnet_engine_pool', controlnet_pool)
+            stream.controlnet_engine_pool = controlnet_pool
             print("Initialized ControlNet TensorRT engine pool")
         else:
-            setattr(controlnet_pipeline, '_use_tensorrt', False)
+            controlnet_pipeline._use_tensorrt = False
             print("Loading ControlNet in PyTorch mode (no TensorRT acceleration)")
 
         # Setup ControlNets from config
@@ -992,8 +988,11 @@ class StreamDiffusionWrapper:
                 }
 
                 controlnet_pipeline.add_controlnet(cn_config)
+                print(f"_apply_controlnet_patch: Successfully added ControlNet: {model_id}")
             except Exception as e:
-                pass
+                print(f"_apply_controlnet_patch: Failed to add ControlNet {model_id}: {e}")
+                import traceback
+                traceback.print_exc()
 
         return controlnet_pipeline
 
@@ -1039,22 +1038,4 @@ class StreamDiffusionWrapper:
             return self.stream.get_last_processed_image(index)
         return None
 
-    def _get_pipeline_type_from_config(self, controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]) -> str:
-        """
-        Extracts the pipeline_type from controlnet_config if it exists.
 
-        Args:
-            controlnet_config: ControlNet configuration(s)
-
-        Returns:
-            pipeline_type: Extracted pipeline_type or 'sd1.5' as default
-        """
-        if controlnet_config is None:
-            return 'sd1.5'  # Default to SD 1.5
-
-        if isinstance(controlnet_config, list):
-            config_dict = controlnet_config[0] if controlnet_config else {}
-        else:
-            config_dict = controlnet_config
-
-        return config_dict.get('pipeline_type', 'sd1.5')  # Default to SD 1.5 if not specified
