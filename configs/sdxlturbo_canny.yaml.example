@@ -1,5 +1,4 @@
 model_id: "stabilityai/sdxl-turbo"
-pipeline_type: "sdxlturbo"
 t_index_list: [32]  # Controls denoising strength - lower values = less denoising, higher = more denoising
 width: 1024
 height: 1024
@@ -18,7 +17,6 @@ use_taesd: true  # Use Tiny AutoEncoder XL for faster decoding
 safety_checker: false
 
 # Advanced parameters
-pipeline_type: "sdxlturbo"
 use_lcm_lora: false  # SD-XL Turbo already has optimizations built-in
 use_tiny_vae: true
 acceleration: "none"  # Can be "tensorrt" for additional speed

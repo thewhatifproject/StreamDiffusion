@@ -74,7 +74,6 @@ class ControlNetEnginePool:
     def get_or_load_engine(self, 
                           model_id: str,
                           pytorch_model: Any,
-                          controlnet_type: str = "canny",
                           model_type: str = "sd15",
                           batch_size: int = 1) -> HybridControlNet:
         """Get or load ControlNet engine with TensorRT/PyTorch fallback"""
@@ -97,7 +96,7 @@ class ControlNetEnginePool:
                 print(f"ControlNetEnginePool.get_or_load_engine: Architecture detection failed: {e}, using provided type: {model_type}")
             
             success = self._compile_controlnet(
-                pytorch_model, controlnet_type, model_type, str(engine_path), batch_size
+                pytorch_model, model_type, str(engine_path), batch_size
             )
             
             compilation_time = time.time() - compilation_start
@@ -122,13 +121,12 @@ class ControlNetEnginePool:
     
     def _compile_controlnet(self, 
                            pytorch_model: Any,
-                           controlnet_type: str, 
                            model_type: str,
                            engine_path: str,
                            batch_size: int) -> bool:
         """Compile ControlNet to TensorRT"""
         try:
-            print(f"ControlNetEnginePool._compile_controlnet: Starting ControlNet compilation: {controlnet_type} ({model_type}) for {self.image_width}x{self.image_height}")
+            print(f"ControlNetEnginePool._compile_controlnet: Starting ControlNet compilation: {model_type} for {self.image_width}x{self.image_height}")
             
             # Use actual image dimensions instead of hardcoded 512x512
             height = self.image_height
@@ -143,7 +141,6 @@ class ControlNetEnginePool:
             
             controlnet_model = create_controlnet_model(
                 model_type=model_type,
-                controlnet_type=controlnet_type,
                 max_batch=batch_size,
                 min_batch_size=1,
                 embedding_dim=embedding_dim

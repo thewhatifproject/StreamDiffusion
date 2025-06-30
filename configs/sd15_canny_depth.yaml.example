@@ -16,7 +16,6 @@ frame_buffer_size: 1
 delta: 0.7
 
 # Advanced parameters
-pipeline_type: "sdturbo"
 use_lcm_lora: false
 use_tiny_vae: true
 acceleration: "tensorrt"

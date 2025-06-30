@@ -686,7 +686,6 @@ class App:
                 "use_denoising_batch": True,
                 "delta": 0.7,
                 "frame_buffer_size": 1,
-                "pipeline_type": "sd1.5",
                 "use_lcm_lora": True,
                 "use_tiny_vae": True,
                 "acceleration": "xformers",

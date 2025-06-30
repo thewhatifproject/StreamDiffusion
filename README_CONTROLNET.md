@@ -141,7 +141,6 @@ config = {
                 'high_threshold': 200
             },
             'enabled': True,
-            'pipeline_type': 'sd1.5',
             'control_guidance_start': 0.0,
             'control_guidance_end': 1.0,
         }
@@ -173,7 +172,6 @@ controlnet_configs = [
             'high_threshold': 200
         },
         'enabled': True,
-        'pipeline_type': 'sd1.5',
         'control_guidance_start': 0.0,
         'control_guidance_end': 1.0,
     }
@@ -226,7 +224,6 @@ output = wrapper(input_image)
 ```yaml
 # Basic SD-Turbo + Canny ControlNet
 model_id: "stabilityai/sd-turbo"
-pipeline_type: "sdturbo"
 mode: "img2img"
 prompt: "a beautiful landscape, highly detailed"
 
@@ -245,7 +242,6 @@ controlnets:
 ```yaml
 # Multiple ControlNets with different strengths
 model_id: "stabilityai/sd-turbo"
-pipeline_type: "sdturbo"
 prompt: "a person in a detailed environment"
 
 controlnets:
@@ -363,7 +359,6 @@ controlnet_config = {
     'preprocessor': str,               # Preprocessor name
     'preprocessor_params': dict,       # Preprocessor-specific parameters
     'enabled': bool,                   # Enable/disable this ControlNet
-    'pipeline_type': str,              # Pipeline type (sd1.5, sdturbo, soon sdxlturbo)
     'control_guidance_start': float,   # Guidance start timestep (0.0-1.0)
     'control_guidance_end': float,     # Guidance end timestep (0.0-1.0)
 }

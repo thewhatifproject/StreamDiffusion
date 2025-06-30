@@ -59,7 +59,6 @@ output_image = wrapper(input_image)
 ```yaml
 # Model and pipeline
 model_id: "stabilityai/sd-turbo"
-pipeline_type: "sdturbo"
 
 # Generation mode
 mode: "txt2img"  # or "img2img"
@@ -118,7 +117,6 @@ controlnets:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model_id` | str | *required* | Model ID or local path |
-| `pipeline_type` | str | `"sd1.5"` | Pipeline type: `"sd1.5"`, `"sdturbo"`, `"sdxlturbo"` |
 | `mode` | str | `"img2img"` | Generation mode: `"img2img"` or `"txt2img"` |
 | `width` | int | `512` | Output image width |
 | `height` | int | `512` | Output image height |

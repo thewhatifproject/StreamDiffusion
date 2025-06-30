@@ -252,19 +252,16 @@ class BaseControlNetPipeline:
         
         # Check if TensorRT engine pool is available
         if hasattr(self.stream, 'controlnet_engine_pool'):
-            # Determine ControlNet type and model type from model_id or config
-            controlnet_type = self._infer_controlnet_type(model_id)
-            model_type = self._infer_model_type()
+            model_type = self._detected_model_type
             
             print(f"Loading ControlNet {model_id} with TensorRT acceleration support")
-            print(f"  ControlNet type: {controlnet_type}, Model type: {model_type}")
+            print(f"  Model type: {model_type}")
             
             # Debug: Check what batch size we're getting
             detected_batch_size = getattr(self.stream, 'trt_unet_batch_size', 1)
             return self.stream.controlnet_engine_pool.get_or_load_engine(
                 model_id=model_id,
                 pytorch_model=pytorch_controlnet,
-                controlnet_type=controlnet_type,
                 model_type=model_type,
                 batch_size=detected_batch_size
             )
@@ -308,65 +305,9 @@ class BaseControlNetPipeline:
         except Exception as e:
             raise ValueError(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
     
-    def _infer_controlnet_type(self, model_id: str) -> str:
-        """Infer ControlNet type from model ID"""
-        model_lower = model_id.lower()
-        
-        # Common ControlNet type mappings
-        if "canny" in model_lower:
-            return "canny"
-        elif "depth" in model_lower:
-            return "depth"
-        elif "openpose" in model_lower or "pose" in model_lower:
-            return "openpose"
-        elif "normal" in model_lower:
-            return "normal"
-        elif "seg" in model_lower:
-            return "seg"
-        elif "lineart" in model_lower:
-            return "lineart"
-        elif "softedge" in model_lower:
-            return "softedge"
-        elif "scribble" in model_lower:
-            return "scribble"
-        elif "mlsd" in model_lower:
-            return "mlsd"
-        elif "qr" in model_lower:
-            return "qr"
-        else:
-            # Default fallback
-            return "canny"
+
     
-    #TODO: model detection module
-    def _infer_model_type(self) -> str:
-        """Infer base model type from StreamDiffusion configuration"""
-        # Check UNet configuration to determine model type
-        if hasattr(self.stream, 'unet') and hasattr(self.stream.unet, 'config'):
-            unet_config = self.stream.unet.config
-            
-            # Check for SDXL characteristics
-            if hasattr(unet_config, 'projection_class_embeddings_input_dim'):
-                return "sdxl"
-            elif hasattr(unet_config, 'time_cond_proj_dim'):
-                return "sdxl"
-            # Check cross attention dimension for SDXL
-            elif hasattr(unet_config, 'cross_attention_dim') and unet_config.cross_attention_dim == 2048:
-                return "sdxl"
-        
-        # Check text encoder for SDXL
-        if hasattr(self.stream, 'text_encoder') and hasattr(self.stream.text_encoder, 'config'):
-            text_config = self.stream.text_encoder.config
-            if hasattr(text_config, 'hidden_size') and text_config.hidden_size == 1024:
-                return "sdxl"
-        
-        # Check model type from pipeline
-        if hasattr(self.stream, 'pipe'):
-            pipe_class_name = self.stream.pipe.__class__.__name__
-            if "SDXL" in pipe_class_name or "Turbo" in pipe_class_name:
-                return "sdxl"
-        
-        # Default to SD 1.5
-        return "sd15"
+
     
     def _prepare_control_image(self, 
                               control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
