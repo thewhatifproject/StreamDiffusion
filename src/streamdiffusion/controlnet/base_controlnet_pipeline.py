@@ -254,7 +254,7 @@ class BaseControlNetPipeline:
         if hasattr(self.stream, 'controlnet_engine_pool'):
             # Determine ControlNet type and model type from model_id or config
             controlnet_type = self._infer_controlnet_type(model_id)
-            model_type = self._infer_model_type()
+            model_type = self._detected_model_type
             
             print(f"Loading ControlNet {model_id} with TensorRT acceleration support")
             print(f"  ControlNet type: {controlnet_type}, Model type: {model_type}")
@@ -337,21 +337,7 @@ class BaseControlNetPipeline:
             # Default fallback
             return "canny"
     
-    def _infer_model_type(self) -> str:
-        """Infer base model type using provided detection or fallback"""
-        # Use pre-detected model type if available (avoids TensorRT engine issues)
-        if hasattr(self, '_detected_model_type'):
-            return self._detected_model_type
-        
-        # Fallback to detection (only works with original UNet, not TensorRT engine)
-        from ..acceleration.tensorrt.model_detection import detect_model_from_diffusers_unet
-        
-        if hasattr(self.stream, 'unet') and hasattr(self.stream.unet, 'config'):
-            model_type = detect_model_from_diffusers_unet(self.stream.unet)
-            return model_type.lower()
-        
-        # Final fallback to sd15
-        return "sd15"
+
     
     def _prepare_control_image(self, 
                               control_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
