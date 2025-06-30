@@ -9,7 +9,6 @@ class ControlNetTRT(BaseModel):
     """TensorRT model definition for ControlNet compilation"""
     
     def __init__(self, 
-                 controlnet_type: str = "canny",
                  fp16: bool = True,
                  device: str = "cuda",
                  max_batch: int = 2,
@@ -25,9 +24,8 @@ class ControlNetTRT(BaseModel):
             embedding_dim=embedding_dim,
             **kwargs
         )
-        self.controlnet_type = controlnet_type
         self.unet_dim = unet_dim
-        self.name = f"ControlNet-{controlnet_type}"
+        self.name = "ControlNet"
         
     def get_input_names(self) -> List[str]:
         """Get input names for ControlNet TensorRT engine"""
@@ -116,7 +114,7 @@ class ControlNetSDXLTRT(ControlNetTRT):
     def __init__(self, **kwargs):
         kwargs.setdefault('embedding_dim', 2048)
         super().__init__(**kwargs)
-        self.name = f"ControlNet-SDXL-{self.controlnet_type}"
+        self.name = "ControlNet-SDXL"
     
     def get_input_names(self) -> List[str]:
         """SDXL ControlNet has additional conditioning inputs"""
@@ -171,10 +169,9 @@ class ControlNetSDXLTRT(ControlNetTRT):
 
 
 def create_controlnet_model(model_type: str = "sd15", 
-                           controlnet_type: str = "canny",
                            **kwargs) -> ControlNetTRT:
     """Factory function to create appropriate ControlNet TensorRT model"""
     if model_type.lower() in ["sdxl", "sdxl-turbo"]:
-        return ControlNetSDXLTRT(controlnet_type=controlnet_type, **kwargs)
+        return ControlNetSDXLTRT(**kwargs)
     else:
-        return ControlNetTRT(controlnet_type=controlnet_type, **kwargs) 
+        return ControlNetTRT(**kwargs) 

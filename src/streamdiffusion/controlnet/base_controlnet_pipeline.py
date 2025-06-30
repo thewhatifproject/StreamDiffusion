@@ -252,19 +252,16 @@ class BaseControlNetPipeline:
         
         # Check if TensorRT engine pool is available
         if hasattr(self.stream, 'controlnet_engine_pool'):
-            # Determine ControlNet type and model type from model_id or config
-            controlnet_type = self._infer_controlnet_type(model_id)
             model_type = self._detected_model_type
             
             print(f"Loading ControlNet {model_id} with TensorRT acceleration support")
-            print(f"  ControlNet type: {controlnet_type}, Model type: {model_type}")
+            print(f"  Model type: {model_type}")
             
             # Debug: Check what batch size we're getting
             detected_batch_size = getattr(self.stream, 'trt_unet_batch_size', 1)
             return self.stream.controlnet_engine_pool.get_or_load_engine(
                 model_id=model_id,
                 pytorch_model=pytorch_controlnet,
-                controlnet_type=controlnet_type,
                 model_type=model_type,
                 batch_size=detected_batch_size
             )
@@ -308,34 +305,7 @@ class BaseControlNetPipeline:
         except Exception as e:
             raise ValueError(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
     
-    def _infer_controlnet_type(self, model_id: str) -> str:
-        """Infer ControlNet type from model ID"""
-        model_lower = model_id.lower()
-        
-        # Common ControlNet type mappings
-        if "canny" in model_lower:
-            return "canny"
-        elif "depth" in model_lower:
-            return "depth"
-        elif "openpose" in model_lower or "pose" in model_lower:
-            return "openpose"
-        elif "normal" in model_lower:
-            return "normal"
-        elif "seg" in model_lower:
-            return "seg"
-        elif "lineart" in model_lower:
-            return "lineart"
-        elif "softedge" in model_lower:
-            return "softedge"
-        elif "scribble" in model_lower:
-            return "scribble"
-        elif "mlsd" in model_lower:
-            return "mlsd"
-        elif "qr" in model_lower:
-            return "qr"
-        else:
-            # Default fallback
-            return "canny"
+
     
 
     
