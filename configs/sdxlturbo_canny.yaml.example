@@ -1,5 +1,4 @@
 model_id: "stabilityai/sdxl-turbo"
-pipeline_type: "sdxlturbo"
 t_index_list: [32]  # Controls denoising strength - lower values = less denoising, higher = more denoising
 width: 1024
 height: 1024
