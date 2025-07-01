@@ -4,10 +4,10 @@ from PIL import Image
 import numpy as np
 
 from ..pipeline import StreamDiffusion
-from .base_controlnet_pipeline import BaseControlNetPipeline
+from .pipelined_pipeline import PipelinedControlNetPipeline
 
-class SDXLTurboControlNetPipeline(BaseControlNetPipeline):
-    """SDXL Turbo ControlNet pipeline using StreamDiffusion"""
+class SDXLTurboControlNetPipeline(PipelinedControlNetPipeline):
+    """SDXL Turbo ControlNet pipeline using StreamDiffusion with inter-frame parallelism"""
     
     def __init__(self, 
                  stream_diffusion: StreamDiffusion,

@@ -4,16 +4,16 @@ from PIL import Image
 import numpy as np
 
 from ..pipeline import StreamDiffusion
-from .base_controlnet_pipeline import BaseControlNetPipeline
+from .pipelined_pipeline import PipelinedControlNetPipeline
 
 
-class ControlNetPipeline(BaseControlNetPipeline):
+class ControlNetPipeline(PipelinedControlNetPipeline):
     """
-    ControlNet-enabled StreamDiffusion pipeline for SD1.5 and SD Turbo
+    ControlNet-enabled StreamDiffusion pipeline for SD1.5 and SD Turbo with inter-frame parallelism
     
     This class extends StreamDiffusion with ControlNet support, allowing for
     conditioning the generation process with multiple ControlNet models.
-    Supports both SD1.5 and SD Turbo models.
+    Supports both SD1.5 and SD Turbo models with pipelined preprocessing.
     """
     
     def __init__(self, 
