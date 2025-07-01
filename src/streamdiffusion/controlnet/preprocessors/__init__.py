@@ -7,6 +7,7 @@ from .standard_lineart import StandardLineartPreprocessor
 from .passthrough import PassthroughPreprocessor
 from .external import ExternalPreprocessor
 from .soft_edge import SoftEdgePreprocessor
+from .hed import HEDPreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
 try:
@@ -47,6 +48,7 @@ _preprocessor_registry = {
     "passthrough": PassthroughPreprocessor,
     "external": ExternalPreprocessor,
     "soft_edge": SoftEdgePreprocessor,
+    "hed": HEDPreprocessor,
 }
 
 # Add TensorRT preprocessors if available
@@ -110,6 +112,7 @@ __all__ = [
     "PassthroughPreprocessor",
     "ExternalPreprocessor",
     "SoftEdgePreprocessor",
+    "HEDPreprocessor",
     "get_preprocessor",
     "register_preprocessor",
     "list_preprocessors",
