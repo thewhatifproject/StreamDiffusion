@@ -86,12 +86,25 @@ class App:
                         await self.conn_manager.disconnect(user_id)
                         return
                     data = await self.conn_manager.receive_json(user_id)
+                    if data is None:
+                        break
                     if data["status"] == "next_frame":
-                        info = Pipeline.Info()
                         params = await self.conn_manager.receive_json(user_id)
                         params = Pipeline.InputParams(**params)
                         params = SimpleNamespace(**params.dict())
-                        if info.input_mode == "image":
+                        
+                        # Check if we need image data based on pipeline
+                        need_image = True
+                        if self.pipeline and hasattr(self.pipeline, 'pipeline_mode'):
+                            # Need image for img2img OR for txt2img with ControlNets
+                            has_controlnets = self.pipeline.use_config and self.pipeline.config and 'controlnets' in self.pipeline.config
+                            need_image = self.pipeline.pipeline_mode == "img2img" or has_controlnets
+                        elif self.uploaded_controlnet_config and 'mode' in self.uploaded_controlnet_config:
+                            # Need image for img2img OR for txt2img with ControlNets
+                            has_controlnets = 'controlnets' in self.uploaded_controlnet_config
+                            need_image = self.uploaded_controlnet_config['mode'] == "img2img" or has_controlnets
+                        
+                        if need_image:
                             image_data = await self.conn_manager.receive_bytes(user_id)
                             if len(image_data) == 0:
                                 await self.conn_manager.send_json(
@@ -99,6 +112,9 @@ class App:
                                 )
                                 continue
                             params.image = bytes_to_pil(image_data)
+                        else:
+                            params.image = None
+                        
                         await self.conn_manager.update_data(user_id, params)
 
             except Exception as e:
@@ -143,10 +159,14 @@ class App:
                         params = await self.conn_manager.get_latest_data(user_id)
                         if params is None:
                             continue
-                        image = self.pipeline.predict(params)
-                        if image is None:
+                        
+                        try:
+                            image = self.pipeline.predict(params)
+                            if image is None:
+                                continue
+                            frame = pil_to_frame(image)
+                        except Exception as e:
                             continue
-                        frame = pil_to_frame(image)
                         
                         # Update FPS counter
                         frame_time = time.time() - frame_start_time
@@ -221,6 +241,29 @@ class App:
                 current_num_inference_steps = self.uploaded_controlnet_config.get('num_inference_steps', 50)
                 current_seed = self.uploaded_controlnet_config.get('seed', 2)
             
+            # Get prompt and seed blending configuration from uploaded config
+            prompt_blending_config = None
+            seed_blending_config = None
+            
+            if self.uploaded_controlnet_config:
+                if 'prompt_blending' in self.uploaded_controlnet_config:
+                    prompt_blending_config = self.uploaded_controlnet_config['prompt_blending']
+                
+                if 'seed_blending' in self.uploaded_controlnet_config:
+                    seed_blending_config = self.uploaded_controlnet_config['seed_blending']
+            
+            # Get current normalize weights settings
+            normalize_prompt_weights = True  # default
+            normalize_seed_weights = True    # default
+            
+            if self.pipeline:
+                current_normalize = self.pipeline.stream.get_normalize_weights()
+                normalize_prompt_weights = current_normalize
+                normalize_seed_weights = current_normalize
+            elif self.uploaded_controlnet_config:
+                normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
+                normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
+            
             return JSONResponse(
                 {
                     "info": info_schema,
@@ -235,6 +278,10 @@ class App:
                     "delta": current_delta,
                     "num_inference_steps": current_num_inference_steps,
                     "seed": current_seed,
+                    "prompt_blending": prompt_blending_config,
+                    "seed_blending": seed_blending_config,
+                    "normalize_prompt_weights": normalize_prompt_weights,
+                    "normalize_seed_weights": normalize_seed_weights,
                 }
             )
 
@@ -449,6 +496,136 @@ class App:
             except Exception as e:
                 logging.error(f"update_seed: Failed to update seed: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update seed: {str(e)}")
+
+        @self.app.post("/api/update-normalize-prompt-weights")
+        async def update_normalize_prompt_weights(request: Request):
+            """Update normalize weights flag for prompt blending in real-time"""
+            try:
+                data = await request.json()
+                normalize = data.get("normalize")
+                
+                if normalize is None:
+                    raise HTTPException(status_code=400, detail="Missing normalize parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Update normalize weights setting for prompt blending
+                # For now, use the existing single flag (this can be enhanced later with separate flags)
+                self.pipeline.stream.set_normalize_weights(bool(normalize))
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated prompt weight normalization to {normalize}"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_normalize_prompt_weights: Failed to update normalize prompt weights: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update normalize prompt weights: {str(e)}")
+
+        @self.app.post("/api/update-normalize-seed-weights")
+        async def update_normalize_seed_weights(request: Request):
+            """Update normalize weights flag for seed blending in real-time"""
+            try:
+                data = await request.json()
+                normalize = data.get("normalize")
+                
+                if normalize is None:
+                    raise HTTPException(status_code=400, detail="Missing normalize parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Update normalize weights setting for seed blending
+                # For now, use the existing single flag (this can be enhanced later with separate flags)
+                self.pipeline.stream.set_normalize_weights(bool(normalize))
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated seed weight normalization to {normalize}"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_normalize_seed_weights: Failed to update normalize seed weights: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update normalize seed weights: {str(e)}")
+
+        @self.app.post("/api/prompt-blending/update")
+        async def update_prompt_blending(request: Request):
+            """Update prompt blending configuration in real-time"""
+            try:
+                data = await request.json()
+                prompt_list = data.get("prompt_list")
+                interpolation_method = data.get("interpolation_method", "slerp")
+                
+                if prompt_list is None:
+                    raise HTTPException(status_code=400, detail="Missing prompt_list parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Validate prompt_list structure
+                if not isinstance(prompt_list, list):
+                    raise HTTPException(status_code=400, detail="prompt_list must be a list")
+                
+                for item in prompt_list:
+                    if not isinstance(item, list) or len(item) != 2:
+                        raise HTTPException(status_code=400, detail="Each prompt_list item must be [prompt, weight]")
+                    if not isinstance(item[0], str) or not isinstance(item[1], (int, float)):
+                        raise HTTPException(status_code=400, detail="Each prompt_list item must be [string, number]")
+                
+                # Update prompt blending using the unified public interface
+                self.pipeline.stream.update_prompt(
+                    prompt=prompt_list,
+                    interpolation_method=interpolation_method
+                )
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated prompt blending with {len(prompt_list)} prompts"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_prompt_blending: Failed to update prompt blending: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update prompt blending: {str(e)}")
+
+        @self.app.post("/api/seed-blending/update")
+        async def update_seed_blending(request: Request):
+            """Update seed blending configuration in real-time"""
+            try:
+                data = await request.json()
+                seed_list = data.get("seed_list")
+                seed_interpolation_method = data.get("seed_interpolation_method", "linear")
+                
+                if seed_list is None:
+                    raise HTTPException(status_code=400, detail="Missing seed_list parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Validate seed_list structure
+                if not isinstance(seed_list, list):
+                    raise HTTPException(status_code=400, detail="seed_list must be a list")
+                
+                for item in seed_list:
+                    if not isinstance(item, list) or len(item) != 2:
+                        raise HTTPException(status_code=400, detail="Each seed_list item must be [seed, weight]")
+                    if not isinstance(item[0], int) or not isinstance(item[1], (int, float)):
+                        raise HTTPException(status_code=400, detail="Each seed_list item must be [int, number]")
+                
+                # Update seed blending using the public interface
+                self.pipeline.stream.update_seed_blending(
+                    seed_list=seed_list,
+                    interpolation_method=seed_interpolation_method
+                )
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated seed blending with {len(seed_list)} seeds"
+                })
+                
+            except Exception as e:
+                logging.error(f"update_seed_blending: Failed to update seed blending: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update seed blending: {str(e)}")
 
         @self.app.get("/api/fps")
         async def get_fps():

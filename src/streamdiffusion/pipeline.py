@@ -26,6 +26,7 @@ class StreamDiffusion:
         use_denoising_batch: bool = True,
         frame_buffer_size: int = 1,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
+        normalize_weights: bool = True,
     ) -> None:
         self.device = pipe.device
         self.dtype = torch_dtype
@@ -78,7 +79,7 @@ class StreamDiffusion:
         self.inference_time_ema = 0
         
         # Initialize parameter updater
-        self._param_updater = StreamParameterUpdater(self)
+        self._param_updater = StreamParameterUpdater(self, normalize_weights)
 
     def load_lcm_lora(
         self,
@@ -274,6 +275,13 @@ class StreamDiffusion:
         delta: Optional[float] = None,
         t_index_list: Optional[List[int]] = None,
         seed: Optional[int] = None,
+        # New prompt blending parameters
+        prompt_list: Optional[List[Tuple[str, float]]] = None,
+        negative_prompt: Optional[str] = None,
+        interpolation_method: Literal["linear", "slerp"] = "slerp",
+        # New seed blending parameters
+        seed_list: Optional[List[Tuple[int, float]]] = None,
+        seed_interpolation_method: Literal["linear", "slerp"] = "linear",
     ) -> None:
         """
         Update streaming parameters efficiently in a single call.
@@ -290,6 +298,16 @@ class StreamDiffusion:
             The t_index_list to use for inference.
         seed : Optional[int]
             The random seed to use for noise generation.
+        prompt_list : Optional[List[Tuple[str, float]]]
+            List of prompts with weights for blending.
+        negative_prompt : Optional[str]
+            The negative prompt to apply to all blended prompts.
+        interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between prompt embeddings.
+        seed_list : Optional[List[Tuple[int, float]]]
+            List of seeds with weights for blending.
+        seed_interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between seed noise tensors.
         """
         self._param_updater.update_stream_params(
             num_inference_steps=num_inference_steps,
@@ -297,7 +315,20 @@ class StreamDiffusion:
             delta=delta,
             t_index_list=t_index_list,
             seed=seed,
+            prompt_list=prompt_list,
+            negative_prompt=negative_prompt,
+            interpolation_method=interpolation_method,
+            seed_list=seed_list,
+            seed_interpolation_method=seed_interpolation_method,
         )
+
+    def set_normalize_weights(self, normalize: bool) -> None:
+        """Set whether to normalize weights in prompt and seed blending operations."""
+        self._param_updater.set_normalize_weights(normalize)
+        
+    def get_normalize_weights(self) -> bool:
+        """Get the current weight normalization setting."""
+        return self._param_updater.get_normalize_weights()
 
 
 
