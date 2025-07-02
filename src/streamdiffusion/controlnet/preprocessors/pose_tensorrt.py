@@ -289,10 +289,7 @@ class YoloNasPoseTensorrtPreprocessor(BasePreprocessor):
         cuda_stream = torch.cuda.current_stream().cuda_stream
         result = self.engine.infer({"input": image_resized_uint8}, cuda_stream)
         
-        predictions = []
-        for key in result.keys():
-            if key != 'input':
-                predictions.append(result[key].cpu().numpy())
+        predictions = [result[key].cpu().numpy() for key in result.keys() if key != 'input']
         
         try:
             pose_image = show_predictions_from_batch_format(predictions)
@@ -300,7 +297,7 @@ class YoloNasPoseTensorrtPreprocessor(BasePreprocessor):
             # Fallback to black image on error
             pose_image = np.zeros((detect_resolution, detect_resolution, 3))
         
-        pose_image = (pose_image.clip(0, 255)).astype(np.uint8)
+        pose_image = pose_image.clip(0, 255).astype(np.uint8)
         pose_image = cv2.cvtColor(pose_image, cv2.COLOR_BGR2RGB)
         
         result = Image.fromarray(pose_image)
@@ -328,14 +325,11 @@ class YoloNasPoseTensorrtPreprocessor(BasePreprocessor):
         cuda_stream = torch.cuda.current_stream().cuda_stream
         result = self.engine.infer({"input": image_resized_uint8}, cuda_stream)
         
-        predictions = []
-        for key in result.keys():
-            if key != 'input':
-                predictions.append(result[key].cpu().numpy())
+        predictions = [result[key].cpu().numpy() for key in result.keys() if key != 'input']
         
         try:
             pose_image = show_predictions_from_batch_format(predictions)
-            pose_image = (pose_image.clip(0, 255)).astype(np.uint8)
+            pose_image = pose_image.clip(0, 255).astype(np.uint8)
             pose_image = cv2.cvtColor(pose_image, cv2.COLOR_BGR2RGB)
             
             pose_tensor = torch.from_numpy(pose_image).float() / 255.0
