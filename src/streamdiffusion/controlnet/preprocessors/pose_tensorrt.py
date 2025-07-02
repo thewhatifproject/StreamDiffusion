@@ -180,20 +180,13 @@ def show_predictions_from_batch_format(predictions):
         return np.zeros((640, 640, 3))
     
     # Add middle joint between shoulders (keypoints 5 and 6)
-    new_pred_joints = []
-    for i in range(pred_joints.shape[0]):
-        try:
-            list1 = pred_joints[i][5]
-            list2 = pred_joints[i][6]
-            middle_list = [(a + b) / 2 for a, b in zip(list1, list2)]
-            middle_data_np = np.array(middle_list)
-            row = np.expand_dims(middle_data_np, axis=0)
-            row = np.concatenate((pred_joints[i], row), axis=0)
-            new_pred_joints.append(row)
-        except Exception as e:
-            raise RuntimeError(f"show_predictions_from_batch_format: Error processing pose {i}: {e}")
-
-    new_pred_joints = np.array(new_pred_joints)
+    try:
+        # Calculate middle joints for all poses at once
+        middle_joints = (pred_joints[:, 5] + pred_joints[:, 6]) / 2
+        # Add middle joint as keypoint 17 to all poses
+        new_pred_joints = np.concatenate([pred_joints, middle_joints[:, np.newaxis]], axis=1)
+    except Exception as e:
+        raise RuntimeError(f"show_predictions_from_batch_format: Error processing poses: {e}")
     
     # Create black background for pose visualization
     black_image = np.zeros((640, 640, 3))
