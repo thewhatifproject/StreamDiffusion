@@ -4,10 +4,10 @@ from PIL import Image
 import numpy as np
 
 from ..pipeline import StreamDiffusion
-from .pipelined_pipeline import PipelinedControlNetPipeline
+from .base_controlnet_pipeline import BaseControlNetPipeline
 
 
-class ControlNetPipeline(PipelinedControlNetPipeline):
+class ControlNetPipeline(BaseControlNetPipeline):
     """
     ControlNet-enabled StreamDiffusion pipeline for SD1.5 and SD Turbo with inter-frame parallelism
     
@@ -30,5 +30,5 @@ class ControlNetPipeline(PipelinedControlNetPipeline):
             dtype: Data type for ControlNet models
             model_type: Type of model being used (e.g., "SD1.5", "SD Turbo")
         """
-        super().__init__(stream_diffusion, device, dtype)
+        super().__init__(stream_diffusion, device, dtype, use_pipelined_processing=True)
         self.model_type = model_type 
