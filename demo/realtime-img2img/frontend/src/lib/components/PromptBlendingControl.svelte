@@ -10,9 +10,15 @@
   let promptList: Array<[string, number]> = [];
   let interpolationMethod = 'slerp';
 
-  $: if (promptBlendingConfig) {
-    promptList = [...(promptBlendingConfig.prompt_list || [])];
+  $: if (promptBlendingConfig && Array.isArray(promptBlendingConfig)) {
+    // Handle normalized config format from backend [[prompt, weight], ...]
+    promptList = [...promptBlendingConfig];
+    console.log('PromptBlendingControl: Updated from config:', promptList);
+  } else if (promptBlendingConfig && promptBlendingConfig.prompt_list) {
+    // Handle legacy format with prompt_list property
+    promptList = [...promptBlendingConfig.prompt_list];
     interpolationMethod = promptBlendingConfig.interpolation_method || 'slerp';
+    console.log('PromptBlendingControl: Updated from legacy config:', promptList);
   } else {
     // Initialize with single prompt if no blending config
     if (promptList.length === 0) {
