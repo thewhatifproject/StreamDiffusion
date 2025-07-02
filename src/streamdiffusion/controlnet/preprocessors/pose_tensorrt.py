@@ -155,7 +155,16 @@ def iterate_over_batch_predictions(predictions, batch_size):
 
         yield image_index, pred_boxes, pred_scores, pred_joints
 
+# precompute edge links define skeleton connections (COCO format)
+edge_links = [[0, 17], [13, 15], [14, 16], [12, 14], [12, 17], [5, 6], 
+                [11, 13], [7, 9], [5, 7], [17, 11], [6, 8], [8, 10], 
+                [1, 3], [0, 1], [0, 2], [2, 4]]
 
+edge_colors = [
+    [255, 0, 0], [255, 85, 0], [170, 255, 0], [85, 255, 0], [85, 255, 0], 
+    [85, 0, 255], [255, 170, 0], [0, 177, 58], [0, 179, 119], [179, 179, 0], 
+    [0, 119, 179], [0, 179, 179], [119, 0, 179], [179, 0, 179], [178, 0, 118], [178, 0, 118]
+]
 def show_predictions_from_batch_format(predictions):
     """Convert predictions to pose visualization format"""
     try:
@@ -164,16 +173,7 @@ def show_predictions_from_batch_format(predictions):
     except Exception as e:
         raise RuntimeError(f"show_predictions_from_batch_format: Error in iterate_over_batch_predictions: {e}")
 
-    # Edge links define skeleton connections (COCO format)
-    edge_links = [[0, 17], [13, 15], [14, 16], [12, 14], [12, 17], [5, 6], 
-                  [11, 13], [7, 9], [5, 7], [17, 11], [6, 8], [8, 10], 
-                  [1, 3], [0, 1], [0, 2], [2, 4]]
-    
-    edge_colors = [
-        [255, 0, 0], [255, 85, 0], [170, 255, 0], [85, 255, 0], [85, 255, 0], 
-        [85, 0, 255], [255, 170, 0], [0, 177, 58], [0, 179, 119], [179, 179, 0], 
-        [0, 119, 179], [0, 179, 179], [119, 0, 179], [179, 0, 179], [178, 0, 118], [178, 0, 118]
-    ]
+
     
     # Handle case where no poses are detected
     if pred_joints.shape[0] == 0:
