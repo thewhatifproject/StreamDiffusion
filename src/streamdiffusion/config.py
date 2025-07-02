@@ -45,8 +45,14 @@ def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
             raise ValueError(f"save_config: Unsupported configuration file format: {config_path.suffix}")
 
 def create_wrapper_from_config(config: Dict[str, Any], **overrides) -> Any:
-    """Create StreamDiffusionWrapper from configuration dictionary"""
-    from streamdiffusion import StreamDiffusionWrapper
+    """Create StreamDiffusionWrapper from configuration dictionary
+    
+    Prompt Interface:
+    - Legacy: Use 'prompt' field for single prompt
+    - New: Use 'prompt_blending' with 'prompt_list' for multiple weighted prompts
+    - If both are provided, 'prompt_blending' takes precedence and 'prompt' is ignored
+    - negative_prompt: Currently a single string (not list) for all prompt types
+    """
     from streamdiffusion import StreamDiffusionWrapper
     import torch
 
@@ -57,33 +63,36 @@ def create_wrapper_from_config(config: Dict[str, Any], **overrides) -> Any:
     prepare_params = _extract_prepare_params(final_config)
 
 
-    # Handle regular prepare or prompt blending prepare
+    # Handle prompt configuration with clear precedence
     if 'prompt_blending' in final_config:
-        # Use prompt blending
+        # Use prompt blending (new interface) - ignore legacy 'prompt' field
         blend_config = final_config['prompt_blending']
         
-        # First prepare with base prompt (will be overridden)
-        base_prepare_params = {k: v for k, v in prepare_params.items() if k not in ['prompt_blending', 'seed_blending']}
-        if base_prepare_params.get('prompt'):
-            wrapper.prepare(**base_prepare_params)
+        # Prepare with prompt blending directly using unified interface
+        prepare_params_with_blending = {k: v for k, v in prepare_params.items() 
+                                       if k not in ['prompt_blending', 'seed_blending']}
+        prepare_params_with_blending['prompt'] = blend_config.get('prompt_list', [])
+        prepare_params_with_blending['interpolation_method'] = blend_config.get('interpolation_method', 'slerp')
         
-        # Apply prompt blending
-        wrapper.stream._param_updater.update_stream_params(
-            prompt_list=blend_config.get('prompt_list', []),
-            negative_prompt=prepare_params.get('negative_prompt', ''),
-            interpolation_method=blend_config.get('interpolation_method', 'slerp')
-        )
+        # Add seed blending if configured
+        if 'seed_blending' in final_config:
+            seed_blend_config = final_config['seed_blending']
+            prepare_params_with_blending['seed_list'] = seed_blend_config.get('seed_list', [])
+            prepare_params_with_blending['seed_interpolation_method'] = seed_blend_config.get('interpolation_method', 'linear')
+        
+        wrapper.prepare(**prepare_params_with_blending)
     elif prepare_params.get('prompt'):
-        # Regular single prompt prepare
-        clean_prepare_params = {k: v for k, v in prepare_params.items() if k not in ['prompt_blending', 'seed_blending']}
+        # Use legacy single prompt interface
+        clean_prepare_params = {k: v for k, v in prepare_params.items() 
+                               if k not in ['prompt_blending', 'seed_blending']}
         wrapper.prepare(**clean_prepare_params)
 
-    # Apply seed blending if configured
-    if 'seed_blending' in final_config:
+    # Apply seed blending if configured and not already handled in prepare
+    if 'seed_blending' in final_config and 'prompt_blending' not in final_config:
         seed_blend_config = final_config['seed_blending']
-        wrapper.stream._param_updater.update_stream_params(
+        wrapper.update_seed_blending(
             seed_list=seed_blend_config.get('seed_list', []),
-            seed_interpolation_method=seed_blend_config.get('interpolation_method', 'linear')
+            interpolation_method=seed_blend_config.get('interpolation_method', 'linear')
         )
 
 

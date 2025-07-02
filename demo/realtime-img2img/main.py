@@ -573,9 +573,9 @@ class App:
                     if not isinstance(item[0], str) or not isinstance(item[1], (int, float)):
                         raise HTTPException(status_code=400, detail="Each prompt_list item must be [string, number]")
                 
-                # Update prompt blending in the pipeline using parameter updater
-                self.pipeline.stream.stream._param_updater.update_stream_params(
-                    prompt_list=prompt_list,
+                # Update prompt blending using the unified public interface
+                self.pipeline.stream.update_prompt(
+                    prompt=prompt_list,
                     interpolation_method=interpolation_method
                 )
                 
@@ -612,10 +612,10 @@ class App:
                     if not isinstance(item[0], int) or not isinstance(item[1], (int, float)):
                         raise HTTPException(status_code=400, detail="Each seed_list item must be [int, number]")
                 
-                # Update seed blending in the pipeline using parameter updater
-                self.pipeline.stream.stream._param_updater.update_stream_params(
+                # Update seed blending using the public interface
+                self.pipeline.stream.update_seed_blending(
                     seed_list=seed_list,
-                    seed_interpolation_method=seed_interpolation_method
+                    interpolation_method=seed_interpolation_method
                 )
                 
                 return JSONResponse({
