@@ -241,6 +241,8 @@ class YoloNasPoseTensorrtPreprocessor(BasePreprocessor):
         )
         
         self._engine = None
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._is_cuda_available = torch.cuda.is_available()
     
     @property
     def engine(self):
@@ -281,7 +283,7 @@ class YoloNasPoseTensorrtPreprocessor(BasePreprocessor):
         
         image_resized_uint8 = (image_resized * 255.0).type(torch.uint8)
         
-        if torch.cuda.is_available():
+        if self._is_cuda_available:
             image_resized_uint8 = image_resized_uint8.cuda()
         
         cuda_stream = torch.cuda.current_stream().cuda_stream
