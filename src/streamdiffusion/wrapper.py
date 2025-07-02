@@ -1372,6 +1372,120 @@ class StreamDiffusionWrapper:
         """Clear all cached prompt embeddings and seed noise tensors."""
         self.stream._param_updater.clear_caches()
 
+    def update_prompt_at_index(
+        self, 
+        index: int, 
+        new_prompt: str,
+        interpolation_method: Literal["linear", "slerp"] = "slerp"
+    ) -> None:
+        """
+        Update a specific prompt by index without changing other prompts.
+        
+        Parameters
+        ----------
+        index : int
+            Index of the prompt to update.
+        new_prompt : str
+            New prompt text.
+        interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between prompt embeddings, by default "slerp".
+        """
+        self.stream._param_updater.update_prompt_at_index(index, new_prompt, interpolation_method)
+    
+    def add_prompt(
+        self, 
+        prompt: str, 
+        weight: float = 1.0,
+        interpolation_method: Literal["linear", "slerp"] = "slerp"
+    ) -> None:
+        """
+        Add a new prompt to the current blending configuration.
+        
+        Parameters
+        ----------
+        prompt : str
+            Prompt text to add.
+        weight : float
+            Weight for the new prompt, by default 1.0.
+        interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between prompt embeddings, by default "slerp".
+        """
+        self.stream._param_updater.add_prompt(prompt, weight, interpolation_method)
+    
+    def remove_prompt_at_index(
+        self, 
+        index: int,
+        interpolation_method: Literal["linear", "slerp"] = "slerp"
+    ) -> None:
+        """
+        Remove a prompt from the current blending configuration by index.
+        
+        Parameters
+        ----------
+        index : int
+            Index of the prompt to remove.
+        interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between remaining prompt embeddings, by default "slerp".
+        """
+        self.stream._param_updater.remove_prompt_at_index(index, interpolation_method)
+    
+    def update_seed_at_index(
+        self, 
+        index: int, 
+        new_seed: int,
+        interpolation_method: Literal["linear", "slerp"] = "linear"
+    ) -> None:
+        """
+        Update a specific seed by index without changing other seeds.
+        
+        Parameters
+        ----------
+        index : int
+            Index of the seed to update.
+        new_seed : int
+            New seed value.
+        interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between seed noise tensors, by default "linear".
+        """
+        self.stream._param_updater.update_seed_at_index(index, new_seed, interpolation_method)
+    
+    def add_seed(
+        self, 
+        seed: int, 
+        weight: float = 1.0,
+        interpolation_method: Literal["linear", "slerp"] = "linear"
+    ) -> None:
+        """
+        Add a new seed to the current blending configuration.
+        
+        Parameters
+        ----------
+        seed : int
+            Seed value to add.
+        weight : float
+            Weight for the new seed, by default 1.0.
+        interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between seed noise tensors, by default "linear".
+        """
+        self.stream._param_updater.add_seed(seed, weight, interpolation_method)
+    
+    def remove_seed_at_index(
+        self, 
+        index: int,
+        interpolation_method: Literal["linear", "slerp"] = "linear"
+    ) -> None:
+        """
+        Remove a seed from the current blending configuration by index.
+        
+        Parameters
+        ----------
+        index : int
+            Index of the seed to remove.
+        interpolation_method : Literal["linear", "slerp"]
+            Method for interpolating between remaining seed noise tensors, by default "linear".
+        """
+        self.stream._param_updater.remove_seed_at_index(index, interpolation_method)
+
 
 
 
