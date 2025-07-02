@@ -158,14 +158,14 @@ class PromptBlendingPipeline:
                     update_params['seed_interpolation_method'] = "linear"
                 
                 # Apply blending with new weights
-                self.wrapper.stream._param_updater.update_stream_params(**update_params)
+                self.wrapper.update_stream_params(**update_params)
                 
                 # Generate image
                 result = self.process_image(image)
                 results.append(result)
             
             # Show cache performance
-            cache_info = self.wrapper.stream._param_updater.get_cache_info()
+            cache_info = self.wrapper.get_cache_info()
             print(f"\nCache performance: {cache_info}")
             
         else:
@@ -290,7 +290,7 @@ def run_prompt_blending_demo(config_file: str, input_image_path: str, engine_onl
         print(f"ffmpeg -r 10 -i {output_dir}/blend_%02d_{timestamp}.png -pix_fmt yuv420p blend_animation.mp4")
         
         # Clean up caches
-        pipeline.wrapper.stream._param_updater.clear_caches()
+        pipeline.wrapper.clear_caches()
         
         return True
         
