@@ -81,7 +81,7 @@ class MediaPipePosePreprocessor(BasePreprocessor):
     """
     
     def __init__(self,
-                 detect_resolution: int = 512,
+                 detect_resolution: int = 256,  # OPTIMIZATION: Reduced from 512 for 4x speedup
                  image_resolution: int = 512,
                  min_detection_confidence: float = 0.5,
                  min_tracking_confidence: float = 0.5,
