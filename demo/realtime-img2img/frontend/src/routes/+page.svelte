@@ -195,6 +195,35 @@
     }
   }
 
+  async function refreshBlendingConfigs() {
+    try {
+      const response = await fetch('/api/blending/current');
+      const data = await response.json();
+      
+      if (data.prompt_blending) {
+        promptBlendingConfig = data.prompt_blending;
+        console.log('refreshBlendingConfigs: Updated prompt blending:', promptBlendingConfig);
+      }
+      
+      if (data.seed_blending) {
+        seedBlendingConfig = data.seed_blending;
+        console.log('refreshBlendingConfigs: Updated seed blending:', seedBlendingConfig);
+      }
+      
+      if (data.normalize_prompt_weights !== undefined) {
+        normalizePromptWeights = data.normalize_prompt_weights;
+      }
+      
+      if (data.normalize_seed_weights !== undefined) {
+        normalizeSeedWeights = data.normalize_seed_weights;
+      }
+      
+      console.log('refreshBlendingConfigs: Blending configs refreshed');
+    } catch (error) {
+      console.error('refreshBlendingConfigs: Failed to refresh blending configs:', error);
+    }
+  }
+
   // Pipeline configuration upload
   let fileInput: HTMLInputElement;
   let uploading = false;
@@ -230,17 +259,54 @@
         uploadStatus = 'Configuration uploaded successfully! Pipeline will load when you start streaming.';
         fileInput.value = '';
         
+        // Update ControlNet info
         if (result.controlnet) {
           controlnetInfo = result.controlnet;
-          if (result.t_index_list) {
-            tIndexList = [...result.t_index_list];
-          }
-          if (result.config_prompt) {
-            pipelineValues.update(values => ({
-              ...values,
-              prompt: result.config_prompt
-            }));
-          }
+        }
+        
+        // Update streaming parameters
+        if (result.t_index_list) {
+          tIndexList = [...result.t_index_list];
+        }
+        if (result.guidance_scale !== undefined) {
+          guidanceScale = result.guidance_scale;
+        }
+        if (result.delta !== undefined) {
+          delta = result.delta;
+        }
+        if (result.num_inference_steps !== undefined) {
+          numInferenceSteps = result.num_inference_steps;
+        }
+        if (result.seed !== undefined) {
+          seed = result.seed;
+        }
+        
+        // Update normalization settings
+        if (result.normalize_prompt_weights !== undefined) {
+          normalizePromptWeights = result.normalize_prompt_weights;
+        }
+        if (result.normalize_seed_weights !== undefined) {
+          normalizeSeedWeights = result.normalize_seed_weights;
+        }
+        
+        // Update blending configurations
+        if (result.prompt_blending) {
+          promptBlendingConfig = result.prompt_blending;
+          showPromptBlending = true;  // Auto-expand if config has blending data
+          console.log('uploadConfig: Updated prompt blending config:', promptBlendingConfig);
+        }
+        if (result.seed_blending) {
+          seedBlendingConfig = result.seed_blending;
+          showSeedBlending = true;  // Auto-expand if config has blending data
+          console.log('uploadConfig: Updated seed blending config:', seedBlendingConfig);
+        }
+        
+        // Update main prompt if config prompt is available
+        if (result.config_prompt) {
+          pipelineValues.update(values => ({
+            ...values,
+            prompt: result.config_prompt
+          }));
         }
         
         setTimeout(() => {

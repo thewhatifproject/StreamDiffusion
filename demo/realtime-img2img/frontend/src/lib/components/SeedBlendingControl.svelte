@@ -10,9 +10,15 @@
   let seedList: Array<[number, number]> = [];
   let seedInterpolationMethod = 'linear';
 
-  $: if (seedBlendingConfig) {
-    seedList = [...(seedBlendingConfig.seed_list || [])];
+  $: if (seedBlendingConfig && Array.isArray(seedBlendingConfig)) {
+    // Handle normalized config format from backend [[seed, weight], ...]
+    seedList = [...seedBlendingConfig];
+    console.log('SeedBlendingControl: Updated from config:', seedList);
+  } else if (seedBlendingConfig && seedBlendingConfig.seed_list) {
+    // Handle legacy format with seed_list property
+    seedList = [...seedBlendingConfig.seed_list];
     seedInterpolationMethod = seedBlendingConfig.seed_interpolation_method || 'linear';
+    console.log('SeedBlendingControl: Updated from legacy config:', seedList);
   } else {
     // Initialize with single seed if no blending config
     if (seedList.length === 0) {
