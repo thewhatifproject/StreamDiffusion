@@ -212,7 +212,6 @@ class StreamDiffusionWrapper:
 
         self.use_denoising_batch = use_denoising_batch
         self.use_safety_checker = use_safety_checker
-        self._stream_has_controlnet_methods = False  # Track if stream has ControlNet methods (for performance)
 
         self.stream: StreamDiffusion = self._load_model(
             model_id_or_path=model_id_or_path,
@@ -290,10 +289,7 @@ class StreamDiffusionWrapper:
         seed_interpolation_method : Literal["linear", "slerp"], optional
             Method for interpolating between seed noise tensors, by default "linear".
         """
-        # Apply ControlNet if configured
-        if self.use_controlnet and hasattr(self, 'controlnet_configs') and self.controlnet_configs:
-            # Apply ControlNet integration
-            self._apply_controlnet_integration()
+        
 
         # Handle both single prompt and prompt blending
         if isinstance(prompt, str):
@@ -1250,35 +1246,37 @@ class StreamDiffusionWrapper:
         if not self.use_controlnet:
             raise RuntimeError("add_controlnet: ControlNet support not enabled. Set use_controlnet=True in constructor.")
 
-        if self._stream_has_controlnet_methods:
-            cn_config = {
-                'model_id': model_id,
-                'preprocessor': preprocessor,
-                'conditioning_scale': conditioning_scale,
-                'enabled': enabled,
-                'preprocessor_params': preprocessor_params or {}
-            }
-            return self.stream.add_controlnet(cn_config, control_image)
-        else:
-            raise RuntimeError("add_controlnet: ControlNet functionality not available on this pipeline")
+        cn_config = {
+            'model_id': model_id,
+            'preprocessor': preprocessor,
+            'conditioning_scale': conditioning_scale,
+            'enabled': enabled,
+            'preprocessor_params': preprocessor_params or {}
+        }
+        return self.stream.add_controlnet(cn_config, control_image)
 
 
 
     def update_control_image_efficient(self, control_image: Union[str, Image.Image, np.ndarray, torch.Tensor], index: Optional[int] = None) -> None:
         """Forward update_control_image_efficient call to the underlying ControlNet pipeline"""
-        if self.use_controlnet and self._stream_has_controlnet_methods:
-            self.stream.update_control_image_efficient(control_image, index=index)
+        if not self.use_controlnet:
+            raise RuntimeError("update_control_image_efficient: ControlNet support not enabled. Set use_controlnet=True in constructor.")
+        
+        self.stream.update_control_image_efficient(control_image, index=index)
 
     def update_controlnet_scale(self, index: int, scale: float) -> None:
         """Forward update_controlnet_scale call to the underlying ControlNet pipeline"""
-        if self.use_controlnet and self._stream_has_controlnet_methods:
-            self.stream.update_controlnet_scale(index, scale)
+        if not self.use_controlnet:
+            raise RuntimeError("update_controlnet_scale: ControlNet support not enabled. Set use_controlnet=True in constructor.")
+        
+        self.stream.update_controlnet_scale(index, scale)
 
     def get_last_processed_image(self, index: int) -> Optional[Image.Image]:
         """Forward get_last_processed_image call to the underlying ControlNet pipeline"""
-        if self.use_controlnet and self._stream_has_controlnet_methods:
-            return self.stream.get_last_processed_image(index)
-        return None
+        if not self.use_controlnet:
+            raise RuntimeError("get_last_processed_image: ControlNet support not enabled. Set use_controlnet=True in constructor.")
+        
+        return self.stream.get_last_processed_image(index)
 
 
     
