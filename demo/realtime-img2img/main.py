@@ -1144,117 +1144,80 @@ class App:
             "/", StaticFiles(directory="./frontend/public", html=True), name="public"
         )
 
-    def _normalize_prompt_config(self, config_data):
+    def _normalize_blending_config(self, config_data, blending_type):
         """
-        Normalize prompt configuration to always return a list format.
-        Priority: prompt_blending.prompt_list > prompt_blending (direct list) > prompt (converted to single-item list) > default
+        Normalize blending configuration to always return a list format.
+        
+        Args:
+            config_data: The configuration dictionary
+            blending_type: Either 'prompt' or 'seed'
+            
+        Returns:
+            List of [value, weight] pairs or None
+            
+        Priority: {type}_blending.{type}_list > {type}_blending (direct list) > {type} (converted to single-item list) > default
         """
         if not config_data:
             return None
             
-        # Check for explicit prompt_blending first (highest priority)
-        if 'prompt_blending' in config_data:
-            prompt_blending = config_data['prompt_blending']
+        # Set up type-specific parameters
+        blending_key = f'{blending_type}_blending'
+        list_key = f'{blending_type}_list'
+        single_key = blending_type
+        value_converter = str if blending_type == 'prompt' else int
+        
+        # Check for explicit blending config first (highest priority)
+        if blending_key in config_data:
+            blending_config = config_data[blending_key]
             
-            # Handle nested structure: prompt_blending.prompt_list
-            if isinstance(prompt_blending, dict) and 'prompt_list' in prompt_blending:
-                prompt_list = prompt_blending['prompt_list']
-                if isinstance(prompt_list, list) and len(prompt_list) > 0:
+            # Handle nested structure: {type}_blending.{type}_list
+            if isinstance(blending_config, dict) and list_key in blending_config:
+                item_list = blending_config[list_key]
+                if isinstance(item_list, list) and len(item_list) > 0:
                     normalized = []
-                    for item in prompt_list:
-                        if isinstance(item, list) and len(item) == 2:
-                            normalized.append([str(item[0]), float(item[1])])
-                        elif isinstance(item, tuple) and len(item) == 2:
-                            normalized.append([str(item[0]), float(item[1])])
+                    for item in item_list:
+                        if isinstance(item, (list, tuple)) and len(item) == 2:
+                            normalized.append([value_converter(item[0]), float(item[1])])
                     if normalized:
                         return normalized
                         
-            # Handle direct list format: prompt_blending: [["text", weight], ...]
-            elif isinstance(prompt_blending, list) and len(prompt_blending) > 0:
+            # Handle direct list format: {type}_blending: [[value, weight], ...]
+            elif isinstance(blending_config, list) and len(blending_config) > 0:
                 normalized = []
-                for item in prompt_blending:
-                    if isinstance(item, list) and len(item) == 2:
-                        normalized.append([str(item[0]), float(item[1])])
-                    elif isinstance(item, tuple) and len(item) == 2:
-                        normalized.append([str(item[0]), float(item[1])])
+                for item in blending_config:
+                    if isinstance(item, (list, tuple)) and len(item) == 2:
+                        normalized.append([value_converter(item[0]), float(item[1])])
                 if normalized:
                     return normalized
         
-        # Fall back to single prompt, convert to list format
-        if 'prompt' in config_data:
-            prompt = config_data['prompt']
-            if isinstance(prompt, str) and prompt.strip():
-                return [[prompt, 1.0]]  # Convert single prompt to list with weight 1.0
-            elif isinstance(prompt, list) and len(prompt) > 0:
-                # Handle case where prompt is already a list (but not in prompt_blending key)
+        # Fall back to single value, convert to list format
+        if single_key in config_data:
+            single_value = config_data[single_key]
+            if blending_type == 'prompt' and isinstance(single_value, str) and single_value.strip():
+                return [[single_value, 1.0]]
+            elif blending_type == 'seed' and isinstance(single_value, int):
+                return [[single_value, 1.0]]
+            elif isinstance(single_value, list) and len(single_value) > 0:
+                # Handle case where value is already a list (but not in blending key)
                 normalized = []
-                for item in prompt:
-                    if isinstance(item, list) and len(item) == 2:
-                        normalized.append([str(item[0]), float(item[1])])
-                    elif isinstance(item, tuple) and len(item) == 2:
-                        normalized.append([str(item[0]), float(item[1])])
-                    elif isinstance(item, str):
-                        normalized.append([item, 1.0])
+                for item in single_value:
+                    if isinstance(item, (list, tuple)) and len(item) == 2:
+                        normalized.append([value_converter(item[0]), float(item[1])])
+                    elif (blending_type == 'prompt' and isinstance(item, str)) or \
+                         (blending_type == 'seed' and isinstance(item, int)):
+                        normalized.append([value_converter(item), 1.0])
                 if normalized:
                     return normalized
         
         return None
 
+    def _normalize_prompt_config(self, config_data):
+        """Normalize prompt configuration - wrapper for backwards compatibility."""
+        return self._normalize_blending_config(config_data, 'prompt')
+
     def _normalize_seed_config(self, config_data):
-        """
-        Normalize seed configuration to always return a list format.
-        Priority: seed_blending.seed_list > seed_blending (direct list) > seed (converted to single-item list) > default
-        """
-        if not config_data:
-            return None
-            
-        # Check for explicit seed_blending first (highest priority)
-        if 'seed_blending' in config_data:
-            seed_blending = config_data['seed_blending']
-            
-            # Handle nested structure: seed_blending.seed_list
-            if isinstance(seed_blending, dict) and 'seed_list' in seed_blending:
-                seed_list = seed_blending['seed_list']
-                if isinstance(seed_list, list) and len(seed_list) > 0:
-                    normalized = []
-                    for item in seed_list:
-                        if isinstance(item, list) and len(item) == 2:
-                            normalized.append([int(item[0]), float(item[1])])
-                        elif isinstance(item, tuple) and len(item) == 2:
-                            normalized.append([int(item[0]), float(item[1])])
-                    if normalized:
-                        return normalized
-                        
-            # Handle direct list format: seed_blending: [[seed, weight], ...]
-            elif isinstance(seed_blending, list) and len(seed_blending) > 0:
-                normalized = []
-                for item in seed_blending:
-                    if isinstance(item, list) and len(item) == 2:
-                        normalized.append([int(item[0]), float(item[1])])
-                    elif isinstance(item, tuple) and len(item) == 2:
-                        normalized.append([int(item[0]), float(item[1])])
-                if normalized:
-                    return normalized
-        
-        # Fall back to single seed, convert to list format
-        if 'seed' in config_data:
-            seed = config_data['seed']
-            if isinstance(seed, int):
-                return [[seed, 1.0]]  # Convert single seed to list with weight 1.0
-            elif isinstance(seed, list) and len(seed) > 0:
-                # Handle case where seed is already a list (but not in seed_blending key)
-                normalized = []
-                for item in seed:
-                    if isinstance(item, list) and len(item) == 2:
-                        normalized.append([int(item[0]), float(item[1])])
-                    elif isinstance(item, tuple) and len(item) == 2:
-                        normalized.append([int(item[0]), float(item[1])])
-                    elif isinstance(item, int):
-                        normalized.append([item, 1.0])
-                if normalized:
-                    return normalized
-        
-        return None
+        """Normalize seed configuration - wrapper for backwards compatibility."""
+        return self._normalize_blending_config(config_data, 'seed')
 
     def _create_default_pipeline(self):
         """Create the default pipeline (standard mode)"""
