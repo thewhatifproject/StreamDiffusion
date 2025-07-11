@@ -4,9 +4,10 @@ import torch.nn.functional as F
 
 
 class StreamParameterUpdater:
-    def __init__(self, stream_diffusion, normalize_weights: bool = True):
+    def __init__(self, stream_diffusion, normalize_prompt_weights: bool = True, normalize_seed_weights: bool = True):
         self.stream = stream_diffusion
-        self.normalize_weights = normalize_weights
+        self.normalize_prompt_weights = normalize_prompt_weights
+        self.normalize_seed_weights = normalize_seed_weights
         # Prompt blending caches
         self._prompt_cache: Dict[int, Dict] = {}
         self._current_prompt_list: List[Tuple[str, float]] = []
@@ -54,14 +55,23 @@ class StreamParameterUpdater:
         self._seed_cache_hits = 0
         self._seed_cache_misses = 0
 
-    def set_normalize_weights(self, normalize: bool) -> None:
-        """Set whether to normalize weights in blending operations."""
-        self.normalize_weights = normalize
-        print(f"set_normalize_weights: Weight normalization set to {normalize}")
+    def set_normalize_prompt_weights(self, normalize: bool) -> None:
+        """Set whether to normalize prompt weights in blending operations."""
+        self.normalize_prompt_weights = normalize
+        print(f"set_normalize_prompt_weights: Prompt weight normalization set to {normalize}")
+
+    def set_normalize_seed_weights(self, normalize: bool) -> None:
+        """Set whether to normalize seed weights in blending operations."""
+        self.normalize_seed_weights = normalize
+        print(f"set_normalize_seed_weights: Seed weight normalization set to {normalize}")
         
-    def get_normalize_weights(self) -> bool:
-        """Get the current weight normalization setting."""
-        return self.normalize_weights
+    def get_normalize_prompt_weights(self) -> bool:
+        """Get the current prompt weight normalization setting."""
+        return self.normalize_prompt_weights
+
+    def get_normalize_seed_weights(self) -> bool:
+        """Get the current seed weight normalization setting."""
+        return self.normalize_seed_weights
 
     @torch.no_grad()
     def update_stream_params(
@@ -228,7 +238,7 @@ class StreamParameterUpdater:
         
         # Normalize weights
         weights = torch.tensor(weights, device=self.stream.device, dtype=self.stream.dtype)
-        if self.normalize_weights:
+        if self.normalize_prompt_weights:
             weights = weights / weights.sum()
         
         # Apply interpolation
@@ -357,7 +367,7 @@ class StreamParameterUpdater:
         
         # Normalize weights
         weights = torch.tensor(weights, device=self.stream.device, dtype=self.stream.dtype)
-        if self.normalize_weights:
+        if self.normalize_seed_weights:
             weights = weights / weights.sum()
         
         # Apply interpolation

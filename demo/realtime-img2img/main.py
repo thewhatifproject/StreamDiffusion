@@ -42,6 +42,9 @@ class App:
         # Store uploaded ControlNet config separately
         self.uploaded_controlnet_config = None
         self.config_needs_reload = False  # Track when pipeline needs recreation
+        
+        # Store uploaded style image before pipeline initialization
+        self.uploaded_style_image = None
         self.init_app()
 
     def init_app(self):
@@ -97,12 +100,31 @@ class App:
                         need_image = True
                         if self.pipeline and hasattr(self.pipeline, 'pipeline_mode'):
                             # Need image for img2img OR for txt2img with ControlNets
-                            has_controlnets = self.pipeline.use_config and self.pipeline.config and 'controlnets' in self.pipeline.config
-                            need_image = self.pipeline.pipeline_mode == "img2img" or has_controlnets
+                            # For IPAdapter: need image for img2img mode, but not for txt2img (style image is separate)
+                            has_controlnets = hasattr(self.pipeline, 'has_controlnet') and self.pipeline.has_controlnet
+                            has_ipadapter = hasattr(self.pipeline, 'has_ipadapter') and self.pipeline.has_ipadapter
+                            
+                            if self.pipeline.pipeline_mode == "img2img":
+                                need_image = True  # Always need image for img2img
+                            elif has_controlnets:
+                                need_image = True  # Need image for txt2img with ControlNets
+                            elif has_ipadapter:
+                                need_image = False  # Don't need input image for txt2img with IPAdapter
+                            else:
+                                need_image = False  # Pure txt2img doesn't need image
                         elif self.uploaded_controlnet_config and 'mode' in self.uploaded_controlnet_config:
                             # Need image for img2img OR for txt2img with ControlNets
                             has_controlnets = 'controlnets' in self.uploaded_controlnet_config
-                            need_image = self.uploaded_controlnet_config['mode'] == "img2img" or has_controlnets
+                            has_ipadapter = 'ipadapters' in self.uploaded_controlnet_config
+                            
+                            if self.uploaded_controlnet_config['mode'] == "img2img":
+                                need_image = True  # Always need image for img2img
+                            elif has_controlnets:
+                                need_image = True  # Need image for txt2img with ControlNets
+                            elif has_ipadapter:
+                                need_image = False  # Don't need input image for txt2img with IPAdapter
+                            else:
+                                need_image = False  # Pure txt2img doesn't need image
                         
                         if need_image:
                             image_data = await self.conn_manager.receive_bytes(user_id)
@@ -132,7 +154,7 @@ class App:
                 # Create pipeline if it doesn't exist yet or needs recreation
                 if self.pipeline is None:
                     if self.uploaded_controlnet_config:
-                        print("stream: Creating pipeline with ControlNet config...")
+                        print("stream: Creating pipeline with config...")
                         self.pipeline = self._create_pipeline_with_config()
                     else:
                         print("stream: Creating default pipeline...")
@@ -140,15 +162,15 @@ class App:
                     print("stream: Pipeline created successfully")
                 
                 # Recreate pipeline if config changed
-                elif self.config_needs_reload or (self.uploaded_controlnet_config and not (self.pipeline.use_config and self.pipeline.config and 'controlnets' in self.pipeline.config)):
+                elif self.config_needs_reload or (self.uploaded_controlnet_config and not (self.pipeline.use_config and self.pipeline.config and ('controlnets' in self.pipeline.config or 'ipadapters' in self.pipeline.config))):
                     if self.config_needs_reload:
-                        print("stream: Recreating pipeline with new ControlNet config...")
+                        print("stream: Recreating pipeline with new config...")
                     else:
-                        print("stream: Upgrading to ControlNet pipeline...")
+                        print("stream: Upgrading to config-based pipeline...")
                     
                     self.pipeline = self._create_pipeline_with_config()
                     self.config_needs_reload = False  # Reset the flag
-                    print("stream: Pipeline recreated with ControlNet support")
+                    print("stream: Pipeline recreated with config support")
 
                 async def generate():
                     while True:
@@ -200,6 +222,9 @@ class App:
             
             # Add ControlNet information 
             controlnet_info = self._get_controlnet_info()
+            
+            # Add IPAdapter information
+            ipadapter_info = self._get_ipadapter_info()
             
             # Include config prompt if available
             config_prompt = None
@@ -273,12 +298,11 @@ class App:
             normalize_seed_weights = True    # default
             
             if self.pipeline:
-                current_normalize = self.pipeline.stream.get_normalize_weights()
-                normalize_prompt_weights = current_normalize
-                normalize_seed_weights = current_normalize
+                normalize_prompt_weights = self.pipeline.stream.get_normalize_prompt_weights()
+                normalize_seed_weights = self.pipeline.stream.get_normalize_seed_weights()
             elif self.uploaded_controlnet_config:
-                normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
-                normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
+                normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_prompt_weights', True)
+                normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_seed_weights', True)
             
             return JSONResponse(
                 {
@@ -287,6 +311,7 @@ class App:
                     "max_queue_size": self.args.max_queue_size,
                     "page_content": page_content if info.page_content else "",
                     "controlnet": controlnet_info,
+                    "ipadapter": ipadapter_info,
                     "config_prompt": config_prompt,
                     "t_index_list": current_t_index_list,
                     "acceleration": current_acceleration,
@@ -347,13 +372,15 @@ class App:
                 config_seed = config_data.get('seed', 2)
                 
                 # Get normalization settings
-                config_normalize_weights = config_data.get('normalize_weights', True)
+                config_normalize_prompt_weights = config_data.get('normalize_prompt_weights', True)
+                config_normalize_seed_weights = config_data.get('normalize_seed_weights', True)
                 
                 return JSONResponse({
                     "status": "success",
-                    "message": "ControlNet configuration uploaded successfully",
+                    "message": "Configuration uploaded successfully",
                     "controls_updated": True,  # Flag for frontend to update controls
                     "controlnet": self._get_controlnet_info(),
+                    "ipadapter": self._get_ipadapter_info(),
                     "config_prompt": config_prompt,
                     "t_index_list": t_index_list,
                     "acceleration": config_acceleration,
@@ -363,8 +390,8 @@ class App:
                     "seed": config_seed,
                     "prompt_blending": normalized_prompt_blending,
                     "seed_blending": normalized_seed_blending,
-                    "normalize_prompt_weights": config_normalize_weights,
-                    "normalize_seed_weights": config_normalize_weights,
+                    "normalize_prompt_weights": config_normalize_prompt_weights,
+                    "normalize_seed_weights": config_normalize_seed_weights,
                 })
                 
             except Exception as e:
@@ -412,12 +439,11 @@ class App:
                 normalize_seed_weights = True
                 
                 if self.pipeline:
-                    current_normalize = self.pipeline.stream.get_normalize_weights()
-                    normalize_prompt_weights = current_normalize
-                    normalize_seed_weights = current_normalize
+                    normalize_prompt_weights = self.pipeline.stream.get_normalize_prompt_weights()
+                    normalize_seed_weights = self.pipeline.stream.get_normalize_seed_weights()
                 elif self.uploaded_controlnet_config:
-                    normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
-                    normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
+                    normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_prompt_weights', True)
+                    normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_seed_weights', True)
                 
                 return JSONResponse({
                     "prompt_blending": prompt_blending_config,
@@ -467,6 +493,123 @@ class App:
             except Exception as e:
                 logging.error(f"update_controlnet_strength: Failed to update strength: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update strength: {str(e)}")
+
+        @self.app.post("/api/ipadapter/upload-style-image")
+        async def upload_style_image(file: UploadFile = File(...)):
+            """Upload a style image for IPAdapter"""
+            try:
+                logging.info(f"upload_style_image: Starting upload for file: {file.filename}")
+                
+                # Validate file type
+                if not file.content_type or not file.content_type.startswith('image/'):
+                    logging.error(f"upload_style_image: Invalid file type: {file.content_type}")
+                    raise HTTPException(status_code=400, detail="File must be an image")
+                
+                logging.info(f"upload_style_image: File type validated: {file.content_type}")
+                
+                # Read file content
+                content = await file.read()
+                logging.info(f"upload_style_image: Read {len(content)} bytes from file")
+                
+                # Save temporarily and load as PIL Image
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+                    tmp.write(content)
+                    tmp_path = tmp.name
+                
+                logging.info(f"upload_style_image: Saved temp file to: {tmp_path}")
+                
+                try:
+                    # Load and validate image
+                    from PIL import Image
+                    style_image = Image.open(tmp_path).convert("RGB")
+                    logging.info(f"upload_style_image: Loaded PIL image with size: {style_image.size}")
+                    
+                    # Store the style image for use when pipeline is created
+                    self.uploaded_style_image = style_image
+                    logging.info("upload_style_image: Stored style image for later use")
+                    
+                    # If pipeline exists and has IPAdapter, update it immediately
+                    pipeline_updated = False
+                    if self.pipeline and getattr(self.pipeline, 'has_ipadapter', False):
+                        logging.info("upload_style_image: Pipeline found with IPAdapter, updating immediately")
+                        success = self.pipeline.update_ipadapter_style_image(style_image)
+                        if success:
+                            pipeline_updated = True
+                            logging.info("upload_style_image: Updated active pipeline successfully")
+                        else:
+                            logging.warning("upload_style_image: Failed to update active pipeline, but image is stored")
+                    else:
+                        logging.info("upload_style_image: No active IPAdapter pipeline, image stored for when pipeline starts")
+                    
+                    # Return success - image is stored and will be used when pipeline starts
+                    message = "Style image uploaded successfully"
+                    if pipeline_updated:
+                        message += " and applied to active pipeline"
+                    else:
+                        message += " and will be applied when pipeline starts"
+                    
+                    return JSONResponse({
+                        "status": "success",
+                        "message": message
+                    })
+                    
+                finally:
+                    # Clean up temp file
+                    try:
+                        os.unlink(tmp_path)
+                        logging.info(f"upload_style_image: Cleaned up temp file: {tmp_path}")
+                    except Exception as cleanup_error:
+                        logging.warning(f"upload_style_image: Failed to cleanup temp file: {cleanup_error}")
+                
+            except HTTPException:
+                # Re-raise HTTP exceptions as-is
+                raise
+            except Exception as e:
+                logging.error(f"upload_style_image: Unexpected error: {type(e).__name__}: {e}")
+                import traceback
+                logging.error(f"upload_style_image: Traceback: {traceback.format_exc()}")
+                raise HTTPException(status_code=500, detail=f"Failed to upload style image: {str(e)}")
+
+        @self.app.post("/api/ipadapter/update-scale")
+        async def update_ipadapter_scale(request: Request):
+            """Update IPAdapter scale/strength in real-time"""
+            try:
+                data = await request.json()
+                scale = data.get("scale")
+                
+                if scale is None:
+                    raise HTTPException(status_code=400, detail="Missing scale parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Check if we're using config mode and have ipadapters configured
+                ipadapter_enabled = (self.pipeline.use_config and 
+                                    self.pipeline.config and 
+                                    'ipadapters' in self.pipeline.config)
+                
+                if not ipadapter_enabled:
+                    raise HTTPException(status_code=400, detail="IPAdapter is not enabled")
+                
+                # Update IPAdapter scale in the pipeline
+                success = self.pipeline.update_ipadapter_scale(float(scale))
+                
+                if success:
+                    return JSONResponse({
+                        "status": "success",
+                        "message": f"Updated IPAdapter scale to {scale}"
+                    })
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to update scale in pipeline")
+                
+            except Exception as e:
+                logging.error(f"update_ipadapter_scale: Failed to update scale: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update scale: {str(e)}")
+
+        @self.app.get("/api/ipadapter/info")
+        async def get_ipadapter_info():
+            """Get current IPAdapter configuration info"""
+            return JSONResponse({"ipadapter": self._get_ipadapter_info()})
 
         @self.app.post("/api/update-t-index-list")
         async def update_t_index_list(request: Request):
@@ -611,8 +754,7 @@ class App:
                     raise HTTPException(status_code=400, detail="Pipeline is not initialized")
                 
                 # Update normalize weights setting for prompt blending
-                # For now, use the existing single flag (this can be enhanced later with separate flags)
-                self.pipeline.stream.set_normalize_weights(bool(normalize))
+                self.pipeline.stream.set_normalize_prompt_weights(bool(normalize))
                 
                 return JSONResponse({
                     "status": "success",
@@ -637,8 +779,7 @@ class App:
                     raise HTTPException(status_code=400, detail="Pipeline is not initialized")
                 
                 # Update normalize weights setting for seed blending
-                # For now, use the existing single flag (this can be enhanced later with separate flags)
-                self.pipeline.stream.set_normalize_weights(bool(normalize))
+                self.pipeline.stream.set_normalize_seed_weights(bool(normalize))
                 
                 return JSONResponse({
                     "status": "success",
@@ -1130,14 +1271,35 @@ class App:
         if controlnet_config_path:
             new_args = self.args._replace(controlnet_config=controlnet_config_path)
         elif self.uploaded_controlnet_config:
-            # Create temporary file from stored config
+            # Create a copy of the config to modify
+            config_data = self.uploaded_controlnet_config.copy()
+            
+            # If we have an uploaded style image, modify the config to use it instead of the file path
+            if self.uploaded_style_image and 'ipadapters' in config_data:
+                print("_create_pipeline_with_config: Modifying config to use uploaded style image")
+                
+                # Save uploaded style image to a temporary file
+                temp_image_path = tempfile.NamedTemporaryFile(mode='wb', suffix='.jpg', delete=False)
+                self.uploaded_style_image.save(temp_image_path.name, format='JPEG')
+                temp_image_path.close()
+                
+                # Update the config to point to our uploaded image
+                for ipadapter_config in config_data['ipadapters']:
+                    original_path = ipadapter_config.get('style_image', 'None')
+                    ipadapter_config['style_image'] = temp_image_path.name
+                    print(f"_create_pipeline_with_config: Changed style_image from '{original_path}' to '{temp_image_path.name}'")
+                
+                # Store the temp image path for cleanup later
+                self.temp_style_image_path = temp_image_path.name
+            
+            # Create temporary file from modified config
             temp_config_path = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
-            yaml.dump(self.uploaded_controlnet_config, temp_config_path, default_flow_style=False)
+            yaml.dump(config_data, temp_config_path, default_flow_style=False)
             temp_config_path.close()
             
             # Merge YAML config values into args, respecting config overrides
             # This ensures that acceleration settings from YAML config override command line args
-            config_acceleration = self.uploaded_controlnet_config.get('acceleration', self.args.acceleration)
+            config_acceleration = config_data.get('acceleration', self.args.acceleration)
             new_args = self.args._replace(
                 controlnet_config=temp_config_path.name,
                 acceleration=config_acceleration
@@ -1147,12 +1309,22 @@ class App:
         
         new_pipeline = Pipeline(new_args, device, torch_dtype)
         
-        # Clean up temp file if created
+        # Clean up temp files if created
         if self.uploaded_controlnet_config and not controlnet_config_path:
             try:
                 os.unlink(new_args.controlnet_config)
             except:
                 pass
+                
+            # Clean up temp style image file if created
+            if hasattr(self, 'temp_style_image_path'):
+                try:
+                    os.unlink(self.temp_style_image_path)
+                    print(f"_create_pipeline_with_config: Cleaned up temp style image: {self.temp_style_image_path}")
+                except:
+                    pass
+                finally:
+                    delattr(self, 'temp_style_image_path')
         
         return new_pipeline
 
@@ -1190,6 +1362,43 @@ class App:
                     })
         
         return controlnet_info
+
+    def _get_ipadapter_info(self):
+        """Get IPAdapter information from uploaded config or active pipeline"""
+        ipadapter_info = {
+            "enabled": False,
+            "config_loaded": False,
+            "style_image_path": None,
+            "scale": 1.0,
+            "model_path": None,
+            "style_image_uploaded": self.uploaded_style_image is not None
+        }
+        
+        # Check uploaded config first
+        if self.uploaded_controlnet_config:
+            if 'ipadapters' in self.uploaded_controlnet_config:
+                ipadapter_info["enabled"] = True
+                ipadapter_info["config_loaded"] = True
+                # Use first IPAdapter config
+                if len(self.uploaded_controlnet_config['ipadapters']) > 0:
+                    ia_config = self.uploaded_controlnet_config['ipadapters'][0]
+                    ipadapter_info["style_image_path"] = ia_config.get('style_image')
+                    ipadapter_info["scale"] = ia_config.get('scale', 1.0)
+                    ipadapter_info["model_path"] = ia_config.get('ipadapter_model_path')
+        # Otherwise check active pipeline
+        elif self.pipeline:
+            # Use the pipeline's method to get current IPAdapter info
+            pipeline_info = self.pipeline.get_ipadapter_info()
+            ipadapter_info.update(pipeline_info)
+            ipadapter_info["config_loaded"] = pipeline_info["enabled"]
+            
+            # Add style_image_path from config if available
+            if self.pipeline.config and 'ipadapters' in self.pipeline.config:
+                if len(self.pipeline.config['ipadapters']) > 0:
+                    ia_config = self.pipeline.config['ipadapters'][0]
+                    ipadapter_info["style_image_path"] = ia_config.get('style_image')
+        
+        return ipadapter_info
 
 
 app = App(config).app

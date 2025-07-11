@@ -68,6 +68,8 @@
         console.error('updateNormalizeWeights: Failed to update normalize prompt weights:', result.detail);
       } else {
         normalizePromptWeights = normalize;
+        // Trigger reblending to immediately apply the new normalization setting
+        updateBlending();
       }
     } catch (error) {
       console.error('updateNormalizeWeights: Update failed:', error);

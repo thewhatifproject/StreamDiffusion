@@ -26,7 +26,8 @@ class StreamDiffusion:
         use_denoising_batch: bool = True,
         frame_buffer_size: int = 1,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
-        normalize_weights: bool = True,
+        normalize_prompt_weights: bool = True,
+        normalize_seed_weights: bool = True,
     ) -> None:
         self.device = pipe.device
         self.dtype = torch_dtype
@@ -79,7 +80,7 @@ class StreamDiffusion:
         self.inference_time_ema = 0
         
         # Initialize parameter updater
-        self._param_updater = StreamParameterUpdater(self, normalize_weights)
+        self._param_updater = StreamParameterUpdater(self, normalize_prompt_weights, normalize_seed_weights)
 
     def load_lcm_lora(
         self,
@@ -322,13 +323,21 @@ class StreamDiffusion:
             seed_interpolation_method=seed_interpolation_method,
         )
 
-    def set_normalize_weights(self, normalize: bool) -> None:
-        """Set whether to normalize weights in prompt and seed blending operations."""
-        self._param_updater.set_normalize_weights(normalize)
+    def set_normalize_prompt_weights(self, normalize: bool) -> None:
+        """Set whether to normalize prompt weights in blending operations."""
+        self._param_updater.set_normalize_prompt_weights(normalize)
+
+    def set_normalize_seed_weights(self, normalize: bool) -> None:
+        """Set whether to normalize seed weights in blending operations."""
+        self._param_updater.set_normalize_seed_weights(normalize)
         
-    def get_normalize_weights(self) -> bool:
-        """Get the current weight normalization setting."""
-        return self._param_updater.get_normalize_weights()
+    def get_normalize_prompt_weights(self) -> bool:
+        """Get the current prompt weight normalization setting."""
+        return self._param_updater.get_normalize_prompt_weights()
+
+    def get_normalize_seed_weights(self) -> bool:
+        """Get the current seed weight normalization setting."""
+        return self._param_updater.get_normalize_seed_weights()
 
 
 
