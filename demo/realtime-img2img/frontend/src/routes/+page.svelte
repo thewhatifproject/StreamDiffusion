@@ -7,8 +7,7 @@
   import Button from '$lib/components/Button.svelte';
   import PipelineOptions from '$lib/components/PipelineOptions.svelte';
   import ControlNetConfig from '$lib/components/ControlNetConfig.svelte';
-  import PromptBlendingControl from '$lib/components/PromptBlendingControl.svelte';
-  import SeedBlendingControl from '$lib/components/SeedBlendingControl.svelte';
+  import BlendingControl from '$lib/components/BlendingControl.svelte';
   import Spinner from '$lib/icons/spinner.svelte';
   import Warning from '$lib/components/Warning.svelte';
   import { lcmLiveStatus, lcmLiveActions, LCMLiveStatus } from '$lib/lcmLive';
@@ -436,7 +435,11 @@
             </button>
             {#if showPromptBlending}
               <div class="p-4 pt-0">
-                <PromptBlendingControl {promptBlendingConfig} {normalizePromptWeights} />
+                <BlendingControl 
+                  blendingType="prompt" 
+                  blendingConfig={promptBlendingConfig} 
+                  normalizeWeights={normalizePromptWeights} 
+                />
               </div>
             {/if}
           </div>
@@ -452,7 +455,11 @@
             </button>
             {#if showSeedBlending}
               <div class="p-4 pt-0">
-                <SeedBlendingControl {seedBlendingConfig} {normalizeSeedWeights} />
+                <BlendingControl 
+                  blendingType="seed" 
+                  blendingConfig={seedBlendingConfig} 
+                  normalizeWeights={normalizeSeedWeights} 
+                />
               </div>
             {/if}
           </div>
