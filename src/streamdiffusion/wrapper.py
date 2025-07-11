@@ -263,7 +263,7 @@ class StreamDiffusionWrapper:
         guidance_scale: float = 1.2,
         delta: float = 1.0,
         # Blending-specific parameters (only used when prompt is a list)
-        interpolation_method: Literal["linear", "slerp"] = "slerp",
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp",
         seed_list: Optional[List[Tuple[int, float]]] = None,
         seed_interpolation_method: Literal["linear", "slerp"] = "linear",
     ) -> None:
@@ -287,7 +287,7 @@ class StreamDiffusionWrapper:
             The guidance scale to use, by default 1.2.
         delta : float, optional
             The delta multiplier of virtual residual noise, by default 1.0.
-        interpolation_method : Literal["linear", "slerp"], optional
+        prompt_interpolation_method : Literal["linear", "slerp"], optional
             Method for interpolating between prompt embeddings (only used for prompt blending), 
             by default "slerp".
         seed_list : Optional[List[Tuple[int, float]]], optional
@@ -334,7 +334,7 @@ class StreamDiffusionWrapper:
             self.stream.update_stream_params(
                 prompt_list=prompt,
                 negative_prompt=negative_prompt,
-                interpolation_method=interpolation_method,
+                prompt_interpolation_method=prompt_interpolation_method,
                 seed_list=seed_list,
                 seed_interpolation_method=seed_interpolation_method,
             )
@@ -346,7 +346,7 @@ class StreamDiffusionWrapper:
         self, 
         prompt: Union[str, List[Tuple[str, float]]], 
         negative_prompt: str = "",
-        interpolation_method: Literal["linear", "slerp"] = "slerp",
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp",
         clear_blending: bool = True,
         warn_about_conflicts: bool = True
     ) -> None:
@@ -364,7 +364,7 @@ class StreamDiffusionWrapper:
             - Blending: [("cat", 0.7), ("dog", 0.3)]
         negative_prompt : str, optional
             The negative prompt (used with blending), by default "".
-        interpolation_method : Literal["linear", "slerp"], optional
+        prompt_interpolation_method : Literal["linear", "slerp"], optional
             Method for interpolating between prompt embeddings (used with blending), by default "slerp".
         clear_blending : bool, optional
             Whether to clear existing blending when switching to single prompt, by default True.
@@ -402,7 +402,7 @@ class StreamDiffusionWrapper:
             self.stream.update_stream_params(
                 prompt_list=prompt,
                 negative_prompt=negative_prompt,
-                interpolation_method=interpolation_method,
+                prompt_interpolation_method=prompt_interpolation_method,
             )
         
         else:
@@ -418,7 +418,7 @@ class StreamDiffusionWrapper:
         # New prompt blending parameters
         prompt_list: Optional[List[Tuple[str, float]]] = None,
         negative_prompt: Optional[str] = None,
-        interpolation_method: Literal["linear", "slerp"] = "slerp",
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp",
         # New seed blending parameters  
         seed_list: Optional[List[Tuple[int, float]]] = None,
         seed_interpolation_method: Literal["linear", "slerp"] = "linear",
@@ -444,7 +444,7 @@ class StreamDiffusionWrapper:
             Example: [("cat", 0.7), ("dog", 0.3)]
         negative_prompt : Optional[str]
             The negative prompt to apply to all blended prompts.
-        interpolation_method : Literal["linear", "slerp"]
+        prompt_interpolation_method : Literal["linear", "slerp"]
             Method for interpolating between prompt embeddings, by default "slerp".
         seed_list : Optional[List[Tuple[int, float]]]
             List of seeds with weights for blending. Each tuple contains (seed_value, weight).
@@ -460,7 +460,7 @@ class StreamDiffusionWrapper:
             seed=seed,
             prompt_list=prompt_list,
             negative_prompt=negative_prompt,
-            interpolation_method=interpolation_method,
+            prompt_interpolation_method=prompt_interpolation_method,
             seed_list=seed_list,
             seed_interpolation_method=seed_interpolation_method,
         )
@@ -1320,7 +1320,7 @@ class StreamDiffusionWrapper:
     def update_prompt_weights(
         self, 
         prompt_weights: List[float],
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """
         Update weights for current prompt list without re-encoding prompts.
@@ -1329,10 +1329,10 @@ class StreamDiffusionWrapper:
         ----------
         prompt_weights : List[float]
             New weights for the current prompt list.
-        interpolation_method : Literal["linear", "slerp"]
+        prompt_interpolation_method : Literal["linear", "slerp"]
             Method for interpolating between prompt embeddings, by default "slerp".
         """
-        self.stream._param_updater.update_prompt_weights(prompt_weights, interpolation_method)
+        self.stream._param_updater.update_prompt_weights(prompt_weights, prompt_interpolation_method)
     
     def update_seed_weights(
         self, 
@@ -1392,7 +1392,7 @@ class StreamDiffusionWrapper:
         self, 
         index: int, 
         new_prompt: str,
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """
         Update a specific prompt by index without changing other prompts.
@@ -1403,16 +1403,16 @@ class StreamDiffusionWrapper:
             Index of the prompt to update.
         new_prompt : str
             New prompt text.
-        interpolation_method : Literal["linear", "slerp"]
+        prompt_interpolation_method : Literal["linear", "slerp"]
             Method for interpolating between prompt embeddings, by default "slerp".
         """
-        self.stream._param_updater.update_prompt_at_index(index, new_prompt, interpolation_method)
+        self.stream._param_updater.update_prompt_at_index(index, new_prompt, prompt_interpolation_method)
     
     def add_prompt(
         self, 
         prompt: str, 
         weight: float = 1.0,
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """
         Add a new prompt to the current blending configuration.
@@ -1423,15 +1423,15 @@ class StreamDiffusionWrapper:
             Prompt text to add.
         weight : float
             Weight for the new prompt, by default 1.0.
-        interpolation_method : Literal["linear", "slerp"]
+        prompt_interpolation_method : Literal["linear", "slerp"]
             Method for interpolating between prompt embeddings, by default "slerp".
         """
-        self.stream._param_updater.add_prompt(prompt, weight, interpolation_method)
+        self.stream._param_updater.add_prompt(prompt, weight, prompt_interpolation_method)
     
     def remove_prompt_at_index(
         self, 
         index: int,
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """
         Remove a prompt from the current blending configuration by index.
@@ -1440,10 +1440,10 @@ class StreamDiffusionWrapper:
         ----------
         index : int
             Index of the prompt to remove.
-        interpolation_method : Literal["linear", "slerp"]
+        prompt_interpolation_method : Literal["linear", "slerp"]
             Method for interpolating between remaining prompt embeddings, by default "slerp".
         """
-        self.stream._param_updater.remove_prompt_at_index(index, interpolation_method)
+        self.stream._param_updater.remove_prompt_at_index(index, prompt_interpolation_method)
     
     def update_seed_at_index(
         self, 

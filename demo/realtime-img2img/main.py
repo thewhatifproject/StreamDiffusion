@@ -796,7 +796,7 @@ class App:
             try:
                 data = await request.json()
                 prompt_list = data.get("prompt_list")
-                interpolation_method = data.get("interpolation_method", "slerp")
+                prompt_interpolation_method = data.get("interpolation_method", "slerp")
                 
                 if prompt_list is None:
                     raise HTTPException(status_code=400, detail="Missing prompt_list parameter")
@@ -820,7 +820,7 @@ class App:
                 # Update prompt blending using the unified public interface
                 self.pipeline.stream.update_prompt(
                     prompt=prompt_tuples,
-                    interpolation_method=interpolation_method
+                    prompt_interpolation_method=prompt_interpolation_method
                 )
                 
                 return JSONResponse({

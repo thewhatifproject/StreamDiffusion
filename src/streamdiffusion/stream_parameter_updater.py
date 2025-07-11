@@ -121,7 +121,7 @@ class StreamParameterUpdater:
         seed: Optional[int] = None,
         prompt_list: Optional[List[Tuple[str, float]]] = None,
         negative_prompt: Optional[str] = None,
-        interpolation_method: Literal["linear", "slerp"] = "slerp",
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp",
         seed_list: Optional[List[Tuple[int, float]]] = None,
         seed_interpolation_method: Literal["linear", "slerp"] = "linear",
     ) -> None:
@@ -151,7 +151,7 @@ class StreamParameterUpdater:
             self._update_blended_prompts(
                 prompt_list=prompt_list,
                 negative_prompt=negative_prompt or self._current_negative_prompt,
-                interpolation_method=interpolation_method
+                prompt_interpolation_method=prompt_interpolation_method
             )
         
         # Handle seed blending if seed_list is provided
@@ -168,7 +168,7 @@ class StreamParameterUpdater:
     def update_prompt_weights(
         self, 
         prompt_weights: List[float],
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """Update weights for current prompt list without re-encoding prompts."""
         if not self._current_prompt_list:
@@ -187,7 +187,7 @@ class StreamParameterUpdater:
         self._current_prompt_list = updated_prompt_list
         
         # Recompute blended embeddings with new weights
-        self._apply_prompt_blending(interpolation_method)
+        self._apply_prompt_blending(prompt_interpolation_method)
 
     @torch.no_grad()
     def update_seed_weights(
@@ -219,7 +219,7 @@ class StreamParameterUpdater:
         self,
         prompt_list: List[Tuple[str, float]],
         negative_prompt: str = "",
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """Update prompt embeddings using multiple weighted prompts."""
         # Store current state
@@ -230,7 +230,7 @@ class StreamParameterUpdater:
         self._cache_prompt_embeddings(prompt_list, negative_prompt)
         
         # Apply blending
-        self._apply_prompt_blending(interpolation_method)
+        self._apply_prompt_blending(prompt_interpolation_method)
 
     def _cache_prompt_embeddings(
         self, 
@@ -257,7 +257,7 @@ class StreamParameterUpdater:
                 # Cache hit
                 self._prompt_cache_stats.record_hit()
 
-    def _apply_prompt_blending(self, interpolation_method: Literal["linear", "slerp"]) -> None:
+    def _apply_prompt_blending(self, prompt_interpolation_method: Literal["linear", "slerp"]) -> None:
         """Apply weighted blending of cached prompt embeddings."""
         if not self._current_prompt_list:
             return
@@ -278,7 +278,7 @@ class StreamParameterUpdater:
         weights = self._normalize_weights(weights, self.normalize_prompt_weights)
         
         # Apply interpolation
-        if interpolation_method == "slerp" and len(embeddings) == 2:
+        if prompt_interpolation_method == "slerp" and len(embeddings) == 2:
             # Spherical linear interpolation for 2 prompts
             embed1, embed2 = embeddings[0], embeddings[1]
             t = weights[1].item()  # Use second weight as interpolation factor
@@ -543,7 +543,7 @@ class StreamParameterUpdater:
         self, 
         index: int, 
         new_prompt: str,
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """Update a single prompt at the specified index without re-encoding others."""
         if not self._validate_index(index, self._current_prompt_list, "update_prompt_at_index"):
@@ -587,7 +587,7 @@ class StreamParameterUpdater:
                 }
         
         # Recompute blended embeddings with updated prompt
-        self._apply_prompt_blending(interpolation_method)
+        self._apply_prompt_blending(prompt_interpolation_method)
 
     @torch.no_grad()
     def get_current_prompts(self) -> List[Tuple[str, float]]:
@@ -599,7 +599,7 @@ class StreamParameterUpdater:
         self, 
         prompt: str, 
         weight: float = 1.0,
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """Add a new prompt to the current list."""
         new_index = len(self._current_prompt_list)
@@ -622,13 +622,13 @@ class StreamParameterUpdater:
         self._prompt_cache_stats.record_miss()
         
         # Recompute blended embeddings
-        self._apply_prompt_blending(interpolation_method)
+        self._apply_prompt_blending(prompt_interpolation_method)
 
     @torch.no_grad()
     def remove_prompt_at_index(
         self, 
         index: int,
-        interpolation_method: Literal["linear", "slerp"] = "slerp"
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp"
     ) -> None:
         """Remove a prompt at the specified index."""
         if not self._validate_index(index, self._current_prompt_list, "remove_prompt_at_index"):
@@ -650,7 +650,7 @@ class StreamParameterUpdater:
         self._prompt_cache = self._reindex_cache(self._prompt_cache, index)
         
         # Recompute blended embeddings
-        self._apply_prompt_blending(interpolation_method)
+        self._apply_prompt_blending(prompt_interpolation_method)
 
     @torch.no_grad()
     def update_seed_at_index(

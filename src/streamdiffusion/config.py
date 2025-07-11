@@ -72,7 +72,7 @@ def create_wrapper_from_config(config: Dict[str, Any], **overrides) -> Any:
         prepare_params_with_blending = {k: v for k, v in prepare_params.items() 
                                        if k not in ['prompt_blending', 'seed_blending']}
         prepare_params_with_blending['prompt'] = blend_config.get('prompt_list', [])
-        prepare_params_with_blending['interpolation_method'] = blend_config.get('interpolation_method', 'slerp')
+        prepare_params_with_blending['prompt_interpolation_method'] = blend_config.get('interpolation_method', 'slerp')
         
         # Add seed blending if configured
         if 'seed_blending' in final_config:
@@ -198,7 +198,7 @@ def _prepare_controlnet_configs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 def create_prompt_blending_config(
     base_config: Dict[str, Any],
     prompt_list: List[Tuple[str, float]],
-    interpolation_method: str = "slerp",
+    prompt_interpolation_method: str = "slerp",
     enable_caching: bool = True
 ) -> Dict[str, Any]:
     """Create a configuration with prompt blending settings"""
@@ -206,7 +206,7 @@ def create_prompt_blending_config(
     
     config['prompt_blending'] = {
         'prompt_list': prompt_list,
-        'interpolation_method': interpolation_method,
+        'interpolation_method': prompt_interpolation_method,
         'enable_caching': enable_caching
     }
     

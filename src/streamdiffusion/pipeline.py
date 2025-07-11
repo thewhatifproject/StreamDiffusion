@@ -279,7 +279,7 @@ class StreamDiffusion:
         # New prompt blending parameters
         prompt_list: Optional[List[Tuple[str, float]]] = None,
         negative_prompt: Optional[str] = None,
-        interpolation_method: Literal["linear", "slerp"] = "slerp",
+        prompt_interpolation_method: Literal["linear", "slerp"] = "slerp",
         # New seed blending parameters
         seed_list: Optional[List[Tuple[int, float]]] = None,
         seed_interpolation_method: Literal["linear", "slerp"] = "linear",
@@ -303,7 +303,7 @@ class StreamDiffusion:
             List of prompts with weights for blending.
         negative_prompt : Optional[str]
             The negative prompt to apply to all blended prompts.
-        interpolation_method : Literal["linear", "slerp"]
+        prompt_interpolation_method : Literal["linear", "slerp"]
             Method for interpolating between prompt embeddings.
         seed_list : Optional[List[Tuple[int, float]]]
             List of seeds with weights for blending.
@@ -318,7 +318,7 @@ class StreamDiffusion:
             seed=seed,
             prompt_list=prompt_list,
             negative_prompt=negative_prompt,
-            interpolation_method=interpolation_method,
+            prompt_interpolation_method=prompt_interpolation_method,
             seed_list=seed_list,
             seed_interpolation_method=seed_interpolation_method,
         )
