@@ -7,7 +7,8 @@
   import Button from '$lib/components/Button.svelte';
   import PipelineOptions from '$lib/components/PipelineOptions.svelte';
   import ControlNetConfig from '$lib/components/ControlNetConfig.svelte';
-  import BlendingControl from '$lib/components/BlendingControl.svelte';
+  import PromptBlendingControl from '$lib/components/PromptBlendingControl.svelte';
+  import SeedBlendingControl from '$lib/components/SeedBlendingControl.svelte';
   import ResolutionPicker from '$lib/components/ResolutionPicker.svelte';
   import Spinner from '$lib/icons/spinner.svelte';
   import Warning from '$lib/components/Warning.svelte';
@@ -56,9 +57,9 @@
   }
   
   // Panel state management
-  let showPromptBlending: boolean = false; // Default to expanded since it's the unified blending interface
-  let showResolutionPicker: boolean = false; // Default to expanded
+  let showPromptBlending: boolean = true; // Default to expanded since it's the primary prompt interface
   let showSeedBlending: boolean = false;
+  let showResolutionPicker: boolean = true; // Default to expanded
   let leftPanelCollapsed: boolean = false;
   let rightPanelCollapsed: boolean = false;
 
@@ -418,6 +419,7 @@
         }
         if (result.seed_blending) {
           seedBlendingConfig = result.seed_blending;
+          showSeedBlending = true;  // Auto-expand if config has blending data
           console.log('uploadConfig: Updated seed blending config:', seedBlendingConfig);
         }
         
@@ -571,22 +573,18 @@
             {/if}
           </div>
 
-          <!-- Unified Blending Control -->
+          <!-- Prompt -->
           <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <button 
               on:click={() => showPromptBlending = !showPromptBlending}
               class="w-full p-4 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg"
             >
-              <h3 class="text-md font-medium">Blending Controls</h3>
+              <h3 class="text-md font-medium">Prompt</h3>
               <span class="text-sm">{showPromptBlending ? '−' : '+'}</span>
             </button>
             {#if showPromptBlending}
               <div class="p-4 pt-0">
-                <BlendingControl
-                  blendingType="prompt" 
-                  blendingConfig={promptBlendingConfig} 
-                  normalizeWeights={normalizePromptWeights} 
-                />
+                <PromptBlendingControl {promptBlendingConfig} {normalizePromptWeights} currentPrompt={$pipelineValues.prompt} />
               </div>
             {/if}
           </div>
@@ -602,11 +600,7 @@
             </button>
             {#if showSeedBlending}
               <div class="p-4 pt-0">
-                <BlendingControl 
-                  blendingType="seed" 
-                  blendingConfig={seedBlendingConfig} 
-                  normalizeWeights={normalizeSeedWeights} 
-                />
+                <SeedBlendingControl {seedBlendingConfig} {normalizeSeedWeights} />
               </div>
             {/if}
           </div>
