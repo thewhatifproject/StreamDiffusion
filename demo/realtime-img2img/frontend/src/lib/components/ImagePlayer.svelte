@@ -1,14 +1,38 @@
 <script lang="ts">
   import { lcmLiveStatus, LCMLiveStatus, streamId } from '$lib/lcmLive';
-  import { getPipelineValues } from '$lib/store';
+  import { getPipelineValues, pipelineValues } from '$lib/store';
+  import { parseResolution, type ResolutionInfo } from '$lib/utils';
 
   import Button from '$lib/components/Button.svelte';
   import Floppy from '$lib/icons/floppy.svelte';
   import { snapImage } from '$lib/utils';
 
+  export let currentResolution: ResolutionInfo | undefined = undefined;
+
   $: isLCMRunning = $lcmLiveStatus !== LCMLiveStatus.DISCONNECTED;
   $: console.log('ImagePlayer: isLCMRunning', isLCMRunning);
   let imageEl: HTMLImageElement;
+  let localResolution: ResolutionInfo;
+
+  // Reactive resolution parsing
+  $: {
+    if (currentResolution) {
+      // Use prop if provided
+      localResolution = currentResolution;
+    } else if ($pipelineValues.resolution) {
+      // Fallback to pipeline values
+      localResolution = parseResolution($pipelineValues.resolution);
+    } else {
+      // Default fallback
+      localResolution = {
+        width: 512,
+        height: 512,
+        aspectRatio: 1,
+        aspectRatioString: "1:1"
+      };
+    }
+  }
+  
   async function takeSnapshot() {
     if (isLCMRunning) {
       await snapImage(imageEl, {
@@ -21,7 +45,10 @@
   }
 </script>
 
-<div class="relative w-full h-full flex items-center justify-center overflow-hidden rounded-lg border border-slate-300 bg-gray-50 dark:bg-gray-900">
+<div 
+  class="relative w-full h-full flex items-center justify-center overflow-hidden rounded-lg border border-slate-300 bg-gray-50 dark:bg-gray-900"
+  style="aspect-ratio: {localResolution?.aspectRatio || 1}"
+>
   <!-- svelte-ignore a11y-missing-attribute -->
   {#if isLCMRunning && $streamId}
     <img
@@ -30,6 +57,14 @@
       src={'/api/stream/' + $streamId}
       alt="Generated output stream"
     />
+    
+    <!-- Resolution indicator -->
+    {#if localResolution}
+      <div class="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
+        Output: {localResolution.width}×{localResolution.height} ({localResolution.aspectRatioString})
+      </div>
+    {/if}
+    
     <div class="absolute bottom-2 right-2">
       <Button
         on:click={takeSnapshot}
@@ -51,6 +86,11 @@
       </div>
       <p class="text-lg font-medium">Generated output will appear here</p>
       <p class="text-sm opacity-75">Click "Start Stream" to begin</p>
+      {#if localResolution}
+        <div class="text-xs mt-2 opacity-50">
+          Ready for {localResolution.width}×{localResolution.height} ({localResolution.aspectRatioString})
+        </div>
+      {/if}
     </div>
   {/if}
 </div>

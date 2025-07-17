@@ -64,9 +64,17 @@ class UNet2DConditionModelEngine:
             # Check if this engine was compiled with ControlNet support but no conditioning is provided
             # In that case, we need to provide dummy zero tensors for the expected ControlNet inputs
             if self.use_control:
-                # Generate dummy inputs once and cache them
-                if self._cached_dummy_controlnet_inputs is None:
+                # Check if we need to regenerate dummy inputs due to dimension change
+                current_latent_height = latent_model_input.shape[2]
+                current_latent_width = latent_model_input.shape[3]
+                
+                # Check if cached dummy inputs exist and have correct dimensions
+                if (self._cached_dummy_controlnet_inputs is None or 
+                    not hasattr(self, '_cached_latent_dims') or
+                    self._cached_latent_dims != (current_latent_height, current_latent_width)):
+                    
                     self._cached_dummy_controlnet_inputs = self._generate_dummy_controlnet_specs(latent_model_input)
+                    self._cached_latent_dims = (current_latent_height, current_latent_width)
                 
                 # Use cached dummy inputs
                 self._add_cached_dummy_inputs(self._cached_dummy_controlnet_inputs, latent_model_input, shape_dict, input_dict)
@@ -129,6 +137,7 @@ class UNet2DConditionModelEngine:
             shape_dict: Shape dictionary to update
             input_dict: Input dictionary to update
         """
+        
         # Add down block residuals as input controls
         if down_block_additional_residuals is not None:
             # Map directly to engine input names (no reversal needed for our approach)

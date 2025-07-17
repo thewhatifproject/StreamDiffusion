@@ -48,18 +48,40 @@ class Pipeline:
         page_content: str = page_content
 
     class InputParams(BaseModel):
-        prompt: str = Field(
-            default_prompt,
-            title="Prompt",
-            field="textarea",
-            id="prompt",
-        )
         # negative_prompt: str = Field(
         #     default_negative_prompt,
         #     title="Negative Prompt",
         #     field="textarea",
         #     id="negative_prompt",
         # )
+        resolution: str = Field(
+            "512x512 (1:1)",
+            title="Resolution",
+            field="select",
+            id="resolution",
+            values=[
+                # --- Square (1:1) ---
+                "384x384 (1:1)",
+                "512x512 (1:1)",
+                "640x640 (1:1)",
+                "704x704 (1:1)",
+                "768x768 (1:1)",
+                "896x896 (1:1)",
+                "1024x1024 (1:1)",
+                # --- Portrait ---
+                "384x512 (3:4)",
+                "512x768 (2:3)",
+                "640x896 (5:7)",
+                "768x1024 (3:4)",
+                "576x1024 (9:16)",
+                # --- Landscape ---
+                "512x384 (4:3)",
+                "768x512 (3:2)",
+                "896x640 (7:5)",
+                "1024x768 (4:3)",
+                "1024x576 (16:9)"
+            ]
+        )
         width: int = Field(
             512, min=2, max=15, title="Width", disabled=True, hide=True, id="width"
         )
@@ -68,7 +90,7 @@ class Pipeline:
         )
 
 #TODO update naming convention to reflect the controlnet agnostic nature of the config system (pipeline_config instead of controlnet_config for example)
-    def __init__(self, args: Args, device: torch.device, torch_dtype: torch.dtype):
+    def __init__(self, args: Args, device: torch.device, torch_dtype: torch.dtype, width: int = 512, height: int = 512):
         # Load configuration if provided
         self.config = None
         self.use_config = False
@@ -118,15 +140,18 @@ class Pipeline:
             if args.taesd and 'use_tiny_vae' not in self.config:
                 overrides['use_tiny_vae'] = args.taesd
 
-            # Update params with config values
-            params.width = self.config.get('width', 512)
-            params.height = self.config.get('height', 512)
+            # Use passed width/height, falling back to config values, then defaults
+            params.width = width if width != 512 else self.config.get('width', 512)
+            params.height = height if height != 512 else self.config.get('height', 512)
+            
+            # Override width/height in config for pipeline creation
+            overrides['width'] = params.width
+            overrides['height'] = params.height
 
             # Create wrapper using config system
             self.stream = create_wrapper_from_config(self.config, **overrides)
 
-            # Store config values for later use
-            self.prompt = self.config.get('prompt', default_prompt)
+            # Store config values for later use (excluding prompt which is handled via blending)
             self.negative_prompt = self.config.get('negative_prompt', default_negative_prompt)
             self.guidance_scale = self.config.get('guidance_scale', 1.2)
             self.num_inference_steps = self.config.get('num_inference_steps', 50)
@@ -134,6 +159,10 @@ class Pipeline:
         else:
             # Create StreamDiffusionWrapper without config (original behavior)
             print("__init__: Using standard mode (no config)")
+            # Use passed width/height parameters
+            params.width = width
+            params.height = height
+            
             self.stream = StreamDiffusionWrapper(
                 model_id_or_path=base_model,
                 use_tiny_vae=args.taesd,
@@ -155,34 +184,28 @@ class Pipeline:
                 engine_dir=args.engine_dir,
             )
 
-            # Store default values for later use
-            self.prompt = default_prompt
+            # Store default values for later use (excluding prompt which is handled via blending)
             self.negative_prompt = default_negative_prompt
             self.guidance_scale = 1.2
             self.num_inference_steps = 50
 
-            # Prepare pipeline with default prompts
+            # Initial preparation without prompt (will be set via blending interface)
             self.stream.prepare(
-                prompt=self.prompt,
+                prompt=default_prompt,  # Temporary initial prompt 
                 negative_prompt=self.negative_prompt,
                 num_inference_steps=self.num_inference_steps,
                 guidance_scale=self.guidance_scale,
             )
 
-        self.last_prompt = self.prompt
+        # Initialize pipeline parameters
+        self.seed = 2
+        self.guidance_scale = 1.1
+        self.num_inference_steps = 50
+        self.negative_prompt = default_negative_prompt
+
+        # Model and acceleration setup
 
     def predict(self, params: "Pipeline.InputParams") -> Image.Image:
-        # Update prompt if it has changed
-        if hasattr(params, 'prompt') and params.prompt != self.last_prompt:
-            self.last_prompt = params.prompt
-            # Update the pipeline with new prompt
-            self.stream.prepare(
-                prompt=params.prompt,
-                negative_prompt=self.negative_prompt,
-                num_inference_steps=self.num_inference_steps,
-                guidance_scale=self.guidance_scale,
-            )
-
         # Handle different modes
         if self.pipeline_mode == "txt2img":
             # Text-to-image mode
@@ -202,6 +225,6 @@ class Pipeline:
             else:
                 # Standard mode: use original logic with preprocessed tensor
                 image_tensor = self.stream.preprocess_image(params.image)
-                output_image = self.stream(image=image_tensor, prompt=params.prompt)
+                output_image = self.stream(image=image_tensor)
 
         return output_image

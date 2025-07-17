@@ -1,4 +1,5 @@
 import torch
+import traceback
 from typing import List, Optional, Union, Dict, Any, Tuple
 from PIL import Image
 import numpy as np
@@ -262,6 +263,9 @@ class BaseControlNetPipeline:
             return controlnet
             
         except Exception as e:
+            print(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
+            print(f"Full stack trace for model loading failure:")
+            print(traceback.format_exc())
             raise ValueError(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
     
 
@@ -341,33 +345,22 @@ class BaseControlNetPipeline:
                                    timestep: torch.Tensor,
                                    encoder_hidden_states: torch.Tensor,
                                    **kwargs) -> Tuple[Optional[List[torch.Tensor]], Optional[torch.Tensor]]:
-        """Get combined conditioning from all active ControlNets"""
+        """Get ControlNet conditioning for the current latent and timestep"""
         if not self.controlnets:
             return None, None
         
-        # Use cached active indices if available (from recent update_control_image_efficient call)
-        if hasattr(self, '_active_indices_cache') and self._active_indices_cache:
-            # Quick validation of cached indices
-            active_indices = [
-                i for i in self._active_indices_cache 
-                if i < len(self.controlnets) and 
-                   self.controlnet_scales[i] > 0
-            ]
-        else:
-            # Fallback to full calculation
-            active_indices = [
-                i for i, (controlnet, control_image, scale) in enumerate(
-                    zip(self.controlnets, self.controlnet_images, self.controlnet_scales)
-                ) if controlnet is not None and control_image is not None and scale > 0
-            ]
+        # Get active ControlNet indices (ControlNets with scale > 0 and valid images)
+        active_indices = [
+            i for i, (controlnet, control_image, scale) in enumerate(
+                zip(self.controlnets, self.controlnet_images, self.controlnet_scales)
+            ) if controlnet is not None and control_image is not None and scale > 0
+        ]
         
         if not active_indices:
             return None, None
         
-        # Pre-compute batch expansion once for all ControlNets
+        # Prepare base kwargs for ControlNet calls
         main_batch_size = x_t_latent.shape[0]
-        
-        # Pre-compute base controlnet_kwargs once
         base_kwargs = {
             'sample': x_t_latent,
             'timestep': timestep,
@@ -376,7 +369,6 @@ class BaseControlNetPipeline:
         }
         base_kwargs.update(self._get_additional_controlnet_kwargs(**kwargs))
         
-        # Process all active ControlNets with optimized loop
         down_samples_list = []
         mid_samples_list = []
         
@@ -403,10 +395,13 @@ class BaseControlNetPipeline:
             # Forward pass through ControlNet
             try:
                 down_samples, mid_sample = controlnet(**controlnet_kwargs)
+                
                 down_samples_list.append(down_samples)
                 mid_samples_list.append(mid_sample)
             except Exception as e:
-                print(f"_get_controlnet_conditioning: ControlNet {i} failed: {e}")
+                print(f"ControlNetPipeline: ControlNet {i} failed: {e}")
+                print(f"ControlNetPipeline: Full stack trace for ControlNet {i}:")
+                print(traceback.format_exc())
                 continue
         
         # Early exit if no outputs

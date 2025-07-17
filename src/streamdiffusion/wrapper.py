@@ -426,8 +426,7 @@ class StreamDiffusionWrapper:
         normalize_seed_weights: Optional[bool] = None,
     ) -> None:
         """
-        Update streaming parameters efficiently in a single call.
-
+        Update streaming parameters efficiently in a single call.        
 
         Parameters
         ----------
@@ -460,7 +459,7 @@ class StreamDiffusionWrapper:
             Whether to normalize seed weights in blending to sum to 1, by default None (no change).
             When False, weights > 1 will amplify noise.
         """
-        self.stream.update_stream_params(
+        self.stream._param_updater.update_stream_params(
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             delta=delta,
@@ -535,14 +534,19 @@ class StreamDiffusionWrapper:
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
 
         if self.use_safety_checker:
-            safety_checker_input = self.feature_extractor(
-                image, return_tensors="pt"
-            ).to(self.device)
-            _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.dtype),
-                clip_input=safety_checker_input.pixel_values.to(self.dtype),
+            from diffusers.pipelines.stable_diffusion.safety_checker import (
+                StableDiffusionSafetyChecker,
             )
-            image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
+            from transformers.models.clip import CLIPFeatureExtractor
+
+            self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
+                "CompVis/stable-diffusion-safety-checker"
+            ).to(device=self.device)
+            self.feature_extractor = CLIPFeatureExtractor.from_pretrained(
+                "openai/clip-vit-base-patch32"
+            )
+            # Use stream's current resolution for fallback image
+            self.nsfw_fallback_img = Image.new("RGB", (self.stream.height, self.stream.width), (0, 0, 0))
 
         return image
 
@@ -575,14 +579,19 @@ class StreamDiffusionWrapper:
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
 
         if self.use_safety_checker:
-            safety_checker_input = self.feature_extractor(
-                image, return_tensors="pt"
-            ).to(self.device)
-            _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.dtype),
-                clip_input=safety_checker_input.pixel_values.to(self.dtype),
+            from diffusers.pipelines.stable_diffusion.safety_checker import (
+                StableDiffusionSafetyChecker,
             )
-            image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
+            from transformers.models.clip import CLIPFeatureExtractor
+
+            self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
+                "CompVis/stable-diffusion-safety-checker"
+            ).to(device=self.device)
+            self.feature_extractor = CLIPFeatureExtractor.from_pretrained(
+                "openai/clip-vit-base-patch32"
+            )
+            # Use stream's current resolution for fallback image
+            self.nsfw_fallback_img = Image.new("RGB", (self.stream.height, self.stream.width), (0, 0, 0))
 
         return image
 
@@ -600,13 +609,17 @@ class StreamDiffusionWrapper:
         torch.Tensor
             The preprocessed image.
         """
+        # Use stream's current resolution instead of wrapper's cached values
+        current_width = self.stream.width
+        current_height = self.stream.height
+        
         if isinstance(image, str):
-            image = Image.open(image).convert("RGB").resize((self.width, self.height))
+            image = Image.open(image).convert("RGB").resize((current_width, current_height))
         if isinstance(image, Image.Image):
-            image = image.convert("RGB").resize((self.width, self.height))
+            image = image.convert("RGB").resize((current_width, current_height))
 
         return self.stream.image_processor.preprocess(
-            image, self.height, self.width
+            image, current_height, current_width
         ).to(device=self.device, dtype=self.dtype)
 
     def postprocess_image(
@@ -897,10 +910,12 @@ class StreamDiffusionWrapper:
                     height: int,
                 ):
                     maybe_path = Path(model_id_or_path)
+                    # Use dynamic engine naming to distinguish from static engines
+                    dynamic_suffix = "dyn-384-1024"
                     if maybe_path.exists():
-                        return f"{maybe_path.stem}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}--mode-{self.mode}--width-{width}--height-{height}"
+                        return f"{maybe_path.stem}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}--mode-{self.mode}--{dynamic_suffix}"
                     else:
-                        return f"{model_id_or_path}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}--mode-{self.mode}--width-{width}--height-{height}"
+                        return f"{model_id_or_path}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}--mode-{self.mode}--{dynamic_suffix}"
 
                 # Always enable ControlNet TensorRT support to create universal engines
                 use_controlnet_trt = False
@@ -1019,6 +1034,9 @@ class StreamDiffusionWrapper:
                             engine_build_options={
                                 'opt_image_height': self.height,
                                 'opt_image_width': self.width,
+                                'build_dynamic_shape': True,  # Force dynamic shapes
+                                'min_image_resolution': 384,
+                                'max_image_resolution': 1024,
                             },
                         )
                     else:
@@ -1032,6 +1050,9 @@ class StreamDiffusionWrapper:
                             engine_build_options={
                                 'opt_image_height': self.height,
                                 'opt_image_width': self.width,
+                                'build_dynamic_shape': True,  # Force dynamic shapes
+                                'min_image_resolution': 384,
+                                'max_image_resolution': 1024,
                             },
                         )
 
@@ -1059,6 +1080,9 @@ class StreamDiffusionWrapper:
                         engine_build_options={
                             'opt_image_height': self.height,
                             'opt_image_width': self.width,
+                            'build_dynamic_shape': True,  # Force dynamic shapes
+                            'min_image_resolution': 384,
+                            'max_image_resolution': 1024,
                         },
                     )
                     delattr(stream.vae, "forward")
@@ -1087,6 +1111,9 @@ class StreamDiffusionWrapper:
                         engine_build_options={
                             'opt_image_height': self.height,
                             'opt_image_width': self.width,
+                            'build_dynamic_shape': True,  # Force dynamic shapes
+                            'min_image_resolution': 384,
+                            'max_image_resolution': 1024,
                         },
                     )
 
@@ -1159,7 +1186,8 @@ class StreamDiffusionWrapper:
             self.feature_extractor = CLIPFeatureExtractor.from_pretrained(
                 "openai/clip-vit-base-patch32"
             )
-            self.nsfw_fallback_img = Image.new("RGB", (self.height, self.width), (0, 0, 0))
+            # Use stream's current resolution for fallback image
+            self.nsfw_fallback_img = Image.new("RGB", (stream.height, stream.width), (0, 0, 0))
 
         # Apply ControlNet patch if needed
         if use_controlnet and controlnet_config:
@@ -1225,12 +1253,11 @@ class StreamDiffusionWrapper:
             if not model_id:
                 continue
 
-
             preprocessor = config.get('preprocessor', None)
             conditioning_scale = config.get('conditioning_scale', 1.0)
             enabled = config.get('enabled', True)
             preprocessor_params = config.get('preprocessor_params', None)
-
+            control_image = config.get('control_image', None)  # Extract control image from config
 
             try:
                 # Pass config dictionary directly
@@ -1242,8 +1269,8 @@ class StreamDiffusionWrapper:
                     'preprocessor_params': preprocessor_params or {}
                 }
 
-
-                controlnet_pipeline.add_controlnet(cn_config)
+                # Add ControlNet with control image if provided
+                controlnet_pipeline.add_controlnet(cn_config, control_image)
                 print(f"_apply_controlnet_patch: Successfully added ControlNet: {model_id}")
             except Exception as e:
                 print(f"_apply_controlnet_patch: Failed to add ControlNet {model_id}: {e}")

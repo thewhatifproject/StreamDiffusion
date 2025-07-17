@@ -42,19 +42,33 @@ class App:
         # Store uploaded ControlNet config separately
         self.uploaded_controlnet_config = None
         self.config_needs_reload = False  # Track when pipeline needs recreation
-        
+        # Store current resolution for pipeline recreation
+        self.new_width = 512
+        self.new_height = 512
         # Store uploaded style image before pipeline initialization
         self.uploaded_style_image = None
         self.init_app()
 
     def init_app(self):
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+        # Enhanced CORS for API-only development mode
+        if self.args.api_only:
+            # More permissive CORS for development
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "*"],  # Include common Vite dev ports
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        else:
+            # Standard CORS for production
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
 
         @self.app.websocket("/api/ws/{user_id}")
         async def websocket_endpoint(user_id: uuid.UUID, websocket: WebSocket):
@@ -151,7 +165,7 @@ class App:
         @self.app.get("/api/stream/{user_id}")
         async def stream(user_id: uuid.UUID, request: Request):
             try:
-                # Create pipeline if it doesn't exist yet or needs recreation
+                # Create pipeline if it doesn't exist yet
                 if self.pipeline is None:
                     if self.uploaded_controlnet_config:
                         print("stream: Creating pipeline with config...")
@@ -161,16 +175,21 @@ class App:
                         self.pipeline = self._create_default_pipeline()
                     print("stream: Pipeline created successfully")
                 
-                # Recreate pipeline if config changed
+                # Recreate pipeline if config changed (but not resolution - that's handled separately)
                 elif self.config_needs_reload or (self.uploaded_controlnet_config and not (self.pipeline.use_config and self.pipeline.config and ('controlnets' in self.pipeline.config or 'ipadapters' in self.pipeline.config))):
                     if self.config_needs_reload:
                         print("stream: Recreating pipeline with new config...")
                     else:
                         print("stream: Upgrading to config-based pipeline...")
                     
-                    self.pipeline = self._create_pipeline_with_config()
+                    if self.uploaded_controlnet_config:
+                        self.pipeline = self._create_pipeline_with_config()
+                    else:
+                        self.pipeline = self._create_default_pipeline()
+                    
                     self.config_needs_reload = False  # Reset the flag
-                    print("stream: Pipeline recreated with config support")
+
+                print("stream: Pipeline recreated with config support")
 
                 async def generate():
                     while True:
@@ -199,6 +218,9 @@ class App:
                         yield frame
                         if self.args.debug:
                             print(f"Time taken: {time.time() - frame_start_time}")
+                        
+                        # Add delay for testing - 1 frame per second
+                        # await asyncio.sleep(1.0)
 
                 return StreamingResponse(
                     generate(),
@@ -243,6 +265,13 @@ class App:
             
             # Get current acceleration setting
             current_acceleration = self.args.acceleration
+            
+            # Get current resolution
+            current_resolution = f"{self.new_width}x{self.new_height}"
+            # Add aspect ratio for display
+            aspect_ratio = self._calculate_aspect_ratio(self.new_width, self.new_height)
+            if aspect_ratio:
+                current_resolution += f" ({aspect_ratio})"
             if self.uploaded_controlnet_config and 'acceleration' in self.uploaded_controlnet_config:
                 current_acceleration = self.uploaded_controlnet_config['acceleration']
             
@@ -319,6 +348,7 @@ class App:
                     "delta": current_delta,
                     "num_inference_steps": current_num_inference_steps,
                     "seed": current_seed,
+                    "current_resolution": current_resolution,
                     "prompt_blending": prompt_blending_config,
                     "seed_blending": seed_blending_config,
                     "normalize_prompt_weights": normalize_prompt_weights,
@@ -355,6 +385,28 @@ class App:
                 # Get acceleration from config if available
                 config_acceleration = config_data.get('acceleration', self.args.acceleration)
                 
+                # Get width and height from config if available
+                config_width = config_data.get('width', None)
+                config_height = config_data.get('height', None)
+                
+                # Update resolution if width/height are specified in config
+                if config_width is not None and config_height is not None:
+                    try:
+                        # Validate resolution
+                        if config_width % 64 != 0 or config_height % 64 != 0:
+                            raise HTTPException(status_code=400, detail="Resolution must be multiples of 64")
+                        
+                        if not (384 <= config_width <= 1024) or not (384 <= config_height <= 1024):
+                            raise HTTPException(status_code=400, detail="Resolution must be between 384 and 1024")
+                        
+                        # Update the resolution
+                        self.new_width = config_width
+                        self.new_height = config_height
+                        print(f"upload_controlnet_config: Updated resolution to {config_width}x{config_height}")
+                    except Exception as e:
+                        logging.error(f"upload_controlnet_config: Failed to update resolution: {e}")
+                        # Don't fail the upload, just log the error
+                
                 # Normalize prompt and seed configurations for frontend
                 normalized_prompt_blending = self._normalize_prompt_config(config_data)
                 normalized_seed_blending = self._normalize_seed_config(config_data)
@@ -375,6 +427,12 @@ class App:
                 config_normalize_prompt_weights = config_data.get('normalize_prompt_weights', True)
                 config_normalize_seed_weights = config_data.get('normalize_seed_weights', True)
                 
+                # Calculate current resolution string for frontend
+                current_resolution = f"{self.new_width}x{self.new_height}"
+                aspect_ratio = self._calculate_aspect_ratio(self.new_width, self.new_height)
+                if aspect_ratio:
+                    current_resolution += f" ({aspect_ratio})"
+                
                 return JSONResponse({
                     "status": "success",
                     "message": "Configuration uploaded successfully",
@@ -390,6 +448,7 @@ class App:
                     "seed": config_seed,
                     "prompt_blending": normalized_prompt_blending,
                     "seed_blending": normalized_seed_blending,
+                    "current_resolution": current_resolution,  # Include updated resolution
                     "normalize_prompt_weights": config_normalize_prompt_weights,
                     "normalize_seed_weights": config_normalize_seed_weights,
                 })
@@ -415,9 +474,12 @@ class App:
                 if self.pipeline:
                     try:
                         current_prompts = self.pipeline.stream.get_current_prompts()
+                        print(f"get_current_blending_config: Retrieved current prompts from pipeline: {current_prompts}")
                         if current_prompts and len(current_prompts) > 0:
                             prompt_blending_config = current_prompts
-                    except:
+                            print(f"get_current_blending_config: Using pipeline prompts: {prompt_blending_config}")
+                    except Exception as e:
+                        print(f"get_current_blending_config: Error getting current prompts: {e}")
                         pass
                         
                     try:
@@ -740,6 +802,54 @@ class App:
                 logging.error(f"update_seed: Failed to update seed: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update seed: {str(e)}")
 
+        @self.app.post("/api/update-resolution")
+        async def update_resolution(request: Request):
+            """Update resolution (width x height) by creating a new pipeline"""
+            try:
+                data = await request.json()
+                resolution_str = data.get('resolution')
+                
+                if not resolution_str:
+                    raise HTTPException(status_code=400, detail="Resolution parameter is required")
+                
+                # Parse resolution string (e.g., "512x768 (2:3)" -> width=512, height=768)
+                resolution_part = resolution_str.split(' ')[0]  # Get "512x768" part
+                try:
+                    width, height = map(int, resolution_part.split('x'))
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid resolution format. Use 'widthxheight' (e.g., '512x768')")
+                
+                # Validate resolution
+                if width % 64 != 0 or height % 64 != 0:
+                    raise HTTPException(status_code=400, detail="Resolution must be multiples of 64")
+                
+                if not (384 <= width <= 1024) or not (384 <= height <= 1024):
+                    raise HTTPException(status_code=400, detail="Resolution must be between 384 and 1024")
+                
+                # Check if resolution actually changed
+                if width == self.new_width and height == self.new_height:
+                    raise HTTPException(status_code=400, detail="Resolution unchanged")
+                
+                print(f"API: Updating resolution from {self.new_width}x{self.new_height} to {width}x{height}")
+                
+                # Create new pipeline with new resolution
+                try:
+                    self._update_resolution(width, height)
+                    
+                    print(f"API: Resolution update successful: {width}x{height}")
+                    return JSONResponse({
+                        "status": "success",
+                        "message": f"Resolution updated to {width}x{height}",
+                    })
+                    
+                except Exception as update_error:
+                    print(f"API: Resolution update failed: {update_error}")
+                    raise HTTPException(status_code=500, detail=f"Failed to update resolution: {update_error}")
+                
+            except Exception as e:
+                print(f"API: Resolution update error: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update resolution: {e}")
+
         @self.app.post("/api/update-normalize-prompt-weights")
         async def update_normalize_prompt_weights(request: Request):
             """Update normalize weights flag for prompt blending in real-time"""
@@ -798,6 +908,10 @@ class App:
                 prompt_list = data.get("prompt_list")
                 prompt_interpolation_method = data.get("interpolation_method", "slerp")
                 
+                print(f"update_prompt_blending: Received request with {len(prompt_list) if prompt_list else 0} prompts")
+                print(f"update_prompt_blending: prompt_list = {prompt_list}")
+                print(f"update_prompt_blending: interpolation_method = {prompt_interpolation_method}")
+                
                 if prompt_list is None:
                     raise HTTPException(status_code=400, detail="Missing prompt_list parameter")
                 
@@ -817,11 +931,15 @@ class App:
                 # Convert list format [[prompt, weight], ...] to tuple format [(prompt, weight), ...]
                 prompt_tuples = [(item[0], item[1]) for item in prompt_list]
                 
+                print(f"update_prompt_blending: Calling pipeline.stream.update_prompt with {len(prompt_tuples)} prompts")
+                
                 # Update prompt blending using the unified public interface
                 self.pipeline.stream.update_prompt(
                     prompt=prompt_tuples,
                     prompt_interpolation_method=prompt_interpolation_method
                 )
+                
+                print(f"update_prompt_blending: Successfully updated prompt blending")
                 
                 return JSONResponse({
                     "status": "success",
@@ -829,6 +947,7 @@ class App:
                 })
                 
             except Exception as e:
+                print(f"update_prompt_blending: Error: {e}")
                 logging.error(f"update_prompt_blending: Failed to update prompt blending: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update prompt blending: {str(e)}")
 
@@ -1137,12 +1256,25 @@ class App:
                 }
             })
 
-        if not os.path.exists("public"):
-            os.makedirs("public")
+        # ------------------------------------------------------------
 
-        self.app.mount(
-            "/", StaticFiles(directory="./frontend/public", html=True), name="public"
-        )
+        # Only mount static files if not in API-only mode
+        if not self.args.api_only:
+            if not os.path.exists("public"):
+                os.makedirs("public")
+
+            self.app.mount(
+                "/", StaticFiles(directory="./frontend/public", html=True), name="public"
+            )
+        else:
+            # In API-only mode, add a simple root endpoint for health check
+            @self.app.get("/")
+            async def api_root():
+                return JSONResponse({
+                    "message": "StreamDiffusion API Server", 
+                    "mode": "api-only",
+                    "frontend": "Run separately with 'npm run dev' in ./frontend/"
+                })
 
     def _normalize_blending_config(self, config_data, blending_type):
         """
@@ -1223,7 +1355,13 @@ class App:
         """Create the default pipeline (standard mode)"""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         torch_dtype = torch.float16
-        return Pipeline(self.args, device, torch_dtype)
+        pipeline = Pipeline(self.args, device, torch_dtype, width=self.new_width, height=self.new_height)
+        
+        # Initialize with default prompt blending (single prompt with weight 1.0)
+        default_prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed, intricate, full of colour, cinematic lighting, trending on artstation, 8k, hyperrealistic, focused, extreme details, unreal engine 5 cinematic, masterpiece"
+        pipeline.stream.update_prompt([(default_prompt, 1.0)], prompt_interpolation_method="slerp")
+        
+        return pipeline
 
     def _create_pipeline_with_config(self, controlnet_config_path=None):
         """Create a new pipeline with optional ControlNet configuration"""
@@ -1270,7 +1408,18 @@ class App:
         else:
             new_args = self.args
         
-        new_pipeline = Pipeline(new_args, device, torch_dtype)
+        new_pipeline = Pipeline(new_args, device, torch_dtype, width=self.new_width, height=self.new_height)
+        
+        # Initialize prompt blending from config
+        normalized_prompt_config = self._normalize_prompt_config(self.uploaded_controlnet_config)
+        if normalized_prompt_config:
+            # Convert to tuple format and set up prompt blending
+            prompt_tuples = [(item[0], item[1]) for item in normalized_prompt_config]
+            new_pipeline.stream.update_prompt(prompt_tuples, prompt_interpolation_method="slerp")
+        else:
+            # Fallback to default single prompt
+            default_prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed, intricate, full of colour, cinematic lighting, trending on artstation, 8k, hyperrealistic, focused, extreme details, unreal engine 5 cinematic, masterpiece"
+            new_pipeline.stream.update_prompt([(default_prompt, 1.0)], prompt_interpolation_method="slerp")
         
         # Clean up temp files if created
         if self.uploaded_controlnet_config and not controlnet_config_path:
@@ -1325,6 +1474,66 @@ class App:
                     })
         
         return controlnet_info
+
+    def _calculate_aspect_ratio(self, width: int, height: int) -> str:
+        """Calculate and return aspect ratio as a string"""
+        import math
+        
+        # Find GCD to simplify the ratio
+        gcd = math.gcd(width, height)
+        simplified_width = width // gcd
+        simplified_height = height // gcd
+        
+        return f"{simplified_width}:{simplified_height}"
+
+    def _update_resolution(self, width: int, height: int) -> None:
+        """Create a new pipeline with the specified resolution and replace the old one."""
+        print(f"Creating new pipeline with resolution {width}x{height}")
+        
+        # Store current pipeline state
+        current_prompt = getattr(self.pipeline, 'prompt', '')
+        current_negative_prompt = getattr(self.pipeline, 'negative_prompt', '')
+        current_guidance_scale = getattr(self.pipeline, 'guidance_scale', 1.2)
+        current_num_inference_steps = getattr(self.pipeline, 'num_inference_steps', 50)
+        
+        # Update current resolution BEFORE creating new pipeline
+        self.new_width = width
+        self.new_height = height
+        
+        # Create new pipeline with new resolution
+        if self.uploaded_controlnet_config:
+            new_pipeline = self._create_pipeline_with_config()
+        else:
+            new_pipeline = self._create_default_pipeline()
+        
+        # Replace old pipeline
+        old_pipeline = self.pipeline
+        self.pipeline = new_pipeline
+        
+        # Restore pipeline state
+        if current_prompt:
+            self.pipeline.stream.prepare(
+                prompt=current_prompt,
+                negative_prompt=current_negative_prompt,
+                guidance_scale=current_guidance_scale,
+                num_inference_steps=current_num_inference_steps
+            )
+            # Also update the pipeline's stored values
+            self.pipeline.prompt = current_prompt
+            self.pipeline.negative_prompt = current_negative_prompt
+            self.pipeline.guidance_scale = current_guidance_scale
+            self.pipeline.num_inference_steps = current_num_inference_steps
+            self.pipeline.last_prompt = current_prompt
+        
+        # Clean up old pipeline
+        if old_pipeline:
+            try:
+                # Clear any references to free memory
+                del old_pipeline
+            except:
+                pass
+        
+        print(f"Pipeline updated successfully to {width}x{height}")
 
     def _get_ipadapter_info(self):
         """Get IPAdapter information from uploaded config or active pipeline"""

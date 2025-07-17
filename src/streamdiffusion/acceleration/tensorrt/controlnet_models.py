@@ -48,32 +48,39 @@ class ControlNetTRT(BaseModel):
             "encoder_hidden_states": {0: "B"},
             "timestep": {0: "B"},
             "controlnet_cond": {0: "B", 2: "H_ctrl", 3: "W_ctrl"},
-            **{f"down_block_{i:02d}": {0: "B"} for i in range(12)},
-            "mid_block": {0: "B"}
+            **{f"down_block_{i:02d}": {0: "B", 2: "H", 3: "W"} for i in range(12)},
+            "mid_block": {0: "B", 2: "H", 3: "W"}
         }
     
     def get_input_profile(self, batch_size, image_height, image_width, 
                          static_batch, static_shape):
-        """Generate TensorRT input profiles for ControlNet"""
+        """Generate TensorRT input profiles for ControlNet with dynamic 384-1024 range"""
         min_batch = batch_size if static_batch else self.min_batch
         max_batch = batch_size if static_batch else self.max_batch
         
-        min_ctrl_h = 256 if not static_shape else image_height
-        max_ctrl_h = 1024 if not static_shape else image_height
-        min_ctrl_w = 256 if not static_shape else image_width  
-        max_ctrl_w = 1024 if not static_shape else image_width
+        # Force dynamic shapes for universal engines (384-1024 range)
+        min_ctrl_h = 384  # Changed from 256 to 512 to match min resolution
+        max_ctrl_h = 1024
+        min_ctrl_w = 384  # Changed from 256 to 512 to match min resolution
+        max_ctrl_w = 1024
         
-        latent_h = image_height // 8
-        latent_w = image_width // 8
-        min_latent_h = min_ctrl_h // 8
-        max_latent_h = max_ctrl_h // 8
-        min_latent_w = min_ctrl_w // 8
-        max_latent_w = max_ctrl_w // 8
+        # Use a flexible optimal resolution that's in the middle of the range
+        # This allows the engine to handle both smaller and larger resolutions
+        opt_ctrl_h = 704  # Middle of 512-1024 range
+        opt_ctrl_w = 704  # Middle of 512-1024 range
         
-        return {
+        # Calculate latent dimensions
+        min_latent_h = min_ctrl_h // 8  # 64
+        max_latent_h = max_ctrl_h // 8  # 128
+        min_latent_w = min_ctrl_w // 8  # 64
+        max_latent_w = max_ctrl_w // 8  # 128
+        opt_latent_h = opt_ctrl_h // 8  # 96
+        opt_latent_w = opt_ctrl_w // 8  # 96
+        
+        profile = {
             "sample": [
                 (min_batch, self.unet_dim, min_latent_h, min_latent_w),
-                (batch_size, self.unet_dim, latent_h, latent_w),
+                (batch_size, self.unet_dim, opt_latent_h, opt_latent_w),
                 (max_batch, self.unet_dim, max_latent_h, max_latent_w),
             ],
             "timestep": [
@@ -86,10 +93,12 @@ class ControlNetTRT(BaseModel):
             ],
             "controlnet_cond": [
                 (min_batch, 3, min_ctrl_h, min_ctrl_w),
-                (batch_size, 3, image_height, image_width),
+                (batch_size, 3, opt_ctrl_h, opt_ctrl_w),
                 (max_batch, 3, max_ctrl_h, max_ctrl_w),
             ],
         }
+        
+        return profile
     
     def get_sample_input(self, batch_size, image_height, image_width):
         """Generate sample inputs for ONNX export"""

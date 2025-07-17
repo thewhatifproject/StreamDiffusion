@@ -8,11 +8,14 @@
   import PipelineOptions from '$lib/components/PipelineOptions.svelte';
   import ControlNetConfig from '$lib/components/ControlNetConfig.svelte';
   import BlendingControl from '$lib/components/BlendingControl.svelte';
+  import ResolutionPicker from '$lib/components/ResolutionPicker.svelte';
   import Spinner from '$lib/icons/spinner.svelte';
   import Warning from '$lib/components/Warning.svelte';
   import { lcmLiveStatus, lcmLiveActions, LCMLiveStatus } from '$lib/lcmLive';
   import { mediaStreamActions, onFrameChangeStore } from '$lib/mediaStream';
   import { getPipelineValues, deboucedPipelineValues, pipelineValues } from '$lib/store';
+  import { parseResolution, type ResolutionInfo } from '$lib/utils';
+  import TextArea from '$lib/components/TextArea.svelte';
 
   let pipelineParams: Fields;
   let pipelineInfo: PipelineInfo;
@@ -32,9 +35,29 @@
   let currentQueueSize: number = 0;
   let queueCheckerRunning: boolean = false;
   let warningMessage: string = '';
+
+  let currentResolution: ResolutionInfo;
+  let apiError: string = '';
+  let isRetrying: boolean = false;
+  
+  // Reactive resolution parsing
+  $: {
+    if ($pipelineValues.resolution) {
+      currentResolution = parseResolution($pipelineValues.resolution);
+    } else if (pipelineParams?.width?.default && pipelineParams?.height?.default) {
+      // Fallback to pipeline params
+      currentResolution = {
+        width: Number(pipelineParams.width.default),
+        height: Number(pipelineParams.height.default),
+        aspectRatio: Number(pipelineParams.width.default) / Number(pipelineParams.height.default),
+        aspectRatioString: "1:1"
+      };
+    }
+  }
   
   // Panel state management
-  let showPromptBlending: boolean = false;
+  let showPromptBlending: boolean = false; // Default to expanded since it's the unified blending interface
+  let showResolutionPicker: boolean = false; // Default to expanded
   let showSeedBlending: boolean = false;
   let leftPanelCollapsed: boolean = false;
   let rightPanelCollapsed: boolean = false;
@@ -56,35 +79,76 @@
   });
 
   async function getSettings() {
-    const settings = await fetch('/api/settings').then((r) => r.json());
-    pipelineParams = settings.input_params.properties;
-    pipelineInfo = settings.info.properties;
-    controlnetInfo = settings.controlnet || null;
-    tIndexList = settings.t_index_list || [35, 45];
-    guidanceScale = settings.guidance_scale || 1.1;
-    delta = settings.delta || 0.7;
-    numInferenceSteps = settings.num_inference_steps || 50;
-    seed = settings.seed || 2;
-    promptBlendingConfig = settings.prompt_blending || null;
-    seedBlendingConfig = settings.seed_blending || null;
-    normalizePromptWeights = settings.normalize_prompt_weights ?? true;
-    normalizeSeedWeights = settings.normalize_seed_weights ?? true;
-    isImageMode = pipelineInfo.input_mode.default === PipelineMode.IMAGE;
-    maxQueueSize = settings.max_queue_size;
-    pageContent = settings.page_content;
-    
-    // Update prompt in store if config prompt is available
-    if (settings.config_prompt) {
-      pipelineValues.update(values => ({
-        ...values,
-        prompt: settings.config_prompt
-      }));
+    try {
+      apiError = '';
+      isRetrying = false;
+      
+      const response = await fetch('/api/settings');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const settings = await response.json();
+
+      pipelineParams = settings.input_params.properties;
+      pipelineInfo = settings.info.properties;
+      
+      // Initialize prompt value in store if not already set
+      if (!($pipelineValues.prompt)) {
+        pipelineValues.update(values => ({
+          ...values,
+          prompt: pipelineParams.prompt?.default || "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed, intricate, full of colour, cinematic lighting, trending on artstation, 8k, hyperrealistic, focused, extreme details, unreal engine 5 cinematic, masterpiece"
+        }));
+      }
+      
+      controlnetInfo = settings.controlnet || null;
+      tIndexList = settings.t_index_list || [35, 45];
+      guidanceScale = settings.guidance_scale || 1.1;
+      delta = settings.delta || 0.7;
+      numInferenceSteps = settings.num_inference_steps || 50;
+      seed = settings.seed || 2;
+      promptBlendingConfig = settings.prompt_blending || null;
+      seedBlendingConfig = settings.seed_blending || null;
+      normalizePromptWeights = settings.normalize_prompt_weights ?? true;
+      normalizeSeedWeights = settings.normalize_seed_weights ?? true;
+      isImageMode = pipelineInfo.input_mode.default === PipelineMode.IMAGE;
+      maxQueueSize = settings.max_queue_size;
+      pageContent = settings.page_content;
+      
+      console.log('getSettings: promptBlendingConfig:', promptBlendingConfig);
+      console.log('getSettings: current prompt in store:', $pipelineValues.prompt);
+      
+      // Update prompt in store if config prompt is available
+      if (settings.config_prompt) {
+        pipelineValues.update(values => ({
+          ...values,
+          prompt: settings.config_prompt
+        }));
+        console.log('getSettings: Updated prompt from config_prompt:', settings.config_prompt);
+      }
+      
+      // Set initial resolution value if available
+      if (settings.current_resolution) {
+        pipelineValues.update(values => ({
+          ...values,
+          resolution: settings.current_resolution
+        }));
+      }
+      
+      console.log(pipelineParams);
+      console.log('handleControlNetUpdate: ControlNet Info:', controlnetInfo);
+      console.log('handleControlNetUpdate: T-Index List:', tIndexList);
+      toggleQueueChecker(true);
+      
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+      apiError = error instanceof Error ? error.message : 'Failed to connect to the API. Please check if the server is running.';
     }
-    
-    console.log(pipelineParams);
-    console.log('handleControlNetUpdate: ControlNet Info:', controlnetInfo);
-    console.log('handleControlNetUpdate: T-Index List:', tIndexList);
-    toggleQueueChecker(true);
+  }
+
+  async function retryConnection() {
+    isRetrying = true;
+    await getSettings();
   }
 
   function handleControlNetUpdate(event: CustomEvent) {
@@ -131,18 +195,64 @@
     }
   }
 
+  async function handleResolutionUpdate(resolution: string) {
+    try {
+      const response = await fetch('/api/update-resolution', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ resolution }),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Resolution updated successfully:', result.detail);
+        
+        // Show success message - no restart needed for real-time updates
+        if (result.detail) {
+          warningMessage = result.detail;
+          // Clear message after a few seconds
+          setTimeout(() => {
+            warningMessage = '';
+          }, 3000);
+        }
+      } else {
+        const result = await response.json();
+        console.error('Failed to update resolution:', result.detail);
+        warningMessage = 'Failed to update resolution: ' + result.detail;
+      }
+    } catch (error: unknown) {
+      console.error('Failed to update resolution:', error);
+      warningMessage = 'Failed to update resolution: ' + (error instanceof Error ? error.message : String(error));
+    }
+  }
+
   function toggleQueueChecker(start: boolean) {
     queueCheckerRunning = start && maxQueueSize > 0;
     if (start) {
       getQueueSize();
     }
   }
+  
   async function getQueueSize() {
     if (!queueCheckerRunning) {
       return;
     }
-    const data = await fetch('/api/queue').then((r) => r.json());
-    currentQueueSize = data.queue_size;
+    
+    try {
+      const response = await fetch('/api/queue');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data = await response.json();
+      currentQueueSize = data.queue_size;
+    } catch (error) {
+      console.error('Failed to get queue size:', error);
+      // Don't show error to user for queue size, just log it
+      // This is a background operation that shouldn't interrupt the main flow
+    }
+    
     setTimeout(getQueueSize, 10000);
   }
 
@@ -158,6 +268,18 @@
   $: if ($lcmLiveStatus === LCMLiveStatus.TIMEOUT) {
     warningMessage = 'Session timed out. Please try again.';
   }
+  
+  // Watch for resolution changes
+  let previousResolution: string = '';
+  $: {
+    if ($pipelineValues.resolution && $pipelineValues.resolution !== previousResolution && previousResolution !== '') {
+      previousResolution = $pipelineValues.resolution;
+      handleResolutionUpdate($pipelineValues.resolution);
+    } else if ($pipelineValues.resolution && previousResolution === '') {
+      previousResolution = $pipelineValues.resolution;
+    }
+  }
+  
   let disabled = false;
   async function toggleLcmLive() {
     try {
@@ -296,7 +418,6 @@
         }
         if (result.seed_blending) {
           seedBlendingConfig = result.seed_blending;
-          showSeedBlending = true;  // Auto-expand if config has blending data
           console.log('uploadConfig: Updated seed blending config:', seedBlendingConfig);
         }
         
@@ -306,6 +427,15 @@
             ...values,
             prompt: result.config_prompt
           }));
+        }
+        
+        // Update resolution if config resolution is available
+        if (result.current_resolution) {
+          pipelineValues.update(values => ({
+            ...values,
+            resolution: result.current_resolution
+          }));
+          console.log('uploadConfig: Updated resolution to:', result.current_resolution);
         }
         
         setTimeout(() => {
@@ -420,22 +550,39 @@
               <VideoInput
                 width={Number(pipelineParams.width.default)}
                 height={Number(pipelineParams.height.default)}
+                {currentResolution}
               />
             </div>
           {/if}
 
-          <!-- Prompt Blending -->
+          <!-- Resolution Picker -->
+          <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <button 
+              on:click={() => showResolutionPicker = !showResolutionPicker}
+              class="w-full p-4 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg"
+            >
+              <h3 class="text-md font-medium">Resolution</h3>
+              <span class="text-sm">{showResolutionPicker ? '−' : '+'}</span>
+            </button>
+            {#if showResolutionPicker}
+              <div class="p-4 pt-0">
+                <ResolutionPicker {currentResolution} {pipelineParams} />
+              </div>
+            {/if}
+          </div>
+
+          <!-- Unified Blending Control -->
           <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <button 
               on:click={() => showPromptBlending = !showPromptBlending}
               class="w-full p-4 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg"
             >
-              <h3 class="text-md font-medium">Prompt Blending</h3>
+              <h3 class="text-md font-medium">Blending Controls</h3>
               <span class="text-sm">{showPromptBlending ? '−' : '+'}</span>
             </button>
             {#if showPromptBlending}
               <div class="p-4 pt-0">
-                <BlendingControl 
+                <BlendingControl
                   blendingType="prompt" 
                   blendingConfig={promptBlendingConfig} 
                   normalizeWeights={normalizePromptWeights} 
@@ -487,7 +634,7 @@
           </div>
           <div class="flex-1 flex items-center justify-center">
             <div class="w-full max-w-2xl">
-              <ImagePlayer />
+              <ImagePlayer {currentResolution} />
             </div>
           </div>
         </div>
@@ -519,6 +666,28 @@
         {/if}
       </div>
     </div>
+  {:else if apiError}
+    <!-- API Error -->
+    <div class="flex-1 flex flex-col items-center justify-center gap-6 py-48 text-center">
+      <div>
+        <h2 class="text-2xl font-bold text-red-600 mb-2">API Connection Failed</h2>
+        <p class="text-gray-600 dark:text-gray-400 mb-4 max-w-md">
+          {apiError}
+        </p>
+        <Button 
+          on:click={retryConnection} 
+          disabled={isRetrying} 
+          classList="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2"
+        >
+          {#if isRetrying}
+            <Spinner classList="w-4 h-4 mr-2 animate-spin" />
+            Retrying...
+          {:else}
+            Retry Connection
+          {/if}
+        </Button>
+      </div>
+    </div>
   {:else}
     <!-- Loading State -->
     <div class="flex-1 flex items-center justify-center">
@@ -531,6 +700,8 @@
 </main>
 
 <style lang="postcss">
+  @reference "tailwindcss";
+  
   :global(html) {
     @apply text-black dark:bg-gray-900 dark:text-white;
   }

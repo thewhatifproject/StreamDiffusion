@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Tuple, Literal, Any, Callable
 import torch
 import torch.nn.functional as F
+import gc
 
 
 class CacheStats:
@@ -131,10 +132,10 @@ class StreamParameterUpdater:
             if self.stream.cfg_type == "none" and guidance_scale > 1.0:
                 print("update_stream_params: Warning: guidance_scale > 1.0 with cfg_type='none' will have no effect")
             self.stream.guidance_scale = guidance_scale
-            
+        
         if delta is not None:
             self.stream.delta = delta
-            
+        
         if seed is not None:
             self._update_seed(seed)
         
@@ -538,6 +539,18 @@ class StreamParameterUpdater:
             dim=0,
         )
 
+    def _regenerate_resolution_tensors(self) -> None:
+        """This method is no longer used - resolution updates now restart the pipeline"""
+        pass
+
+    def _update_controlnet_inputs(self, width: int, height: int) -> None:
+        """This method is no longer used - resolution updates now restart the pipeline"""
+        pass
+
+    def _recalculate_controlnet_inputs(self, width: int, height: int) -> None:
+        """This method is no longer used - resolution updates now restart the pipeline"""
+        pass
+
     @torch.no_grad()
     def update_prompt_at_index(
         self, 
@@ -770,4 +783,4 @@ class StreamParameterUpdater:
         self._seed_cache = self._reindex_cache(self._seed_cache, index)
         
         # Recompute blended noise
-        self._apply_seed_blending(interpolation_method) 
+        self._apply_seed_blending(interpolation_method)
