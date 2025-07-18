@@ -103,6 +103,7 @@ class StreamDiffusionWrapper:
         # ControlNet options
         use_controlnet: bool = False,
         controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
+        enable_pytorch_fallback: bool = False,
     ):
         """
         Initializes the StreamDiffusionWrapper.
@@ -181,9 +182,14 @@ class StreamDiffusionWrapper:
             ControlNet configuration(s), by default None.
             Can be a single config dict or list of config dicts for multiple ControlNets.
             Each config should contain: model_id, preprocessor (optional), conditioning_scale, etc.
+        enable_pytorch_fallback : bool, optional
+            Whether to enable PyTorch fallback when acceleration fails, by default False.
+            When True, falls back to PyTorch inference if TensorRT/xformers acceleration fails.
+            When False, raises an exception when acceleration fails.
         """
         self.sd_turbo = "turbo" in model_id_or_path
         self.use_controlnet = use_controlnet
+        self.enable_pytorch_fallback = enable_pytorch_fallback
 
         if mode == "txt2img":
             if cfg_type != "none":
@@ -239,6 +245,7 @@ class StreamDiffusionWrapper:
             normalize_seed_weights=normalize_seed_weights,
             use_controlnet=use_controlnet,
             controlnet_config=controlnet_config,
+            enable_pytorch_fallback=enable_pytorch_fallback,
         )
 
         # Store acceleration settings for ControlNet integration
@@ -749,6 +756,7 @@ class StreamDiffusionWrapper:
         normalize_seed_weights: bool = True,
         use_controlnet: bool = False,
         controlnet_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
+        enable_pytorch_fallback: bool = False,
     ) -> StreamDiffusion:
         """
         Loads the model.
@@ -1157,8 +1165,10 @@ class StreamDiffusionWrapper:
         except Exception:
             traceback.print_exc()
             print("Acceleration has failed. Falling back to normal mode.")
-            # TODO: Make pytorch fallback configurable
-            raise NotImplementedError("Acceleration has failed. Automatic pytorch inference fallback temporarily disabled.")
+            if not self.enable_pytorch_fallback:
+                raise NotImplementedError("Acceleration has failed. Automatic pytorch inference fallback disabled.")
+            else:
+                print("Acceleration has failed. Falling back to PyTorch inference.")
 
         if seed < 0:  # Random seed
             seed = np.random.randint(0, 1000000)
@@ -1230,7 +1240,7 @@ class StreamDiffusionWrapper:
 
             # Create engine pool with same engine directory structure as UNet
             stream_cuda = cuda.Stream()
-            controlnet_pool = ControlNetEnginePool(engine_dir, stream_cuda, self.width, self.height)
+            controlnet_pool = ControlNetEnginePool(engine_dir, stream_cuda, self.width, self.height, enable_pytorch_fallback=self.enable_pytorch_fallback)
 
             # Store pool on the pipeline for later use
             controlnet_pipeline._controlnet_pool = controlnet_pool
