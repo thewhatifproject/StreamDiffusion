@@ -805,7 +805,7 @@ class App:
                 # Update prompt blending using the unified public interface
                 self.pipeline.stream.update_prompt(
                     prompt_tuples,  # Pass as first positional argument
-                    interpolation_method=interpolation_method
+                    prompt_interpolation_method=interpolation_method
                 )
                 
                 print(f"update_prompt_blending: Successfully updated prompt blending")
@@ -1263,7 +1263,7 @@ class App:
         
         # Initialize with default prompt blending (single prompt with weight 1.0)
         default_prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed, intricate, full of colour, cinematic lighting, trending on artstation, 8k, hyperrealistic, focused, extreme details, unreal engine 5 cinematic, masterpiece"
-        pipeline.stream.update_prompt([(default_prompt, 1.0)], interpolation_method="slerp")
+        pipeline.stream.update_prompt([(default_prompt, 1.0)], prompt_interpolation_method="slerp")
         
         return pipeline
 
@@ -1298,11 +1298,11 @@ class App:
         if normalized_prompt_config:
             # Convert to tuple format and set up prompt blending
             prompt_tuples = [(item[0], item[1]) for item in normalized_prompt_config]
-            new_pipeline.stream.update_prompt(prompt_tuples, interpolation_method="slerp")
+            new_pipeline.stream.update_prompt(prompt_tuples, prompt_interpolation_method="slerp")
         else:
             # Fallback to default single prompt
             default_prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed, intricate, full of colour, cinematic lighting, trending on artstation, 8k, hyperrealistic, focused, extreme details, unreal engine 5 cinematic, masterpiece"
-            new_pipeline.stream.update_prompt([(default_prompt, 1.0)], interpolation_method="slerp")
+            new_pipeline.stream.update_prompt([(default_prompt, 1.0)], prompt_interpolation_method="slerp")
         
         # Clean up temp file if created
         if self.uploaded_controlnet_config and not controlnet_config_path:
