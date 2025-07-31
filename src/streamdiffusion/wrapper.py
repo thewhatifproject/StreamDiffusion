@@ -989,7 +989,7 @@ class StreamDiffusionWrapper:
                     validate_architecture
                 )
                 from streamdiffusion.acceleration.tensorrt.unet_controlnet_export import create_controlnet_wrapper
-                from streamdiffusion.acceleration.tensorrt.ipadapter_wrapper import create_ipadapter_wrapper
+                from streamdiffusion.acceleration.tensorrt.unet_ipadapter_export import create_ipadapter_wrapper
 
                 # Legacy TensorRT implementation (fallback)
                 def create_prefix(

@@ -14,7 +14,7 @@ from .models import VAE, BaseModel, UNet, VAEEncoder
 from ...model_detection import detect_model, extract_unet_architecture, validate_architecture
 from .unet_controlnet_export import create_controlnet_wrapper
 from .engine_pool import ControlNetEnginePool
-from .ipadapter_wrapper import create_ipadapter_wrapper
+from .unet_ipadapter_export import create_ipadapter_wrapper
 
 
 def _has_ipadapter_processors(unet: UNet2DConditionModel) -> bool:
