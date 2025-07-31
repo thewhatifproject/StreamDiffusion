@@ -1227,7 +1227,7 @@ class StreamDiffusionWrapper:
                         control_input_names = unet_model.get_input_names()
                     
                     # Unified compilation path 
-                    from streamdiffusion.acceleration.tensorrt.conditioning_wrapper import UnifiedExportWrapper
+                    from streamdiffusion.acceleration.tensorrt.unet_unified_export import UnifiedExportWrapper
 
                     wrapped_unet = UnifiedExportWrapper(
                         stream.unet,
