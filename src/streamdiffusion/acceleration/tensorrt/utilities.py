@@ -42,7 +42,7 @@ from polygraphy.backend.trt import (
 )
 from polygraphy.backend.trt import util as trt_util
 
-from .models import CLIP, VAE, BaseModel, UNet, VAEEncoder
+from .models.models import CLIP, VAE, BaseModel, UNet, VAEEncoder
 
 # Set up logger for this module
 import logging

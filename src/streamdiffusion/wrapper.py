@@ -978,7 +978,7 @@ class StreamDiffusionWrapper:
                     AutoencoderKLEngine,
                     UNet2DConditionModelEngine,
                 )
-                from streamdiffusion.acceleration.tensorrt.models import (
+                from streamdiffusion.acceleration.tensorrt.models.models import (
                     VAE,
                     UNet,
                     VAEEncoder,

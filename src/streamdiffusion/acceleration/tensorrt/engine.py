@@ -348,7 +348,7 @@ class UNet2DConditionModelEngine:
             raise RuntimeError("No ControlNet architecture info available on engine. Cannot generate dummy inputs.")
         
         # Use the same logic as UNet.get_control() to generate control input specs
-        from .models import UNet
+        from .models.models import UNet
         
         # Create a temporary UNet model instance just to use its get_control method
         temp_unet = UNet(
