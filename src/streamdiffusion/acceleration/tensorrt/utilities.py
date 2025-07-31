@@ -532,7 +532,7 @@ def build_engine(
     return engine
 
 
-class SDXLUNetWrapper(torch.nn.Module):
+class SDXLExportWrapper(torch.nn.Module):
     """Wrapper for SDXL UNet to handle optional conditioning in legacy TensorRT"""
     
     def __init__(self, unet):
@@ -542,7 +542,7 @@ class SDXLUNetWrapper(torch.nn.Module):
         self.supports_added_cond = self._test_added_cond_support()
         
     def _get_base_unet(self, unet):
-        """Extract the base UNet from wrappers like ControlNetUNetWrapper"""
+        """Extract the base UNet from wrappers"""
         # Handle ControlNet wrapper
         if hasattr(unet, 'unet_model') and hasattr(unet.unet_model, 'config'):
             return unet.unet_model
@@ -711,11 +711,11 @@ def export_onnx(
     
     wrapped_model = model  # Default: use model as-is
     
-    # Apply SDXL wrapper for SDXL models (in practice, always ConditioningWrapper)
+    # Apply SDXL wrapper for SDXL models (in practice, always UnifiedExportWrapper)
     if is_sdxl and not is_controlnet:
         embedding_dim = getattr(model_data, 'embedding_dim', 'unknown')
         logger.info(f"Detected SDXL model (embedding_dim={embedding_dim}), using wrapper for ONNX export...")
-        wrapped_model = SDXLUNetWrapper(model)
+        wrapped_model = SDXLExportWrapper(model)
     elif not is_controlnet:
         embedding_dim = getattr(model_data, 'embedding_dim', 'unknown')
         logger.info(f"Detected non-SDXL model (embedding_dim={embedding_dim}), using model as-is for ONNX export...")

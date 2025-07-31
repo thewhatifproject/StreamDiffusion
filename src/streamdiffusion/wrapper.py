@@ -1226,10 +1226,10 @@ class StreamDiffusionWrapper:
                     if use_controlnet_trt:
                         control_input_names = unet_model.get_input_names()
                     
-                    # Unified compilation path using ConditioningWrapper
-                    from streamdiffusion.acceleration.tensorrt.conditioning_wrapper import ConditioningWrapper
+                    # Unified compilation path 
+                    from streamdiffusion.acceleration.tensorrt.conditioning_wrapper import UnifiedExportWrapper
 
-                    wrapped_unet = ConditioningWrapper(
+                    wrapped_unet = UnifiedExportWrapper(
                         stream.unet,
                         use_controlnet=use_controlnet_trt,
                         use_ipadapter=use_ipadapter_trt,
