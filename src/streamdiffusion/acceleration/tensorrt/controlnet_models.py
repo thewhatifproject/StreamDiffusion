@@ -2,7 +2,7 @@
 
 from typing import List, Dict, Optional
 from .models import BaseModel
-from .sdxl_support import SDXLConditioningHandler, get_sdxl_tensorrt_config
+from .unet_sdxl_wrapper import SDXLConditioningHandler, get_sdxl_tensorrt_config
 from ...model_detection import detect_model
 import torch
 
