@@ -7,7 +7,7 @@ conditioning parameters, and Turbo variants
 import torch
 from typing import Dict, List, Optional, Tuple, Any, Union
 from diffusers import UNet2DConditionModel
-from ...model_detection import (
+from ....model_detection import (
     detect_model,
 )
 import logging
