@@ -8,7 +8,7 @@ from diffusers.models.autoencoders.autoencoder_tiny import AutoencoderTinyOutput
 from diffusers.models.autoencoders.autoencoder_kl import DecoderOutput
 from polygraphy import cuda
 
-from .utilities import Engine
+from ..utilities import Engine
 
 # Set up logger for this module
 logger = logging.getLogger(__name__)
@@ -348,7 +348,7 @@ class UNet2DConditionModelEngine:
             raise RuntimeError("No ControlNet architecture info available on engine. Cannot generate dummy inputs.")
         
         # Use the same logic as UNet.get_control() to generate control input specs
-        from .models.models import UNet
+        from ..models.models import UNet
         
         # Create a temporary UNet model instance just to use its get_control method
         temp_unet = UNet(
