@@ -974,7 +974,7 @@ class StreamDiffusionWrapper:
                     compile_vae_decoder,
                     compile_vae_encoder,
                 )
-                from streamdiffusion.acceleration.tensorrt.engines.unet_engine import (
+                from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import (
                     AutoencoderKLEngine,
                     UNet2DConditionModelEngine,
                 )

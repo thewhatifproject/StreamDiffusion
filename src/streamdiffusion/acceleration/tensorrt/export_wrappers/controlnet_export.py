@@ -1,3 +1,5 @@
+import torch
+
 class SDXLControlNetExportWrapper(torch.nn.Module):
     """Wrapper for SDXL ControlNet models to handle added_cond_kwargs properly during ONNX export"""
     
