@@ -28,7 +28,32 @@ from img2img import Pipeline
 mimetypes.add_type("application/javascript", ".js")
 
 THROTTLE = 1.0 / 120
-# logging.basicConfig(level=logging.DEBUG)
+
+# Configure logging
+def setup_logging(log_level: str = "INFO"):
+    """Setup logging configuration for the application"""
+    # Convert string to logging level
+    numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=numeric_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Set up logger for streamdiffusion modules
+    streamdiffusion_logger = logging.getLogger('streamdiffusion')
+    streamdiffusion_logger.setLevel(numeric_level)
+    
+    # Set up logger for this application
+    app_logger = logging.getLogger('realtime_img2img')
+    app_logger.setLevel(numeric_level)
+    
+    return app_logger
+
+# Initialize logger
+logger = setup_logging(config.log_level)
 
 
 class App:
@@ -45,7 +70,17 @@ class App:
         # Store current resolution for pipeline recreation
         self.new_width = 512
         self.new_height = 512
+        # Store uploaded style image persistently
+        self.uploaded_style_image = None
         self.init_app()
+
+    def cleanup(self):
+        """Cleanup resources when app is shutting down"""
+        logger.info("App cleanup: Starting application cleanup...")
+        if self.pipeline:
+            self._cleanup_pipeline(self.pipeline)
+            self.pipeline = None
+        logger.info("App cleanup: Completed application cleanup")
 
     def init_app(self):
         # Enhanced CORS for API-only development mode
@@ -147,29 +182,36 @@ class App:
                 # Create pipeline if it doesn't exist yet
                 if self.pipeline is None:
                     if self.uploaded_controlnet_config:
-                        print("stream: Creating pipeline with ControlNet config...")
+                        logger.info("stream: Creating pipeline with ControlNet config...")
                         self.pipeline = self._create_pipeline_with_config()
                     else:
-                        print("stream: Creating default pipeline...")
+                        logger.info("stream: Creating default pipeline...")
                         self.pipeline = self._create_default_pipeline()
-                    print("stream: Pipeline created successfully")
+                    logger.info("stream: Pipeline created successfully")
                 
                 # Recreate pipeline if config changed (but not resolution - that's handled separately)
-                elif (self.config_needs_reload or 
-                      (self.uploaded_controlnet_config and not (self.pipeline.use_config and self.pipeline.config and 'controlnets' in self.pipeline.config))):
-                    
+                elif self.config_needs_reload or (self.uploaded_controlnet_config and not (self.pipeline.use_config and self.pipeline.config and 'controlnets' in self.pipeline.config)) or (self.uploaded_controlnet_config and not self.pipeline.use_config):
                     if self.config_needs_reload:
-                        print("stream: Recreating pipeline with new ControlNet config...")
+                        logger.info("stream: Recreating pipeline with new ControlNet config...")
                     else:
-                        print("stream: Upgrading to ControlNet pipeline...")
+                        logger.info("stream: Upgrading to ControlNet pipeline...")
                     
+                    # Properly cleanup the old pipeline before creating new one
+                    old_pipeline = self.pipeline
+                    self.pipeline = None
+                    
+                    if old_pipeline:
+                        self._cleanup_pipeline(old_pipeline)
+                        old_pipeline = None
+                    
+                    # Create new pipeline
                     if self.uploaded_controlnet_config:
                         self.pipeline = self._create_pipeline_with_config()
                     else:
                         self.pipeline = self._create_default_pipeline()
                     
                     self.config_needs_reload = False  # Reset the flag
-                    print("stream: Pipeline recreated successfully")
+                    logger.info("stream: Pipeline recreated successfully")
 
                 async def generate():
                     while True:
@@ -197,7 +239,7 @@ class App:
                         
                         yield frame
                         if self.args.debug:
-                            print(f"Time taken: {time.time() - frame_start_time}")
+                            logger.debug(f"Time taken: {time.time() - frame_start_time}")
                         
                         # Add delay for testing - 1 frame per second
                         # await asyncio.sleep(1.0)
@@ -224,6 +266,9 @@ class App:
             
             # Add ControlNet information 
             controlnet_info = self._get_controlnet_info()
+            
+            # Add IPAdapter information
+            ipadapter_info = self._get_ipadapter_info()
             
             # Include config prompt if available
             config_prompt = None
@@ -304,9 +349,8 @@ class App:
             normalize_seed_weights = True    # default
             
             if self.pipeline:
-                current_normalize = self.pipeline.stream.get_normalize_weights()
-                normalize_prompt_weights = current_normalize
-                normalize_seed_weights = current_normalize
+                normalize_prompt_weights = self.pipeline.stream.get_normalize_prompt_weights()
+                normalize_seed_weights = self.pipeline.stream.get_normalize_seed_weights()
             elif self.uploaded_controlnet_config:
                 normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
                 normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
@@ -318,6 +362,7 @@ class App:
                     "max_queue_size": self.args.max_queue_size,
                     "page_content": page_content if info.page_content else "",
                     "controlnet": controlnet_info,
+                    "ipadapter": ipadapter_info,
                     "config_prompt": config_prompt,
                     "t_index_list": current_t_index_list,
                     "acceleration": current_acceleration,
@@ -353,6 +398,10 @@ class App:
                 self.uploaded_controlnet_config = config_data
                 self.config_needs_reload = True  # Mark that pipeline needs recreation
                 
+                # Log IPAdapter configuration for debugging
+                if 'ipadapters' in config_data:
+                    print(f"upload_controlnet_config: Found IPAdapter configuration: {config_data['ipadapters']}")
+                
                 # Get config prompt if available
                 config_prompt = config_data.get('prompt', None)
                 
@@ -373,13 +422,13 @@ class App:
                         if config_width % 64 != 0 or config_height % 64 != 0:
                             raise HTTPException(status_code=400, detail="Resolution must be multiples of 64")
                         
-                        if not (512 <= config_width <= 1024) or not (512 <= config_height <= 1024):
-                            raise HTTPException(status_code=400, detail="Resolution must be between 512 and 1024")
+                        if not (384 <= config_width <= 1024) or not (384 <= config_height <= 1024):
+                            raise HTTPException(status_code=400, detail="Resolution must be between 384 and 1024")
                         
                         # Update the resolution
                         self.new_width = config_width
                         self.new_height = config_height
-                        print(f"upload_controlnet_config: Updated resolution to {config_width}x{config_height}")
+                        logger.info(f"upload_controlnet_config: Updated resolution to {config_width}x{config_height}")
                     except Exception as e:
                         logging.error(f"upload_controlnet_config: Failed to update resolution: {e}")
                         # Don't fail the upload, just log the error
@@ -389,10 +438,10 @@ class App:
                 normalized_seed_blending = self._normalize_seed_config(config_data)
                 
                 # Debug logging
-                print(f"upload_controlnet_config: Raw prompt_blending in config: {config_data.get('prompt_blending', 'NOT FOUND')}")
-                print(f"upload_controlnet_config: Raw seed_blending in config: {config_data.get('seed_blending', 'NOT FOUND')}")
-                print(f"upload_controlnet_config: Normalized prompt blending: {normalized_prompt_blending}")
-                print(f"upload_controlnet_config: Normalized seed blending: {normalized_seed_blending}")
+                logger.debug(f"upload_controlnet_config: Raw prompt_blending in config: {config_data.get('prompt_blending', 'NOT FOUND')}")
+                logger.debug(f"upload_controlnet_config: Raw seed_blending in config: {config_data.get('seed_blending', 'NOT FOUND')}")
+                logger.debug(f"upload_controlnet_config: Normalized prompt blending: {normalized_prompt_blending}")
+                logger.debug(f"upload_controlnet_config: Normalized seed blending: {normalized_seed_blending}")
                 
                 # Get other streaming parameters from config
                 config_guidance_scale = config_data.get('guidance_scale', 1.1)
@@ -409,11 +458,16 @@ class App:
                 if aspect_ratio:
                     current_resolution += f" ({aspect_ratio})"
                 
+                # Get updated IPAdapter info for response
+                response_ipadapter_info = self._get_ipadapter_info()
+                print(f"upload_controlnet_config: Returning IPAdapter info to frontend: {response_ipadapter_info}")
+                
                 return JSONResponse({
                     "status": "success",
                     "message": "ControlNet configuration uploaded successfully",
                     "controls_updated": True,  # Flag for frontend to update controls
                     "controlnet": self._get_controlnet_info(),
+                    "ipadapter": response_ipadapter_info,  # Include updated IPAdapter info
                     "config_prompt": config_prompt,
                     "t_index_list": t_index_list,
                     "acceleration": config_acceleration,
@@ -423,9 +477,9 @@ class App:
                     "seed": config_seed,
                     "prompt_blending": normalized_prompt_blending,
                     "seed_blending": normalized_seed_blending,
+                    "current_resolution": current_resolution,  # Include updated resolution
                     "normalize_prompt_weights": config_normalize_weights,
                     "normalize_seed_weights": config_normalize_weights,
-                    "current_resolution": current_resolution,  # Include updated resolution
                 })
                 
             except Exception as e:
@@ -449,12 +503,12 @@ class App:
                 if self.pipeline:
                     try:
                         current_prompts = self.pipeline.stream.get_current_prompts()
-                        print(f"get_current_blending_config: Retrieved current prompts from pipeline: {current_prompts}")
+                        logger.debug(f"get_current_blending_config: Retrieved current prompts from pipeline: {current_prompts}")
                         if current_prompts and len(current_prompts) > 0:
                             prompt_blending_config = current_prompts
-                            print(f"get_current_blending_config: Using pipeline prompts: {prompt_blending_config}")
+                            logger.debug(f"get_current_blending_config: Using pipeline prompts: {prompt_blending_config}")
                     except Exception as e:
-                        print(f"get_current_blending_config: Error getting current prompts: {e}")
+                        logger.debug(f"get_current_blending_config: Error getting current prompts: {e}")
                         pass
                         
                     try:
@@ -531,6 +585,138 @@ class App:
             except Exception as e:
                 logging.error(f"update_controlnet_strength: Failed to update strength: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update strength: {str(e)}")
+
+        @self.app.post("/api/ipadapter/upload-style-image")
+        async def upload_style_image(file: UploadFile = File(...)):
+            """Upload a style image for IPAdapter"""
+            try:
+                # Validate file type
+                if not file.content_type or not file.content_type.startswith('image/'):
+                    raise HTTPException(status_code=400, detail="File must be an image")
+                
+                # Read file content
+                content = await file.read()
+                
+                # Save temporarily and load as PIL Image
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+                    tmp.write(content)
+                    tmp_path = tmp.name
+                
+                try:
+                    # Load and validate image
+                    from PIL import Image
+                    style_image = Image.open(tmp_path).convert("RGB")
+                    
+                    # Store the uploaded style image persistently FIRST
+                    self.uploaded_style_image = style_image
+                    print(f"upload_style_image: Stored style image with size: {style_image.size}")
+                    
+                    # If pipeline exists and has IPAdapter, update it immediately
+                    pipeline_updated = False
+                    if self.pipeline and getattr(self.pipeline, 'has_ipadapter', False):
+                        print("upload_style_image: Applying to existing pipeline")
+                        success = self.pipeline.update_ipadapter_style_image(style_image)
+                        if success:
+                            pipeline_updated = True
+                            print("upload_style_image: Successfully applied to existing pipeline")
+                            
+                            # Force prompt re-encoding to apply new style image embeddings
+                            try:
+                                current_prompts = self.pipeline.stream.get_current_prompts()
+                                if current_prompts:
+                                    print("upload_style_image: Forcing prompt re-encoding to apply new style image")
+                                    self.pipeline.stream.update_prompt(current_prompts, prompt_interpolation_method="slerp")
+                                    print("upload_style_image: Prompt re-encoding completed")
+                            except Exception as e:
+                                print(f"upload_style_image: Failed to force prompt re-encoding: {e}")
+                        else:
+                            print("upload_style_image: Failed to apply to existing pipeline")
+                    elif self.pipeline:
+                        print(f"upload_style_image: Pipeline exists but has_ipadapter={getattr(self.pipeline, 'has_ipadapter', False)}")
+                    else:
+                        print("upload_style_image: No pipeline exists yet")
+                    
+                    # Return success
+                    message = "Style image uploaded successfully"
+                    if pipeline_updated:
+                        message += " and applied to active pipeline"
+                    else:
+                        message += " and will be applied when pipeline starts"
+                    
+                    return JSONResponse({
+                        "status": "success",
+                        "message": message
+                    })
+                    
+                finally:
+                    # Clean up temp file
+                    try:
+                        os.unlink(tmp_path)
+                    except:
+                        pass
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to upload style image: {str(e)}")
+
+        @self.app.get("/api/ipadapter/uploaded-style-image")
+        async def get_uploaded_style_image():
+            """Get the currently uploaded style image"""
+            try:
+                if not self.uploaded_style_image:
+                    raise HTTPException(status_code=404, detail="No style image uploaded")
+                
+                # Convert PIL image to bytes for streaming
+                import io
+                img_buffer = io.BytesIO()
+                self.uploaded_style_image.save(img_buffer, format='JPEG', quality=95)
+                img_buffer.seek(0)
+                
+                return StreamingResponse(
+                    io.BytesIO(img_buffer.read()),
+                    media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=3600"}
+                )
+                
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to retrieve style image: {str(e)}")
+
+        @self.app.post("/api/ipadapter/update-scale")
+        async def update_ipadapter_scale(request: Request):
+            """Update IPAdapter scale/strength in real-time"""
+            try:
+                data = await request.json()
+                scale = data.get("scale")
+                
+                if scale is None:
+                    raise HTTPException(status_code=400, detail="Missing scale parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Check if we're using config mode and have ipadapters configured
+                ipadapter_enabled = (self.pipeline.use_config and 
+                                    self.pipeline.config and 
+                                    'ipadapters' in self.pipeline.config)
+                
+                if not ipadapter_enabled:
+                    raise HTTPException(status_code=400, detail="IPAdapter is not enabled")
+                
+                # Update IPAdapter scale in the pipeline
+                success = self.pipeline.update_ipadapter_scale(float(scale))
+                
+                if success:
+                    return JSONResponse({
+                        "status": "success",
+                        "message": f"Updated IPAdapter scale to {scale}"
+                    })
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to update scale in pipeline")
+                
+            except Exception as e:
+                logging.error(f"update_ipadapter_scale: Failed to update scale: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update scale: {str(e)}")
 
         @self.app.post("/api/update-t-index-list")
         async def update_t_index_list(request: Request):
@@ -669,53 +855,45 @@ class App:
                 resolution_str = data.get('resolution')
                 
                 if not resolution_str:
-                    return JSONResponse({"success": False, "detail": "Resolution parameter is required"}, status_code=400)
+                    raise HTTPException(status_code=400, detail="Resolution parameter is required")
                 
                 # Parse resolution string (e.g., "512x768 (2:3)" -> width=512, height=768)
                 resolution_part = resolution_str.split(' ')[0]  # Get "512x768" part
                 try:
                     width, height = map(int, resolution_part.split('x'))
                 except ValueError:
-                    return JSONResponse({"success": False, "detail": "Invalid resolution format. Use 'widthxheight' (e.g., '512x768')"}, status_code=400)
+                    raise HTTPException(status_code=400, detail="Invalid resolution format. Use 'widthxheight' (e.g., '512x768')")
                 
                 # Validate resolution
                 if width % 64 != 0 or height % 64 != 0:
-                    return JSONResponse({"success": False, "detail": "Resolution must be multiples of 64"}, status_code=400)
+                    raise HTTPException(status_code=400, detail="Resolution must be multiples of 64")
                 
-                if not (512 <= width <= 1024) or not (512 <= height <= 1024):
-                    return JSONResponse({"success": False, "detail": "Resolution must be between 512 and 1024"}, status_code=400)
+                if not (384 <= width <= 1024) or not (384 <= height <= 1024):
+                    raise HTTPException(status_code=400, detail="Resolution must be between 384 and 1024")
                 
                 # Check if resolution actually changed
                 if width == self.new_width and height == self.new_height:
-                    return JSONResponse({"success": True, "detail": "Resolution unchanged"})
+                    raise HTTPException(status_code=400, detail="Resolution unchanged")
                 
-                print(f"API: Updating resolution from {self.new_width}x{self.new_height} to {width}x{height}")
+                logger.info(f"API: Updating resolution from {self.new_width}x{self.new_height} to {width}x{height}")
                 
                 # Create new pipeline with new resolution
                 try:
                     self._update_resolution(width, height)
                     
-                    print(f"API: Resolution update successful: {width}x{height}")
+                    logger.info(f"API: Resolution update successful: {width}x{height}")
                     return JSONResponse({
-                        "success": True,
-                        "detail": f"Resolution updated to {width}x{height}",
-                        "method": "pipeline_recreation"
+                        "status": "success",
+                        "message": f"Resolution updated to {width}x{height}",
                     })
                     
                 except Exception as update_error:
-                    print(f"API: Resolution update failed: {update_error}")
-                    return JSONResponse({
-                        "success": False,
-                        "detail": f"Failed to update resolution: {update_error}",
-                        "method": "failed"
-                    }, status_code=500)
-                
+                    logger.error(f"API: Resolution update failed: {update_error}")
+                    raise HTTPException(status_code=500, detail=f"Failed to update resolution: {update_error}")
+
             except Exception as e:
-                print(f"API: Resolution update error: {e}")
-                return JSONResponse({
-                    "success": False,
-                    "detail": f"Failed to update resolution: {e}"
-                }, status_code=500)
+                logger.error(f"API: Resolution update error: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update resolution: {e}")
 
         @self.app.post("/api/update-normalize-prompt-weights")
         async def update_normalize_prompt_weights(request: Request):
@@ -777,9 +955,9 @@ class App:
                 prompt_list = data.get("prompt_list")
                 interpolation_method = data.get("interpolation_method", "slerp")
                 
-                print(f"update_prompt_blending: Received request with {len(prompt_list) if prompt_list else 0} prompts")
-                print(f"update_prompt_blending: prompt_list = {prompt_list}")
-                print(f"update_prompt_blending: interpolation_method = {interpolation_method}")
+                logger.debug(f"update_prompt_blending: Received request with {len(prompt_list) if prompt_list else 0} prompts")
+                logger.debug(f"update_prompt_blending: prompt_list = {prompt_list}")
+                logger.debug(f"update_prompt_blending: interpolation_method = {interpolation_method}")
                 
                 if prompt_list is None:
                     raise HTTPException(status_code=400, detail="Missing prompt_list parameter")
@@ -800,7 +978,7 @@ class App:
                 # Convert list format [[prompt, weight], ...] to tuple format [(prompt, weight), ...]
                 prompt_tuples = [(item[0], item[1]) for item in prompt_list]
                 
-                print(f"update_prompt_blending: Calling pipeline.stream.update_prompt with {len(prompt_tuples)} prompts")
+                logger.debug(f"update_prompt_blending: Calling pipeline.stream.update_prompt with {len(prompt_tuples)} prompts")
                 
                 # Update prompt blending using the unified public interface
                 self.pipeline.stream.update_prompt(
@@ -808,7 +986,7 @@ class App:
                     prompt_interpolation_method=interpolation_method
                 )
                 
-                print(f"update_prompt_blending: Successfully updated prompt blending")
+                logger.debug(f"update_prompt_blending: Successfully updated prompt blending")
                 
                 return JSONResponse({
                     "status": "success",
@@ -816,7 +994,7 @@ class App:
                 })
                 
             except Exception as e:
-                print(f"update_prompt_blending: Error: {e}")
+                logger.error(f"update_prompt_blending: Error: {e}")
                 logging.error(f"update_prompt_blending: Failed to update prompt blending: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update prompt blending: {str(e)}")
 
@@ -1129,7 +1307,6 @@ class App:
         if not self.args.api_only:
             if not os.path.exists("public"):
                 os.makedirs("public")
-
             self.app.mount(
                 "/", StaticFiles(directory="./frontend/public", html=True), name="public"
             )
@@ -1304,6 +1481,25 @@ class App:
             default_prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed, intricate, full of colour, cinematic lighting, trending on artstation, 8k, hyperrealistic, focused, extreme details, unreal engine 5 cinematic, masterpiece"
             new_pipeline.stream.update_prompt([(default_prompt, 1.0)], prompt_interpolation_method="slerp")
         
+        # Apply uploaded style image if available and pipeline has IPAdapter
+        if self.uploaded_style_image and getattr(new_pipeline, 'has_ipadapter', False):
+            print("_create_pipeline_with_config: Applying stored style image to new pipeline")
+            success = new_pipeline.update_ipadapter_style_image(self.uploaded_style_image)
+            if success:
+                print("_create_pipeline_with_config: Style image applied successfully")
+                
+                # Force prompt re-encoding to apply style image embeddings
+                try:
+                    current_prompts = new_pipeline.stream.get_current_prompts()
+                    if current_prompts:
+                        print("_create_pipeline_with_config: Forcing prompt re-encoding to apply style image")
+                        new_pipeline.stream.update_prompt(current_prompts, prompt_interpolation_method="slerp")
+                        print("_create_pipeline_with_config: Prompt re-encoding completed")
+                except Exception as e:
+                    print(f"_create_pipeline_with_config: Failed to force prompt re-encoding: {e}")
+            else:
+                print("_create_pipeline_with_config: Failed to apply style image")
+        
         # Clean up temp file if created
         if self.uploaded_controlnet_config and not controlnet_config_path:
             try:
@@ -1348,6 +1544,66 @@ class App:
         
         return controlnet_info
 
+    def _get_ipadapter_info(self):
+        """Get IPAdapter information from uploaded config or active pipeline"""
+        ipadapter_info = {
+            "enabled": False,
+            "config_loaded": False,
+            "scale": 1.0,
+            "model_path": None,
+            "style_image_set": False,
+            "style_image_path": None
+        }
+        
+        # Check uploaded config first
+        if self.uploaded_controlnet_config:
+            if 'ipadapters' in self.uploaded_controlnet_config and len(self.uploaded_controlnet_config['ipadapters']) > 0:
+                ipadapter_info["enabled"] = True
+                ipadapter_info["config_loaded"] = True
+                
+                # Get info from first IPAdapter config
+                first_ipadapter = self.uploaded_controlnet_config['ipadapters'][0]
+                ipadapter_info["scale"] = first_ipadapter.get('scale', 1.0)
+                ipadapter_info["model_path"] = first_ipadapter.get('ipadapter_model_path')
+                
+                # Check for style image - prioritize uploaded style image over config style image
+                if self.uploaded_style_image:
+                    ipadapter_info["style_image_set"] = True
+                    ipadapter_info["style_image_path"] = "/api/ipadapter/uploaded-style-image"  # URL to fetch uploaded image
+                elif 'style_image' in first_ipadapter:
+                    ipadapter_info["style_image_set"] = True
+                    ipadapter_info["style_image_path"] = first_ipadapter['style_image']
+                    
+        # Otherwise check active pipeline
+        elif self.pipeline and self.pipeline.use_config and self.pipeline.config and 'ipadapters' in self.pipeline.config:
+            if len(self.pipeline.config['ipadapters']) > 0:
+                ipadapter_info["enabled"] = True
+                ipadapter_info["config_loaded"] = True
+                
+                # Get info from first IPAdapter config
+                first_ipadapter = self.pipeline.config['ipadapters'][0]
+                ipadapter_info["scale"] = first_ipadapter.get('scale', 1.0)
+                ipadapter_info["model_path"] = first_ipadapter.get('ipadapter_model_path')
+                
+                # Check for style image - prioritize uploaded style image over config style image
+                if self.uploaded_style_image:
+                    ipadapter_info["style_image_set"] = True
+                    ipadapter_info["style_image_path"] = "/api/ipadapter/uploaded-style-image"  # URL to fetch uploaded image
+                elif 'style_image' in first_ipadapter:
+                    ipadapter_info["style_image_set"] = True
+                    ipadapter_info["style_image_path"] = first_ipadapter['style_image']
+                    
+            # Try to get current scale from active pipeline if available
+            try:
+                if hasattr(self.pipeline, 'get_ipadapter_info'):
+                    pipeline_info = self.pipeline.get_ipadapter_info()
+                    if pipeline_info.get("enabled"):
+                        ipadapter_info["scale"] = pipeline_info.get("scale", ipadapter_info["scale"])
+            except:
+                pass
+        
+        return ipadapter_info
+
     def _calculate_aspect_ratio(self, width: int, height: int) -> str:
         """Calculate and return aspect ratio as a string"""
         import math
@@ -1359,55 +1615,114 @@ class App:
         
         return f"{simplified_width}:{simplified_height}"
 
+    def _cleanup_pipeline(self, pipeline):
+        """Properly cleanup a pipeline and free VRAM using StreamDiffusion's built-in cleanup"""
+        if pipeline is None:
+            return
+            
+        try:
+            logger.info("Starting pipeline cleanup...")
+            
+            # Use StreamDiffusion's built-in cleanup method which properly handles:
+            # - TensorRT engine cleanup
+            # - ControlNet engine cleanup  
+            # - Multiple garbage collection cycles
+            # - CUDA cache clearing
+            # - Memory tracking
+            if hasattr(pipeline, 'stream') and pipeline.stream and hasattr(pipeline.stream, 'cleanup_gpu_memory'):
+                pipeline.stream.cleanup_gpu_memory()
+                logger.info("Pipeline cleanup completed using StreamDiffusion cleanup")
+            else:
+                # Fallback cleanup if the method doesn't exist
+                logger.warning("StreamDiffusion cleanup method not found, using fallback cleanup")
+                if hasattr(pipeline, 'stream') and pipeline.stream:
+                    del pipeline.stream
+                del pipeline
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    
+        except Exception as e:
+            logger.error(f"Error during pipeline cleanup: {e}")
+            # Still try to clear CUDA cache even if cleanup fails
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
     def _update_resolution(self, width: int, height: int) -> None:
         """Create a new pipeline with the specified resolution and replace the old one."""
-        print(f"Creating new pipeline with resolution {width}x{height}")
+        logger.info(f"Creating new pipeline with resolution {width}x{height}")
         
-        # Store current pipeline state
-        current_prompt = getattr(self.pipeline, 'prompt', '')
-        current_negative_prompt = getattr(self.pipeline, 'negative_prompt', '')
-        current_guidance_scale = getattr(self.pipeline, 'guidance_scale', 1.2)
-        current_num_inference_steps = getattr(self.pipeline, 'num_inference_steps', 50)
+        # Store current pipeline state before cleanup
+        current_prompt = getattr(self.pipeline, 'prompt', '') if self.pipeline else ''
+        current_negative_prompt = getattr(self.pipeline, 'negative_prompt', '') if self.pipeline else ''
+        current_guidance_scale = getattr(self.pipeline, 'guidance_scale', 1.2) if self.pipeline else 1.2
+        current_num_inference_steps = getattr(self.pipeline, 'num_inference_steps', 50) if self.pipeline else 50
         
-        # Update current resolution BEFORE creating new pipeline
+        # Store reference to old pipeline for cleanup
+        old_pipeline = self.pipeline
+        
+        # Clear current pipeline reference before cleanup to prevent any access during cleanup
+        self.pipeline = None
+        
+        # Cleanup old pipeline and free VRAM
+        if old_pipeline:
+            self._cleanup_pipeline(old_pipeline)
+            old_pipeline = None
+        
+        # Update current resolution 
         self.new_width = width
         self.new_height = height
         
         # Create new pipeline with new resolution
-        if self.uploaded_controlnet_config:
-            new_pipeline = self._create_pipeline_with_config()
-        else:
-            new_pipeline = self._create_default_pipeline()
-        
-        # Replace old pipeline
-        old_pipeline = self.pipeline
-        self.pipeline = new_pipeline
-        
-        # Restore pipeline state
-        if current_prompt:
-            self.pipeline.stream.prepare(
-                prompt=current_prompt,
-                negative_prompt=current_negative_prompt,
-                guidance_scale=current_guidance_scale,
-                num_inference_steps=current_num_inference_steps
-            )
-            # Also update the pipeline's stored values
-            self.pipeline.prompt = current_prompt
-            self.pipeline.negative_prompt = current_negative_prompt
-            self.pipeline.guidance_scale = current_guidance_scale
-            self.pipeline.num_inference_steps = current_num_inference_steps
-            self.pipeline.last_prompt = current_prompt
-        
-        # Clean up old pipeline
-        if old_pipeline:
-            try:
-                # Clear any references to free memory
-                del old_pipeline
-            except:
-                pass
-        
-        print(f"Pipeline updated successfully to {width}x{height}")
-
+        try:
+            if self.uploaded_controlnet_config:
+                new_pipeline = self._create_pipeline_with_config()
+            else:
+                new_pipeline = self._create_default_pipeline()
+            
+            # Apply uploaded style image if available and pipeline has IPAdapter
+            if self.uploaded_style_image and getattr(new_pipeline, 'has_ipadapter', False):
+                print("_update_resolution: Applying stored style image to new pipeline")
+                success = new_pipeline.update_ipadapter_style_image(self.uploaded_style_image)
+                if success:
+                    print("_update_resolution: Style image applied successfully")
+                    
+                    # Force prompt re-encoding to apply style image embeddings
+                    try:
+                        current_prompts = new_pipeline.stream.get_current_prompts()
+                        if current_prompts:
+                            print("_update_resolution: Forcing prompt re-encoding to apply style image")
+                            new_pipeline.stream.update_prompt(current_prompts, prompt_interpolation_method="slerp")
+                            print("_update_resolution: Prompt re-encoding completed")
+                    except Exception as e:
+                        print(f"_update_resolution: Failed to force prompt re-encoding: {e}")
+                else:
+                    print("_update_resolution: Failed to apply style image")
+            
+            # Set the new pipeline
+            self.pipeline = new_pipeline
+            
+            # Restore pipeline state
+            if current_prompt:
+                self.pipeline.stream.prepare(
+                    prompt=current_prompt,
+                    negative_prompt=current_negative_prompt,
+                    guidance_scale=current_guidance_scale,
+                    num_inference_steps=current_num_inference_steps
+                )
+                # Also update the pipeline's stored values
+                self.pipeline.prompt = current_prompt
+                self.pipeline.negative_prompt = current_negative_prompt
+                self.pipeline.guidance_scale = current_guidance_scale
+                self.pipeline.num_inference_steps = current_num_inference_steps
+                self.pipeline.last_prompt = current_prompt
+            
+            logger.info(f"Pipeline updated successfully to {width}x{height}")
+            
+        except Exception as e:
+            logger.error(f"Failed to create new pipeline: {e}")
+            # Make sure we don't leave the system in a broken state
+            self.pipeline = None
+            raise
 
 app = App(config).app
 

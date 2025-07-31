@@ -1,4 +1,5 @@
 import os
+import sys
 import yaml
 import json
 from typing import Dict, List, Optional, Union, Any, Tuple
@@ -7,12 +8,9 @@ from pathlib import Path
 def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
     """Load StreamDiffusion configuration from YAML or JSON file"""
     config_path = Path(config_path)
-
-
+    
     if not config_path.exists():
         raise FileNotFoundError(f"load_config: Configuration file not found: {config_path}")
-
-
     with open(config_path, 'r', encoding='utf-8') as f:
         if config_path.suffix.lower() in ['.yaml', '.yml']:
             config_data = yaml.safe_load(f)
@@ -20,22 +18,18 @@ def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
             config_data = json.load(f)
         else:
             raise ValueError(f"load_config: Unsupported configuration file format: {config_path.suffix}")
-
-
+    
     _validate_config(config_data)
-
-
+    
     return config_data
+
 
 def save_config(config: Dict[str, Any], config_path: Union[str, Path]) -> None:
     """Save StreamDiffusion configuration to YAML or JSON file"""
     config_path = Path(config_path)
-
-
+    
     _validate_config(config)
     config_path.parent.mkdir(parents=True, exist_ok=True)
-
-
     with open(config_path, 'w', encoding='utf-8') as f:
         if config_path.suffix.lower() in ['.yaml', '.yml']:
             yaml.dump(config, f, default_flow_style=False, indent=2)
@@ -56,12 +50,15 @@ def create_wrapper_from_config(config: Dict[str, Any], **overrides) -> Any:
     from streamdiffusion import StreamDiffusionWrapper
     import torch
 
-
     final_config = {**config, **overrides}
     wrapper_params = _extract_wrapper_params(final_config)
     wrapper = StreamDiffusionWrapper(**wrapper_params)
+    
+    # Setup IPAdapter if configured
+    if 'ipadapters' in final_config and final_config['ipadapters']:
+        wrapper = _setup_ipadapter_from_config(wrapper, final_config)
+    
     prepare_params = _extract_prepare_params(final_config)
-
 
     # Handle prompt configuration with clear precedence
     if 'prompt_blending' in final_config:
@@ -95,14 +92,12 @@ def create_wrapper_from_config(config: Dict[str, Any], **overrides) -> Any:
             interpolation_method=seed_blend_config.get('interpolation_method', 'linear')
         )
 
-
     return wrapper
+
 
 def _extract_wrapper_params(config: Dict[str, Any]) -> Dict[str, Any]:
     """Extract parameters for StreamDiffusionWrapper.__init__() from config"""
     import torch
-
-
     param_map = {
         'model_id_or_path': config.get('model_id', 'stabilityai/sd-turbo'),
         't_index_list': config.get('t_index_list', [0, 16, 32, 45]),
@@ -134,17 +129,23 @@ def _extract_wrapper_params(config: Dict[str, Any]) -> Dict[str, Any]:
         'normalize_seed_weights': config.get('normalize_seed_weights', True),
         'enable_pytorch_fallback': config.get('enable_pytorch_fallback', False),
     }
-
-
     if 'controlnets' in config and config['controlnets']:
         param_map['use_controlnet'] = True
         param_map['controlnet_config'] = _prepare_controlnet_configs(config)
     else:
         param_map['use_controlnet'] = config.get('use_controlnet', False)
         param_map['controlnet_config'] = config.get('controlnet_config')
-
-
+    
+    # Set IPAdapter usage if IPAdapters are configured
+    if 'ipadapters' in config and config['ipadapters']:
+        param_map['use_ipadapter'] = True
+        param_map['ipadapter_config'] = _prepare_ipadapter_configs(config)
+    else:
+        param_map['use_ipadapter'] = config.get('use_ipadapter', False)
+        param_map['ipadapter_config'] = config.get('ipadapter_config')
+    
     return {k: v for k, v in param_map.items() if v is not None}
+
 
 def _extract_prepare_params(config: Dict[str, Any]) -> Dict[str, Any]:
     """Extract parameters for wrapper.prepare() from config"""
@@ -179,8 +180,7 @@ def _extract_prepare_params(config: Dict[str, Any]) -> Dict[str, Any]:
 def _prepare_controlnet_configs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Prepare ControlNet configurations for wrapper"""
     controlnet_configs = []
-
-
+    pipeline_type = config.get('pipeline_type', 'sd1.5')
     for cn_config in config['controlnets']:
         controlnet_config = {
             'model_id': cn_config['model_id'],
@@ -188,13 +188,131 @@ def _prepare_controlnet_configs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             'conditioning_scale': cn_config.get('conditioning_scale', 1.0),
             'enabled': cn_config.get('enabled', True),
             'preprocessor_params': cn_config.get('preprocessor_params'),
+            'pipeline_type': pipeline_type,
             'control_guidance_start': cn_config.get('control_guidance_start', 0.0),
             'control_guidance_end': cn_config.get('control_guidance_end', 1.0),
         }
         controlnet_configs.append(controlnet_config)
-
-
+    
     return controlnet_configs
+
+
+def _prepare_ipadapter_configs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Prepare IPAdapter configurations for wrapper"""
+    ipadapter_configs = []
+    
+    for ip_config in config['ipadapters']:
+        ipadapter_config = {
+            'ipadapter_model_path': ip_config['ipadapter_model_path'],
+            'image_encoder_path': ip_config['image_encoder_path'],
+            'style_image': ip_config.get('style_image'),
+            'scale': ip_config.get('scale', 1.0),
+            'enabled': ip_config.get('enabled', True),
+        }
+        ipadapter_configs.append(ipadapter_config)
+    
+    return ipadapter_configs
+
+
+def _setup_ipadapter_from_config(wrapper, config: Dict[str, Any]):
+    """Setup IPAdapter pipeline from configuration"""
+    # Ensure Diffusers_IPAdapter is in path
+    _ensure_ipadapter_path()
+    
+    try:
+        from .ipadapter import BaseIPAdapterPipeline
+        
+        # Create pipeline
+        device = config.get('device', 'cuda')
+        dtype = _parse_dtype(config.get('dtype', 'float16'))
+        pipeline = BaseIPAdapterPipeline(wrapper.stream, device, dtype)
+        
+        # Handle preloaded models vs fresh setup
+        if _has_preloaded_models(wrapper):
+            _configure_preloaded_pipeline(pipeline, config)
+        else:
+            _configure_fresh_pipeline(pipeline, config)
+        
+        # Setup pipeline attributes
+        pipeline.batch_size = getattr(wrapper, 'batch_size', 1)
+        pipeline._original_wrapper = wrapper
+        
+        return pipeline
+        
+    except ImportError as e:
+        raise ImportError(f"_setup_ipadapter_from_config: IPAdapter module not found: {e}") from e
+    except Exception as e:
+        print(f"_setup_ipadapter_from_config: Failed to setup IPAdapter: {e}")
+        raise
+
+
+def _ensure_ipadapter_path():
+    """Ensure Diffusers_IPAdapter is in Python path"""
+    from pathlib import Path
+    diffusers_path = Path(__file__).parent / "ipadapter" / "Diffusers_IPAdapter"
+    if diffusers_path.exists() and str(diffusers_path) not in sys.path:
+        sys.path.insert(0, str(diffusers_path))
+
+
+def _has_preloaded_models(wrapper) -> bool:
+    """Check if wrapper has preloaded IPAdapter models"""
+    return (hasattr(wrapper, 'stream') and 
+            hasattr(wrapper.stream, '_preloaded_with_weights') and 
+            wrapper.stream._preloaded_with_weights and
+            hasattr(wrapper.stream, '_preloaded_ipadapters') and 
+            wrapper.stream._preloaded_ipadapters)
+
+
+def _configure_preloaded_pipeline(pipeline, config: Dict[str, Any]):
+    """Configure pipeline using preloaded models"""
+    pipeline.ipadapter = pipeline.stream._preloaded_ipadapters[0]
+    
+    ipadapter_configs = _prepare_ipadapter_configs(config)
+    if ipadapter_configs:
+        ip_config = ipadapter_configs[0]
+        if ip_config.get('enabled', True):
+            _apply_ipadapter_config(pipeline, ip_config)
+            
+            # Register enhancer for TensorRT compatibility
+            pipeline.stream._param_updater.register_embedding_enhancer(
+                pipeline._enhance_embeddings_with_ipadapter, name="IPAdapter"
+            )
+            
+            if len(ipadapter_configs) > 1:
+                print("_setup_ipadapter_from_config: WARNING - Multiple IPAdapters configured but only first one will be used")
+
+
+def _configure_fresh_pipeline(pipeline, config: Dict[str, Any]):
+    """Configure pipeline with fresh IPAdapter setup"""
+    ipadapter_configs = _prepare_ipadapter_configs(config)
+    if ipadapter_configs:
+        ip_config = ipadapter_configs[0]
+        if ip_config.get('enabled', True):
+            pipeline.set_ipadapter(
+                ipadapter_model_path=ip_config['ipadapter_model_path'],
+                image_encoder_path=ip_config['image_encoder_path'],
+                style_image=ip_config.get('style_image'),
+                scale=ip_config.get('scale', 1.0)
+            )
+            
+            if len(ipadapter_configs) > 1:
+                print("_setup_ipadapter_from_config: WARNING - Multiple IPAdapters configured but only first one will be used")
+
+
+def _apply_ipadapter_config(pipeline, ip_config: Dict[str, Any]):
+    """Apply configuration to existing IPAdapter"""
+    # Set style image
+    style_image_path = ip_config.get('style_image')
+    if style_image_path:
+        from PIL import Image
+        pipeline.style_image = Image.open(style_image_path).convert("RGB")
+    
+    # Set scale
+    scale = ip_config.get('scale', 1.0)
+    pipeline.scale = scale
+    if pipeline.ipadapter:
+        pipeline.ipadapter.set_scale(scale)
+
 
 def create_prompt_blending_config(
     base_config: Dict[str, Any],
@@ -213,6 +331,7 @@ def create_prompt_blending_config(
     
     return config
 
+
 def create_seed_blending_config(
     base_config: Dict[str, Any],
     seed_list: List[Tuple[int, float]],
@@ -230,6 +349,7 @@ def create_seed_blending_config(
     
     return config
 
+
 def set_normalize_weights_config(
     base_config: Dict[str, Any],
     normalize_prompt_weights: bool = True,
@@ -246,42 +366,50 @@ def set_normalize_weights_config(
 def _parse_dtype(dtype_str: str) -> Any:
     """Parse dtype string to torch dtype"""
     import torch
-
-
+    
     dtype_map = {
         'float16': torch.float16,
         'float32': torch.float32,
         'half': torch.float16,
         'float': torch.float32,
     }
-
-
+    
     if isinstance(dtype_str, str):
         return dtype_map.get(dtype_str.lower(), torch.float16)
     return dtype_str  # Assume it's already a torch dtype
-
 def _validate_config(config: Dict[str, Any]) -> None:
     """Basic validation of configuration dictionary"""
     if not isinstance(config, dict):
         raise ValueError("_validate_config: Configuration must be a dictionary")
-
-
+    
     if 'model_id' not in config:
         raise ValueError("_validate_config: Missing required field: model_id")
-
-
+    
     if 'controlnets' in config:
         if not isinstance(config['controlnets'], list):
             raise ValueError("_validate_config: 'controlnets' must be a list")
-
-
+        
         for i, controlnet in enumerate(config['controlnets']):
             if not isinstance(controlnet, dict):
                 raise ValueError(f"_validate_config: ControlNet {i} must be a dictionary")
-
-
+            
             if 'model_id' not in controlnet:
                 raise ValueError(f"_validate_config: ControlNet {i} missing required 'model_id'")
+    
+    # Validate ipadapters if present
+    if 'ipadapters' in config:
+        if not isinstance(config['ipadapters'], list):
+            raise ValueError("_validate_config: 'ipadapters' must be a list")
+        
+        for i, ipadapter in enumerate(config['ipadapters']):
+            if not isinstance(ipadapter, dict):
+                raise ValueError(f"_validate_config: IPAdapter {i} must be a dictionary")
+            
+            if 'ipadapter_model_path' not in ipadapter:
+                raise ValueError(f"_validate_config: IPAdapter {i} missing required 'ipadapter_model_path'")
+            
+            if 'image_encoder_path' not in ipadapter:
+                raise ValueError(f"_validate_config: IPAdapter {i} missing required 'image_encoder_path'")
 
     # Validate prompt blending configuration if present
     if 'prompt_blending' in config:
@@ -328,8 +456,8 @@ def _validate_config(config: Dict[str, Any]) -> None:
                 if not isinstance(seed_value, int) or seed_value < 0:
                     raise ValueError(f"_validate_config: Seed value {i} must be a non-negative integer")
                 
-                if not isinstance(weight, (int, float)) or weight < 0:
-                    raise ValueError(f"_validate_config: Seed weight {i} must be a non-negative number")
+            if not isinstance(weight, (int, float)) or weight < 0:
+                raise ValueError(f"_validate_config: Seed weight {i} must be a non-negative number")
         
         interpolation_method = seed_blend_config.get('interpolation_method', 'linear')
         if interpolation_method not in ['linear', 'slerp']:

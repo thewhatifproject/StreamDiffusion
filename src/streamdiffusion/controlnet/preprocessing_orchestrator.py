@@ -31,6 +31,10 @@ class PreprocessingOrchestrator:
         # Pipeline state for pipelined processing
         self._next_frame_future = None
         self._next_frame_result = None
+        
+        # Pipeline state for embedding preprocessing
+        self._next_embedding_future = None
+        self._next_embedding_result = None
     
     def cleanup(self) -> None:
         """Cleanup thread pool resources"""
@@ -133,6 +137,143 @@ class PreprocessingOrchestrator:
         """Clear preprocessing cache"""
         self._preprocessed_cache.clear()
         self._last_input_frame = None
+    
+    def process_embedding_preprocessors(self, 
+                                      input_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
+                                      embedding_preprocessors: List[Any],
+                                      stream_width: int,
+                                      stream_height: int) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Process IPAdapter embedding preprocessors with same parallelism as ControlNet.
+        
+        Args:
+            input_image: Input image to process
+            embedding_preprocessors: List of IPAdapterEmbeddingPreprocessor instances
+            stream_width: Target width for processing
+            stream_height: Target height for processing
+            
+        Returns:
+            List of (positive_embeds, negative_embeds) tuples
+        """
+        if not embedding_preprocessors:
+            return []
+        
+        # For embedding preprocessing, we don't skip on cache hits - we need the actual embeddings
+        # (Unlike spatial preprocessing where empty list means "no update needed")
+        
+        # Prepare input variants for processing
+        control_variants = self._prepare_input_variants(input_image, stream_width, stream_height)
+        
+        # Process in parallel if multiple preprocessors, otherwise process directly
+        if len(embedding_preprocessors) > 1:
+            results = self._process_embedding_preprocessors_parallel(
+                embedding_preprocessors, control_variants, stream_width, stream_height
+            )
+        else:
+            results = self._process_embedding_preprocessors_sequential(
+                embedding_preprocessors, control_variants, stream_width, stream_height
+            )
+        
+        return results
+    
+    def process_embedding_preprocessors_pipelined(self, 
+                                                input_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
+                                                embedding_preprocessors: List[Any],
+                                                stream_width: int,
+                                                stream_height: int) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Process IPAdapter embedding preprocessors with inter-frame pipelining.
+        
+        Frame N+1 embeddings are generated during frame N diffusion for maximum performance.
+        
+        Returns:
+            List of (positive_embeds, negative_embeds) tuples
+        """
+        if not embedding_preprocessors:
+            return []
+        
+        # Wait for previous frame embedding preprocessing
+        self._wait_for_previous_embedding_preprocessing()
+        
+        # Start next frame embedding preprocessing in background
+        self._start_next_frame_embedding_preprocessing(
+            input_image, embedding_preprocessors, stream_width, stream_height
+        )
+        
+        # Apply current frame embedding preprocessing results
+        return self._apply_current_frame_embedding_preprocessing(embedding_preprocessors)
+    
+    def _process_embedding_preprocessors_parallel(self,
+                                                embedding_preprocessors: List[Any],
+                                                control_variants: Dict[str, Any],
+                                                stream_width: int,
+                                                stream_height: int) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """Process multiple embedding preprocessors in parallel"""
+        futures = [
+            self._preprocessor_executor.submit(
+                self._process_single_embedding_preprocessor,
+                i, preprocessor, control_variants, stream_width, stream_height
+            )
+            for i, preprocessor in enumerate(embedding_preprocessors)
+        ]
+        
+        results = [None] * len(embedding_preprocessors)
+        
+        for future in futures:
+            result = future.result()
+            if result and result['embeddings'] is not None:
+                index = result['index']
+                embeddings = result['embeddings']
+                results[index] = embeddings
+        
+        return results
+    
+    def _process_embedding_preprocessors_sequential(self,
+                                                  embedding_preprocessors: List[Any],
+                                                  control_variants: Dict[str, Any],
+                                                  stream_width: int,
+                                                  stream_height: int) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """Process single embedding preprocessor directly"""
+        result = self._process_single_embedding_preprocessor(
+            0, embedding_preprocessors[0], control_variants, stream_width, stream_height
+        )
+        
+        if result and result['embeddings'] is not None:
+            return [result['embeddings']]
+        else:
+            return [None]
+    
+    def _process_single_embedding_preprocessor(self,
+                                             index: int,
+                                             preprocessor: Any,
+                                             control_variants: Dict[str, Any],
+                                             stream_width: int,
+                                             stream_height: int) -> Optional[Dict[str, Any]]:
+        """Process a single embedding preprocessor"""
+        try:
+            # Use tensor processing if available and input is tensor
+            if (hasattr(preprocessor, 'process_tensor') and 
+                control_variants['tensor'] is not None):
+                embeddings = preprocessor.process_tensor(control_variants['tensor'])
+                return {
+                    'index': index,
+                    'embeddings': embeddings
+                }
+            
+            # Use PIL processing for non-tensor inputs
+            if control_variants['image'] is not None:
+                embeddings = preprocessor.process(control_variants['image'])
+                return {
+                    'index': index,
+                    'embeddings': embeddings
+                }
+            
+            return None
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return None
     
     # Private methods for implementation
     
@@ -639,4 +780,98 @@ class PreprocessingOrchestrator:
         self._preprocessed_cache.clear()
         self._preprocessed_cache.update(processed_cache)
         
-        return processed_images 
+        return processed_images
+    
+    # Embedding pipelining methods
+    
+    def _start_next_frame_embedding_preprocessing(self,
+                                                input_image: Union[str, Image.Image, np.ndarray, torch.Tensor],
+                                                embedding_preprocessors: List[Any],
+                                                stream_width: int,
+                                                stream_height: int) -> None:
+        """Start embedding preprocessing for next frame in background thread"""
+        if not embedding_preprocessors:
+            self._next_embedding_future = None
+            return
+        
+        # Prepare processing data
+        control_variants = self._prepare_input_variants_optimized(input_image)
+        
+        # Submit optimized background processing
+        self._next_embedding_future = self._preprocessor_executor.submit(
+            self._process_embedding_preprocessors_background,
+            embedding_preprocessors,
+            control_variants,
+            stream_width,
+            stream_height
+        )
+    
+    def _process_embedding_preprocessors_background(self,
+                                                  embedding_preprocessors: List[Any],
+                                                  control_variants: Dict[str, Any],
+                                                  stream_width: int,
+                                                  stream_height: int) -> Dict[str, Any]:
+        """Background embedding preprocessing in separate thread"""
+        try:
+            
+            if len(embedding_preprocessors) > 1:
+                # Parallel processing for multiple preprocessors
+                futures = []
+                for i, preprocessor in enumerate(embedding_preprocessors):
+                    future = self._preprocessor_executor.submit(
+                        self._process_single_embedding_preprocessor,
+                        i, preprocessor, control_variants, stream_width, stream_height
+                    )
+                    futures.append((future, i))
+                
+                # Collect results
+                results = [None] * len(embedding_preprocessors)
+                for future, index in futures:
+                    result = future.result()
+                    if result and result['embeddings'] is not None:
+                        results[index] = result['embeddings']
+            else:
+                # Single preprocessor - direct processing
+                result = self._process_single_embedding_preprocessor(
+                    0, embedding_preprocessors[0], control_variants, stream_width, stream_height
+                )
+                results = [result['embeddings'] if result and result['embeddings'] is not None else None]
+            
+            return {
+                'results': results,
+                'status': 'success'
+            }
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                'error': str(e),
+                'status': 'error'
+            }
+    
+    def _wait_for_previous_embedding_preprocessing(self) -> None:
+        """Wait for previous frame embedding preprocessing with optimized timeout"""
+        if hasattr(self, '_next_embedding_future') and self._next_embedding_future is not None:
+            try:
+                # Reduced timeout: 50ms for real-time performance
+                self._next_embedding_result = self._next_embedding_future.result(timeout=0.05)
+            except concurrent.futures.TimeoutError:
+                raise RuntimeError("_wait_for_previous_embedding_preprocessing: Background embedding preprocessing timed out")
+            except Exception as e:
+                raise RuntimeError(f"_wait_for_previous_embedding_preprocessing: Background embedding preprocessing failed: {e}")
+        else:
+            self._next_embedding_result = None
+    
+    def _apply_current_frame_embedding_preprocessing(self,
+                                                   embedding_preprocessors: List[Any]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """Apply embedding preprocessing results from previous iteration"""
+        if not hasattr(self, '_next_embedding_result') or self._next_embedding_result is None:
+            # First frame - no background results available yet
+            return [None] * len(embedding_preprocessors)
+        
+        result = self._next_embedding_result
+        if result['status'] != 'success':
+            raise RuntimeError(f"_apply_current_frame_embedding_preprocessing: Background processing failed: {result.get('error', 'Unknown error')}")
+        
+        return result['results']
