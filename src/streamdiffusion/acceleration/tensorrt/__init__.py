@@ -9,7 +9,7 @@ from polygraphy import cuda
 
 from ...pipeline import StreamDiffusion
 from .builder import EngineBuilder, create_onnx_path
-from .engine import AutoencoderKLEngine, UNet2DConditionModelEngine
+from .unet_engine import AutoencoderKLEngine, UNet2DConditionModelEngine
 from .models.models import VAE, BaseModel, UNet, VAEEncoder
 from ...model_detection import detect_model, extract_unet_architecture, validate_architecture
 from .export_wrappers.unet_controlnet_export import create_controlnet_wrapper
