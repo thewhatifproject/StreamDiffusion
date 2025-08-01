@@ -7,9 +7,11 @@ conditioning parameters, and Turbo variants
 import torch
 from typing import Dict, List, Optional, Tuple, Any, Union
 from diffusers import UNet2DConditionModel
-from ...model_detection import (
+from ....model_detection import (
     detect_model,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 # Handle different diffusers versions for CLIPTextModel import
 try:
@@ -25,7 +27,142 @@ except ImportError:
             CLIPTextModel = None
 
 
-
+class SDXLExportWrapper(torch.nn.Module):
+    """Wrapper for SDXL UNet to handle optional conditioning in legacy TensorRT"""
+    
+    def __init__(self, unet):
+        super().__init__()
+        self.unet = unet
+        self.base_unet = self._get_base_unet(unet)
+        self.supports_added_cond = self._test_added_cond_support()
+        
+    def _get_base_unet(self, unet):
+        """Extract the base UNet from wrappers"""
+        # Handle ControlNet wrapper
+        if hasattr(unet, 'unet_model') and hasattr(unet.unet_model, 'config'):
+            return unet.unet_model
+        elif hasattr(unet, 'unet') and hasattr(unet.unet, 'config'):
+            return unet.unet
+        elif hasattr(unet, 'config'):
+            return unet
+        else:
+            # Fallback: try to find any attribute that has config
+            for attr_name in dir(unet):
+                if not attr_name.startswith('_'):
+                    attr = getattr(unet, attr_name, None)
+                    if hasattr(attr, 'config') and hasattr(attr.config, 'addition_embed_type'):
+                        return attr
+            return unet
+        
+    def _test_added_cond_support(self):
+        """Test if this SDXL model supports added_cond_kwargs"""
+        try:
+            # Create minimal test inputs
+            sample = torch.randn(1, 4, 8, 8, device='cuda', dtype=torch.float16)
+            timestep = torch.tensor([0.5], device='cuda', dtype=torch.float32)
+            encoder_hidden_states = torch.randn(1, 77, 2048, device='cuda', dtype=torch.float16)
+            
+            # Test with added_cond_kwargs
+            test_added_cond = {
+                'text_embeds': torch.randn(1, 1280, device='cuda', dtype=torch.float16),
+                'time_ids': torch.randn(1, 6, device='cuda', dtype=torch.float16)
+            }
+            
+            with torch.no_grad():
+                _ = self.unet(sample, timestep, encoder_hidden_states, added_cond_kwargs=test_added_cond)
+            
+            logger.info("SDXL model supports added_cond_kwargs")
+            return True
+            
+        except Exception as e:
+            logger.error(f"SDXL model does not support added_cond_kwargs: {e}")
+            return False
+        
+    def forward(self, *args, **kwargs):
+        """Forward pass that handles SDXL conditioning gracefully"""
+        logger.debug(f"[SDXL_WRAPPER] forward: Called with {len(args)} args and {len(kwargs)} kwargs")
+        logger.debug(f"[SDXL_WRAPPER] forward: Args shapes: {[arg.shape if hasattr(arg, 'shape') else type(arg) for arg in args]}")
+        logger.debug(f"[SDXL_WRAPPER] forward: Kwargs keys: {list(kwargs.keys())}")
+        logger.debug(f"[SDXL_WRAPPER] forward: self.supports_added_cond: {self.supports_added_cond}")
+        logger.debug(f"[SDXL_WRAPPER] forward: Underlying UNet type: {type(self.unet)}")
+        
+        try:
+            # Ensure added_cond_kwargs is never None to prevent TypeError
+            if 'added_cond_kwargs' in kwargs and kwargs['added_cond_kwargs'] is None:
+                logger.debug(f"[SDXL_WRAPPER] forward: Setting added_cond_kwargs from None to empty dict")
+                kwargs['added_cond_kwargs'] = {}
+            
+            # Auto-generate SDXL conditioning if missing and model needs it
+            if (len(args) >= 3 and 'added_cond_kwargs' not in kwargs and 
+                hasattr(self.base_unet.config, 'addition_embed_type') and 
+                self.base_unet.config.addition_embed_type == 'text_time'):
+                
+                sample = args[0]
+                device = sample.device
+                batch_size = sample.shape[0]
+                
+                logger.info("Auto-generating required SDXL conditioning...")
+                kwargs['added_cond_kwargs'] = {
+                    'text_embeds': torch.zeros(batch_size, 1280, device=device, dtype=sample.dtype),
+                    'time_ids': torch.zeros(batch_size, 6, device=device, dtype=sample.dtype)
+                }
+                
+            # If model supports added conditioning and we have the kwargs, use them
+            if self.supports_added_cond and 'added_cond_kwargs' in kwargs:
+                logger.debug(f"[SDXL_WRAPPER] forward: Using full SDXL call with added_cond_kwargs")
+                logger.debug(f"[SDXL_WRAPPER] forward: About to call self.unet(*args, **kwargs)")
+                logger.debug(f"[SDXL_WRAPPER] forward: Starting underlying UNet call...")
+                
+                import time
+                start_time = time.time()
+                result = self.unet(*args, **kwargs)
+                elapsed_time = time.time() - start_time
+                
+                logger.debug(f"[SDXL_WRAPPER] forward: Underlying UNet call completed in {elapsed_time:.3f}s")
+                return result
+            elif len(args) >= 3:
+                logger.debug(f"[SDXL_WRAPPER] forward: Using basic SDXL call (no added_cond_kwargs)")
+                logger.debug(f"[SDXL_WRAPPER] forward: About to call self.unet(args[0], args[1], args[2])")
+                
+                import time
+                start_time = time.time()
+                result = self.unet(args[0], args[1], args[2])
+                elapsed_time = time.time() - start_time
+                
+                logger.debug(f"[SDXL_WRAPPER] forward: Basic UNet call completed in {elapsed_time:.3f}s")
+                return result
+            else:
+                logger.debug(f"[SDXL_WRAPPER] forward: Using fallback call")
+                # Fallback
+                return self.unet(*args, **kwargs)
+                
+        except (TypeError, AttributeError) as e:
+            logger.error(f"[SDXL_WRAPPER] forward: Exception caught: {e}")
+            if "NoneType" in str(e) or "iterable" in str(e) or "text_embeds" in str(e):
+                # Handle SDXL-Turbo models that need proper conditioning
+                logger.info(f"Providing minimal SDXL conditioning due to: {e}")
+                if len(args) >= 3:
+                    sample, timestep, encoder_hidden_states = args[0], args[1], args[2]
+                    device = sample.device
+                    batch_size = sample.shape[0]
+                    
+                    # Create minimal valid SDXL conditioning
+                    minimal_conditioning = {
+                        'text_embeds': torch.zeros(batch_size, 1280, device=device, dtype=sample.dtype),
+                        'time_ids': torch.zeros(batch_size, 6, device=device, dtype=sample.dtype)
+                    }
+                    
+                    try:
+                        logger.debug(f"[SDXL_WRAPPER] forward: Trying with minimal conditioning...")
+                        return self.unet(sample, timestep, encoder_hidden_states, added_cond_kwargs=minimal_conditioning)
+                    except Exception as final_e:
+                        logger.info(f"Final fallback to basic call: {final_e}")
+                        return self.unet(sample, timestep, encoder_hidden_states)
+                else:
+                    return self.unet(*args)
+            else:
+                raise e
+            
 class SDXLConditioningHandler:
     """Handles SDXL conditioning parameters and dual text encoders"""
     

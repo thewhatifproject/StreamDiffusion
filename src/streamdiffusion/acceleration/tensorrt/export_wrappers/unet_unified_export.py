@@ -1,10 +1,10 @@
 import torch
 from diffusers import UNet2DConditionModel
 from typing import Optional, List
-from .controlnet_wrapper import create_controlnet_wrapper
-from .ipadapter_wrapper import create_ipadapter_wrapper
+from .unet_controlnet_export import create_controlnet_wrapper
+from .unet_ipadapter_export import create_ipadapter_wrapper
 
-class ConditioningWrapper(torch.nn.Module):
+class UnifiedExportWrapper(torch.nn.Module):
     """
     Unified wrapper that composes wrappers for conditioning modules. 
     """
@@ -75,7 +75,7 @@ def create_conditioning_wrapper(unet: UNet2DConditionModel,
                               use_ipadapter: bool = False,
                               control_input_names: Optional[List[str]] = None,
                               num_tokens: int = 4,
-                              **kwargs) -> ConditioningWrapper:
-    return ConditioningWrapper(
+                              **kwargs) -> UnifiedExportWrapper:
+    return UnifiedExportWrapper(
         unet, use_controlnet, use_ipadapter, control_input_names, num_tokens, **kwargs
     ) 

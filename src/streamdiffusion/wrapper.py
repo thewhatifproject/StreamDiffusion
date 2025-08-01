@@ -974,11 +974,11 @@ class StreamDiffusionWrapper:
                     compile_vae_decoder,
                     compile_vae_encoder,
                 )
-                from streamdiffusion.acceleration.tensorrt.engine import (
+                from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import (
                     AutoencoderKLEngine,
                     UNet2DConditionModelEngine,
                 )
-                from streamdiffusion.acceleration.tensorrt.models import (
+                from streamdiffusion.acceleration.tensorrt.models.models import (
                     VAE,
                     UNet,
                     VAEEncoder,
@@ -988,8 +988,8 @@ class StreamDiffusionWrapper:
                     extract_unet_architecture,
                     validate_architecture
                 )
-                from streamdiffusion.acceleration.tensorrt.controlnet_wrapper import create_controlnet_wrapper
-                from streamdiffusion.acceleration.tensorrt.ipadapter_wrapper import create_ipadapter_wrapper
+                from streamdiffusion.acceleration.tensorrt.export_wrappers.unet_controlnet_export import create_controlnet_wrapper
+                from streamdiffusion.acceleration.tensorrt.export_wrappers.unet_ipadapter_export import create_ipadapter_wrapper
 
                 # Legacy TensorRT implementation (fallback)
                 def create_prefix(
@@ -1226,10 +1226,10 @@ class StreamDiffusionWrapper:
                     if use_controlnet_trt:
                         control_input_names = unet_model.get_input_names()
                     
-                    # Unified compilation path using ConditioningWrapper
-                    from streamdiffusion.acceleration.tensorrt.conditioning_wrapper import ConditioningWrapper
+                    # Unified compilation path 
+                    from streamdiffusion.acceleration.tensorrt.export_wrappers.unet_unified_export import UnifiedExportWrapper
 
-                    wrapped_unet = ConditioningWrapper(
+                    wrapped_unet = UnifiedExportWrapper(
                         stream.unet,
                         use_controlnet=use_controlnet_trt,
                         use_ipadapter=use_ipadapter_trt,

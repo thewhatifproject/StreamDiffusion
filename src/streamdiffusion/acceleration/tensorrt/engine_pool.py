@@ -9,8 +9,8 @@ from pathlib import Path
 import torch
 from polygraphy import cuda
 
-from .controlnet_engine import ControlNetModelEngine, HybridControlNet
-from .controlnet_models import create_controlnet_model
+from .runtime_engines.controlnet_engine import ControlNetModelEngine, HybridControlNet
+from .models.controlnet_models import create_controlnet_model
 from .builder import EngineBuilder, create_onnx_path
 from ...model_detection import detect_model
 

@@ -2,8 +2,8 @@
 
 from typing import List, Dict, Optional
 from .models import BaseModel
-from .sdxl_support import SDXLConditioningHandler, get_sdxl_tensorrt_config
-from ...model_detection import detect_model
+from ..export_wrappers.unet_sdxl_export import SDXLConditioningHandler, get_sdxl_tensorrt_config
+from ....model_detection import detect_model
 import torch
 
 

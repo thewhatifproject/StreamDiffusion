@@ -216,9 +216,6 @@ def _prepare_ipadapter_configs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _setup_ipadapter_from_config(wrapper, config: Dict[str, Any]):
     """Setup IPAdapter pipeline from configuration"""
-    # Ensure Diffusers_IPAdapter is in path
-    _ensure_ipadapter_path()
-    
     try:
         from .ipadapter import BaseIPAdapterPipeline
         
@@ -246,12 +243,7 @@ def _setup_ipadapter_from_config(wrapper, config: Dict[str, Any]):
         raise
 
 
-def _ensure_ipadapter_path():
-    """Ensure Diffusers_IPAdapter is in Python path"""
-    from pathlib import Path
-    diffusers_path = Path(__file__).parent / "ipadapter" / "Diffusers_IPAdapter"
-    if diffusers_path.exists() and str(diffusers_path) not in sys.path:
-        sys.path.insert(0, str(diffusers_path))
+
 
 
 def _has_preloaded_models(wrapper) -> bool:
