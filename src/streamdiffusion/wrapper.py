@@ -1322,7 +1322,7 @@ class StreamDiffusionWrapper:
                 try:
                     logger.info("🚀 Loading TensorRT UNet engine...")
                     stream.unet = UNet2DConditionModelEngine(
-                        unet_path, cuda_stream, use_cuda_graph=False
+                        unet_path, cuda_stream, use_cuda_graph=True
                     )
 
                     # Store metadata on the engine for runtime use
@@ -1380,7 +1380,7 @@ class StreamDiffusionWrapper:
                     vae_decoder_path,
                     cuda_stream,
                     stream.pipe.vae_scale_factor,
-                    use_cuda_graph=False,
+                    use_cuda_graph=True,
                 )
                 stream.vae.config = vae_config
                 stream.vae.dtype = vae_dtype
@@ -1397,7 +1397,7 @@ class StreamDiffusionWrapper:
                         vae_decoder_path,
                         cuda_stream,
                         stream.pipe.vae_scale_factor,
-                        use_cuda_graph=False,
+                        use_cuda_graph=True,
                     )
                     stream.vae.config = vae_config
                     stream.vae.dtype = vae_dtype
