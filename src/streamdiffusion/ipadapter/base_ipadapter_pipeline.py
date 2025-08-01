@@ -9,7 +9,7 @@ from pathlib import Path
 # Using relative import - no sys.path modification needed
 
 try:
-    from .Diffusers_IPAdapter.ip_adapter.ip_adapter import IPAdapter
+    from diffusers_ipadapter import IPAdapter
 except Exception as e:
     print(f"base_ipadapter_pipeline: Failed to import IPAdapter: {e}")
     raise

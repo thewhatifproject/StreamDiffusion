@@ -75,19 +75,12 @@ class IPAdapterUNetExportWrapper(torch.nn.Module):
         Install IPAdapter attention processors that will be baked into ONNX.
         These processors handle the internal splitting and processing of concatenated embeddings.
         """
-        # Import IPAdapter attention processors
-        import sys
-        from pathlib import Path
-        
-        # Add Diffusers_IPAdapter to path
-        current_dir = Path(__file__).parent.parent.parent / "ipadapter" / "Diffusers_IPAdapter"
-        sys.path.insert(0, str(current_dir))
-        
+        # Import IPAdapter attention processors from installed package
         try:
             if hasattr(torch.nn.functional, "scaled_dot_product_attention"):
-                from ip_adapter.attention_processor import IPAttnProcessor2_0 as IPAttnProcessor, AttnProcessor2_0 as AttnProcessor
+                from diffusers_ipadapter.ip_adapter.attention_processor import IPAttnProcessor2_0 as IPAttnProcessor, AttnProcessor2_0 as AttnProcessor
             else:
-                from ip_adapter.attention_processor import IPAttnProcessor, AttnProcessor
+                from diffusers_ipadapter.ip_adapter.attention_processor import IPAttnProcessor, AttnProcessor
             
             # Install attention processors with proper configuration
             processor_names = list(self.unet.attn_processors.keys())
