@@ -2,7 +2,7 @@
 
 from .unet_engine import UNet2DConditionModelEngine, AutoencoderKLEngine
 from .controlnet_engine import ControlNetModelEngine
-from .engine_pool import ControlNetEnginePool
+from ..engine_pool import ControlNetEnginePool
 
 __all__ = [
     "UNet2DConditionModelEngine",

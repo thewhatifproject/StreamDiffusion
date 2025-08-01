@@ -1520,7 +1520,7 @@ class StreamDiffusionWrapper:
 
         # Initialize ControlNet engine pool if using TensorRT acceleration
         if use_controlnet_tensorrt:
-            from streamdiffusion.acceleration.tensorrt.runtime_engines.engine_pool import ControlNetEnginePool
+            from streamdiffusion.acceleration.tensorrt.engine_pool import ControlNetEnginePool
             from polygraphy import cuda
 
 

@@ -13,7 +13,7 @@ from .runtime_engines.unet_engine import AutoencoderKLEngine, UNet2DConditionMod
 from .models.models import VAE, BaseModel, UNet, VAEEncoder
 from ...model_detection import detect_model, extract_unet_architecture, validate_architecture
 from .export_wrappers.unet_controlnet_export import create_controlnet_wrapper
-from .runtime_engines.engine_pool import ControlNetEnginePool
+from .engine_pool import ControlNetEnginePool
 from .export_wrappers.unet_ipadapter_export import create_ipadapter_wrapper
 
 
