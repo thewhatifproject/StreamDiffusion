@@ -173,7 +173,6 @@ class Engine:
             # Constant nodes in ONNX do not have inputs but have a constant output
             if n.op == "Constant":
                 name = map_name(n.outputs[0].name)
-                logger.debug(f"Add Constant {name}")
                 add_to_map(refit_dict, name, n.outputs[0].values)
 
             # Handle scale and bias weights
@@ -261,11 +260,8 @@ class Engine:
     def allocate_buffers(self, shape_dict=None, device="cuda"):
         # Check if we can reuse existing buffers (OPTIMIZATION)
         if self._can_reuse_buffers(shape_dict, device):
-            logger.debug(f"Engine.allocate_buffers: Reusing existing buffers")
             return
         
-        logger.debug(f"Engine.allocate_buffers: Allocating new buffers on {device} with {self.engine.num_io_tensors} I/O tensors")
-            
         # Clear existing buffers before reallocating
         self.tensors.clear()
         
@@ -280,8 +276,6 @@ class Engine:
             dtype_np = trt.nptype(self.engine.get_tensor_dtype(name))
             mode = self.engine.get_tensor_mode(name)
 
-            logger.debug(f"Engine.allocate_buffers: Tensor[{idx}] '{name}' - shape: {shape}, dtype: {dtype_np}, mode: {mode}")
-
             if mode == trt.TensorIOMode.INPUT:
                 self.context.set_input_shape(name, shape)
 
@@ -293,7 +287,6 @@ class Engine:
         # Cache allocation parameters for reuse check
         self._last_shape_dict = shape_dict.copy() if shape_dict else None
         self._last_device = device
-        logger.debug(f"Engine.allocate_buffers: Buffer allocation completed")
     
     def _can_reuse_buffers(self, shape_dict=None, device="cuda"):
         """
@@ -338,47 +331,20 @@ class Engine:
         return True
 
     def infer(self, feed_dict, stream, use_cuda_graph=False):
-        logger.debug(f"Engine.infer: Starting inference with {len(feed_dict)} inputs, use_cuda_graph={use_cuda_graph}")
-        
-        # Copy input data to allocated tensors
         for name, buf in feed_dict.items():
-            if name not in self.tensors:
-                logger.warning(f"Engine.infer: Input '{name}' not found in allocated tensors. Available: {list(self.tensors.keys())}")
-                continue
-                
-            logger.debug(f"Engine.infer: Copying input '{name}' - shape: {buf.shape}, dtype: {buf.dtype}, range: [{buf.min().item():.6f}, {buf.max().item():.6f}]")
-            
-            # Check for NaN/Inf in inputs
-            if torch.isnan(buf).any():
-                nan_count = torch.isnan(buf).sum().item()
-                total_elements = buf.numel()
-                logger.warning(f"Engine.infer: NaN detected in input '{name}': {nan_count}/{total_elements} ({100*nan_count/total_elements:.2f}%)")
-            if torch.isinf(buf).any():
-                inf_count = torch.isinf(buf).sum().item()
-                total_elements = buf.numel()
-                logger.warning(f"Engine.infer: Inf detected in input '{name}': {inf_count}/{total_elements} ({100*inf_count/total_elements:.2f}%)")
-            if (buf == 0).all():
-                logger.debug(f"Engine.infer: All values in input '{name}' are zero (expected for some inputs)")
-            
             self.tensors[name].copy_(buf)
 
-        # Set tensor addresses for TensorRT context
-        logger.debug(f"Engine.infer: Setting tensor addresses for TensorRT context")
         for name, tensor in self.tensors.items():
             self.context.set_tensor_address(name, tensor.data_ptr())
 
-        # Execute inference
         if use_cuda_graph:
-            logger.debug(f"Engine.infer: Using CUDA Graph execution")
             if self.cuda_graph_instance is not None:
                 CUASSERT(cudart.cudaGraphLaunch(self.cuda_graph_instance, stream.ptr))
                 CUASSERT(cudart.cudaStreamSynchronize(stream.ptr))
             else:
-                logger.debug(f"Engine.infer: Capturing CUDA Graph (first run)")
                 # do inference before CUDA graph capture
                 noerror = self.context.execute_async_v3(stream.ptr)
                 if not noerror:
-                    logger.error(f"Engine.infer: Initial inference failed during CUDA graph capture")
                     raise ValueError("ERROR: inference failed.")
                 # capture cuda graph
                 CUASSERT(
@@ -388,35 +354,11 @@ class Engine:
                 self.graph = CUASSERT(cudart.cudaStreamEndCapture(stream.ptr))
                 self.cuda_graph_instance = CUASSERT(cudart.cudaGraphInstantiate(self.graph, 0))
         else:
-            logger.debug(f"Engine.infer: Using standard TensorRT execution")
             noerror = self.context.execute_async_v3(stream.ptr)
             if not noerror:
-                logger.error(f"Engine.infer: TensorRT inference execution failed")
                 raise ValueError("ERROR: inference failed.")
 
-        # Check output tensors
-        logger.debug(f"Engine.infer: Checking output tensors")
-        output_tensors = {}
-        for name, tensor in self.tensors.items():
-            if name not in feed_dict:  # This is an output tensor
-                logger.debug(f"Engine.infer: Output '{name}' - shape: {tensor.shape}, dtype: {tensor.dtype}, range: [{tensor.min().item():.6f}, {tensor.max().item():.6f}]")
-                
-                # Check for problematic values in outputs
-                if torch.isnan(tensor).any():
-                    nan_count = torch.isnan(tensor).sum().item()
-                    total_elements = tensor.numel()
-                    logger.error(f"Engine.infer: NaN detected in output '{name}': {nan_count}/{total_elements} ({100*nan_count/total_elements:.2f}%)")
-                if torch.isinf(tensor).any():
-                    inf_count = torch.isinf(tensor).sum().item()
-                    total_elements = tensor.numel()
-                    logger.error(f"Engine.infer: Inf detected in output '{name}': {inf_count}/{total_elements} ({100*inf_count/total_elements:.2f}%)")
-                if (tensor == 0).all():
-                    logger.error(f"Engine.infer: All values in output '{name}' are zero")
-                
-                output_tensors[name] = tensor
-        
-        logger.debug(f"Engine.infer: Inference completed, returning {len(output_tensors)} output tensors")
-        return output_tensors
+        return self.tensors
 
 
 def decode_images(images: torch.Tensor):
@@ -559,12 +501,10 @@ def export_onnx(
 
     # Detect if this is an SDXL model via detect_model
     if hasattr(model, 'unet'):
-        logger.debug(f"Found UNET, detecting model from {model.unet.__class__.__name__}")
         detection_result = detect_model(model.unet)
         if detection_result is not None:
             is_sdxl = detection_result.get('is_sdxl', False)
     elif hasattr(model, 'config'):
-        logger.debug(f"Detecting model directly from {model.__class__.__name__}")
         detection_result = detect_model(model)
         if detection_result is not None:
             is_sdxl = detection_result.get('is_sdxl', False)
@@ -626,8 +566,6 @@ def export_onnx(
             
             # Check if model is large enough to need external data
             if onnx_model.ByteSize() > 2147483648:  # 2GB
-                logger.debug(f"   Model size: {onnx_model.ByteSize() / (1024**3):.2f} GB - converting to external data format")
-                
                 # Create directory for external data
                 onnx_dir = os.path.dirname(onnx_path)
                 
@@ -641,8 +579,6 @@ def export_onnx(
                     convert_attribute=False,
                 )
                 logger.info(f"Converted to external data format with weights in weights.pb")
-            else:
-                logger.debug(f"   Model size: {onnx_model.ByteSize() / (1024**3):.2f} GB - keeping standard format")
             
             del onnx_model
     del wrapped_model
@@ -664,9 +600,6 @@ def optimize_onnx(
     uses_external_data = len(external_data_files) > 0
     
     if uses_external_data:
-        logger.debug(f"Optimizing ONNX model with external data format...")
-        logger.debug(f"   Found {len(external_data_files)} external data files")
-        
         # Load model with external data
         onnx_model = onnx.load(onnx_path, load_external_data=True)
         onnx_opt_graph = model_data.optimize(onnx_model)
@@ -682,7 +615,6 @@ def optimize_onnx(
                     os.remove(os.path.join(opt_dir, f))
         
         # Save optimized model with external data format
-        logger.debug(f"Saving optimized model with external data to: {onnx_opt_path}")
         onnx.save_model(
             onnx_opt_graph,
             onnx_opt_path,
@@ -694,7 +626,6 @@ def optimize_onnx(
         logger.info(f"ONNX optimization complete with external data")
         
     else:
-        logger.debug(f"Optimizing ONNX model (standard format)...")
         # Standard optimization for smaller models
         onnx_opt_graph = model_data.optimize(onnx.load(onnx_path))
         onnx.save(onnx_opt_graph, onnx_opt_path)
