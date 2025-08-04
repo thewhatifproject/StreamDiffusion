@@ -4,7 +4,9 @@
   export let value: string;
   export let params: FieldProps;
   onMount(() => {
-    value = String(params?.default ?? '');
+    if (!value || value === '') {
+      value = String(params?.default ?? '');
+    }
   });
 </script>
 
@@ -14,7 +16,7 @@
   </label>
   <div class="text-normal flex items-center rounded-md border border-gray-700">
     <textarea
-      class="mx-1 w-full px-3 py-2 font-light outline-none dark:text-black"
+      class="mx-1 w-full px-3 py-2 outline-none"
       title={params?.title}
       placeholder="Add your prompt here..."
       bind:value
