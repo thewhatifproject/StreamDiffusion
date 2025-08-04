@@ -591,14 +591,14 @@
           </p>
         {/if}
       </div>
-      
+
       <!-- Pipeline Configuration and Main Controls -->
       <div class="flex items-center gap-2">
         <!-- Pipeline Configuration -->
         <Button on:click={selectFile} disabled={uploading} classList={'text-sm px-4 py-2 font-semibold'}>
-          {uploading ? 'Uploading...' : 'Load Config'}
+          {uploading ? 'Uploading...' : 'Load YAML Config'}
         </Button>
-        
+
         <input
           bind:this={fileInput}
           type="file"
@@ -617,7 +617,7 @@
         </Button>
       </div>
     </div>
-    
+      
     {#if uploadStatus}
       <div class="mt-1 text-center">
         <p class="text-xs {uploadStatus.includes('Error') || uploadStatus.includes('Please') ? 'text-red-600' : 'text-green-600'}">
@@ -681,7 +681,7 @@
 
             <!-- Unified Blending Control -->
             <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-              <button
+              <button 
                 on:click={() => showPromptBlending = !showPromptBlending}
                 class="w-full p-4 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg"
               >
@@ -786,7 +786,6 @@
             on:controlnetUpdated={handleControlNetUpdate}
             on:tIndexListUpdated={(e) => handleTIndexListUpdate(e.detail)}
           ></ControlNetConfig>
-          
           <IPAdapterConfig
             {ipadapterInfo}
             currentScale={ipadapterScale}
