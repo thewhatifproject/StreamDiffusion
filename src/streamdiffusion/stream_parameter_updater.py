@@ -604,6 +604,13 @@ class StreamParameterUpdater:
             combined_noise = torch.zeros_like(noise_tensors[0])
             for noise, weight in zip(noise_tensors, weights):
                 combined_noise += weight * noise
+            
+            # Preserve noise magnitude when weights are normalized
+            if self.normalize_seed_weights and len(noise_tensors) > 1:
+                original_magnitude = torch.mean(torch.stack([torch.norm(noise) for noise in noise_tensors]))
+                current_magnitude = torch.norm(combined_noise)
+                if current_magnitude > 1e-8:  # Avoid division by zero
+                    combined_noise = combined_noise * (original_magnitude / current_magnitude)
 
         # Update stream noise
         self.stream.init_noise = combined_noise
