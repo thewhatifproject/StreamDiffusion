@@ -17,6 +17,7 @@
   import { getPipelineValues, deboucedPipelineValues, pipelineValues } from '$lib/store';
   import { parseResolution, type ResolutionInfo } from '$lib/utils';
   import TextArea from '$lib/components/TextArea.svelte';
+  import InputControl from '$lib/components/InputControl.svelte';
 
   let pipelineParams: Fields;
   let pipelineInfo: PipelineInfo;
@@ -603,6 +604,11 @@
                   />
                 </div>
               {/if}
+            </div>
+
+            <!-- Input Control Section -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+              <InputControl />
             </div>
           </div>
         {/if}
