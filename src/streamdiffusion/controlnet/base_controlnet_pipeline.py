@@ -386,19 +386,24 @@ class BaseControlNetPipeline:
             logger.info(f"Loading ControlNet {model_id} with TensorRT acceleration")
             logger.info(f"  Model type: {model_type}, is_sdxl: {is_sdxl}")
             
-            # Load PyTorch model for engine compilation if needed
-            pytorch_controlnet = self._load_pytorch_controlnet_model(model_id)
-            
             # Get batch size for engine compilation
             detected_batch_size = getattr(self.stream, 'trt_unet_batch_size', 1)
             
-            # Pool now handles all the complexity (model detection, validation, error handling)
-            return self.stream.controlnet_engine_pool.get_or_load_engine(
-                model_id=model_id,
-                pytorch_model=pytorch_controlnet,
-                model_type=model_type,
-                batch_size=detected_batch_size
-            )
+            try:
+                return self.stream.controlnet_engine_pool.load_engine(
+                    model_id=model_id,
+                    model_type=model_type,
+                    batch_size=detected_batch_size
+                )
+            except Exception as e:
+                pytorch_controlnet = self._load_pytorch_controlnet_model(model_id)
+                logger.error(f"Failed to load {self.model_type} ControlNet model '{model_id}': {e}")
+                return self.stream.controlnet_engine_pool.get_or_load_engine(
+                    model_id=model_id,
+                    pytorch_model=pytorch_controlnet,
+                    model_type=model_type,
+                    batch_size=detected_batch_size
+                )
         else:
             # Fallback to PyTorch only
             logger.info(f"Loading ControlNet {model_id} (PyTorch only - no TensorRT acceleration)")

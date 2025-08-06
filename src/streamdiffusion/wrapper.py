@@ -1480,6 +1480,7 @@ class StreamDiffusionWrapper:
 
         # Initialize ControlNet engine management if using TensorRT acceleration
         if use_controlnet_tensorrt and engine_manager is not None:
+            from streamdiffusion.acceleration.tensorrt.engine_manager import EngineType
             # Use the same unified EngineManager for ControlNet engines
             # Create a ControlNet-specific subdirectory for organization
             controlnet_engine_dir = os.path.join(engine_dir, "controlnet")
@@ -1496,6 +1497,28 @@ class StreamDiffusionWrapper:
                     self.engine_manager = engine_manager
                     self.engine_dir = controlnet_engine_dir
                     self.cuda_stream = cuda_stream
+
+                def load_engine(self, model_id, model_type="sd15", batch_size=1):
+                    engine_path = self.engine_manager.get_engine_path(
+                        EngineType.CONTROLNET,
+                        model_id_or_path="",  # Not used for ControlNet
+                        max_batch=batch_size,
+                        min_batch_size=1,
+                        mode="",  # Not used for ControlNet
+                        use_lcm_lora=False,  # Not used for ControlNet
+                        use_tiny_vae=False,  # Not used for ControlNet
+                        controlnet_model_id=model_id
+                    )
+                    if not os.path.exists(engine_path):
+                        raise FileNotFoundError(f"ControlNet engine not found at {engine_path}")
+                    return self.engine_manager.load_engine(
+                        EngineType.CONTROLNET,
+                        engine_path,
+                        model_type=model_type,
+                        batch_size=batch_size,
+                        cuda_stream=self.cuda_stream,
+                        use_cuda_graph=True
+                    )
                 
                 def get_or_load_engine(self, model_id, pytorch_model, model_type="sd15", batch_size=1):
                     """get_or_load_engine: Compatibility wrapper for ControlNet pipeline"""
