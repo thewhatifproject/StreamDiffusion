@@ -23,6 +23,7 @@ from config import config, Args
 from util import pil_to_frame, bytes_to_pil
 from connection_manager import ConnectionManager, ServerFullException
 from img2img import Pipeline
+from input_control import InputManager, GamepadInput
 
 # fix mime error on windows
 mimetypes.add_type("application/javascript", ".js")
@@ -114,6 +115,8 @@ class App:
         self.new_height = 512
         # Store uploaded style image persistently
         self.uploaded_style_image = None
+        # Initialize input manager for controller support
+        self.input_manager = InputManager()
         self.init_app()
 
     def cleanup(self):
@@ -123,6 +126,83 @@ class App:
             self._cleanup_pipeline(self.pipeline)
             self.pipeline = None
         logger.info("App cleanup: Completed application cleanup")
+
+    def _handle_input_parameter_update(self, parameter_name: str, value: float) -> None:
+        """Handle parameter updates from input controls"""
+        try:
+            if not self.pipeline or not hasattr(self.pipeline, 'stream'):
+                logger.warning(f"_handle_input_parameter_update: No pipeline available for parameter {parameter_name}")
+                return
+
+            # Map parameter names to pipeline update methods
+            if parameter_name == 'guidance_scale':
+                self.pipeline.stream.update_stream_params(guidance_scale=value)
+            elif parameter_name == 'delta':
+                self.pipeline.stream.update_stream_params(delta=value)
+            elif parameter_name == 'num_inference_steps':
+                self.pipeline.stream.update_stream_params(num_inference_steps=int(value))
+            elif parameter_name == 'seed':
+                self.pipeline.stream.update_stream_params(seed=int(value))
+            elif parameter_name == 'ipadapter_scale':
+                self.pipeline.stream.update_stream_params(ipadapter_scale=value)
+            elif parameter_name.startswith('controlnet_') and parameter_name.endswith('_strength'):
+                # Handle ControlNet strength parameters
+                import re
+                match = re.match(r'controlnet_(\d+)_strength', parameter_name)
+                if match:
+                    index = int(match.group(1))
+                    # Use existing ControlNet strength update logic
+                    current_config = self._get_current_controlnet_config()
+                    if current_config and index < len(current_config):
+                        current_config[index]['conditioning_scale'] = float(value)
+                        # Apply the updated config
+                        self.pipeline.stream.apply_controlnet_config(current_config)
+            elif parameter_name.startswith('controlnet_') and '_preprocessor_' in parameter_name:
+                # Handle ControlNet preprocessor parameters
+                match = re.match(r'controlnet_(\d+)_preprocessor_(.+)', parameter_name)
+                if match:
+                    controlnet_index = int(match.group(1))
+                    param_name = match.group(2)
+                    # Use the same approach as the API endpoint
+                    current_config = self._get_current_controlnet_config()
+                    if current_config and controlnet_index < len(current_config):
+                        # Update preprocessor_params for the specified controlnet
+                        if 'preprocessor_params' not in current_config[controlnet_index]:
+                            current_config[controlnet_index]['preprocessor_params'] = {}
+                        current_config[controlnet_index]['preprocessor_params'][param_name] = value
+                        self.pipeline.update_stream_params(controlnet_config=current_config)
+            elif parameter_name.startswith('prompt_weight_'):
+                # Handle prompt blending weights
+                match = re.match(r'prompt_weight_(\d+)', parameter_name)
+                if match:
+                    index = int(match.group(1))
+                    # Get current prompt list and update specific weight
+                    current_prompts = self.pipeline.get_current_prompts()
+                    if current_prompts and index < len(current_prompts):
+                        # Create updated prompt list with new weight
+                        updated_prompts = current_prompts.copy()
+                        updated_prompts[index] = (updated_prompts[index][0], value)
+                        # Update prompt list with new weights
+                        self.pipeline.update_prompt_weights([weight for _, weight in updated_prompts])
+            elif parameter_name.startswith('seed_weight_'):
+                # Handle seed blending weights  
+                match = re.match(r'seed_weight_(\d+)', parameter_name)
+                if match:
+                    index = int(match.group(1))
+                    # Get current seed list and update specific weight
+                    current_seeds = self.pipeline.get_current_seeds()
+                    if current_seeds and index < len(current_seeds):
+                        # Create updated seed list with new weight
+                        updated_seeds = current_seeds.copy()
+                        updated_seeds[index] = (updated_seeds[index][0], value)
+                        # Update seed list with new weights
+                        self.pipeline.update_seed_weights([weight for _, weight in updated_seeds])
+            else:
+                logger.warning(f"_handle_input_parameter_update: Unknown parameter {parameter_name}")
+
+            logger.info(f"_handle_input_parameter_update: Updated {parameter_name} to {value}")
+        except Exception as e:
+            logger.error(f"_handle_input_parameter_update: Failed to update {parameter_name}: {e}")
 
 
     
@@ -187,6 +267,9 @@ class App:
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
+
+        # Set up input manager callback for parameter updates
+        self.input_manager.set_parameter_update_callback(self._handle_input_parameter_update)
 
         @self.app.websocket("/api/ws/{user_id}")
         async def websocket_endpoint(user_id: uuid.UUID, websocket: WebSocket):
@@ -592,12 +675,9 @@ class App:
                 if self.pipeline:
                     try:
                         current_prompts = self.pipeline.stream.get_current_prompts()
-                        logger.debug(f"get_current_blending_config: Retrieved current prompts from pipeline: {current_prompts}")
                         if current_prompts and len(current_prompts) > 0:
                             prompt_blending_config = current_prompts
-                            logger.debug(f"get_current_blending_config: Using pipeline prompts: {prompt_blending_config}")
-                    except Exception as e:
-                        logger.debug(f"get_current_blending_config: Error getting current prompts: {e}")
+                    except Exception:
                         pass
                         
                     try:
@@ -619,9 +699,8 @@ class App:
                 normalize_seed_weights = True
                 
                 if self.pipeline:
-                    current_normalize = self.pipeline.stream.get_normalize_weights()
-                    normalize_prompt_weights = current_normalize
-                    normalize_seed_weights = current_normalize
+                    normalize_prompt_weights = self.pipeline.stream.get_normalize_prompt_weights()
+                    normalize_seed_weights = self.pipeline.stream.get_normalize_seed_weights()
                 elif self.uploaded_controlnet_config:
                     normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
                     normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
@@ -1131,7 +1210,94 @@ class App:
                 logging.error(f"update_params: Failed to update parameters: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update parameters: {str(e)}")
 
+        # Individual parameter update endpoints for input controls
+        @self.app.post("/api/update-guidance-scale")
+        async def update_guidance_scale(request: Request):
+            """Update guidance scale parameter"""
+            try:
+                data = await request.json()
+                guidance_scale = float(data.get("guidance_scale", 1.0))
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                self.pipeline.stream.update_stream_params(guidance_scale=guidance_scale)
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated guidance_scale to {guidance_scale}",
+                    "guidance_scale": guidance_scale
+                })
+                
+            except Exception as e:
+                logging.error(f"update_guidance_scale: Failed to update guidance scale: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update guidance scale: {str(e)}")
 
+        @self.app.post("/api/update-delta")
+        async def update_delta(request: Request):
+            """Update delta parameter"""
+            try:
+                data = await request.json()
+                delta = float(data.get("delta", 0.7))
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                self.pipeline.stream.update_stream_params(delta=delta)
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated delta to {delta}",
+                    "delta": delta
+                })
+                
+            except Exception as e:
+                logging.error(f"update_delta: Failed to update delta: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update delta: {str(e)}")
+
+        @self.app.post("/api/update-num-inference-steps")
+        async def update_num_inference_steps(request: Request):
+            """Update number of inference steps parameter"""
+            try:
+                data = await request.json()
+                num_inference_steps = int(data.get("num_inference_steps", 50))
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                self.pipeline.stream.update_stream_params(num_inference_steps=num_inference_steps)
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated num_inference_steps to {num_inference_steps}",
+                    "num_inference_steps": num_inference_steps
+                })
+                
+            except Exception as e:
+                logging.error(f"update_num_inference_steps: Failed to update num_inference_steps: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update num_inference_steps: {str(e)}")
+
+        @self.app.post("/api/update-seed")
+        async def update_seed(request: Request):
+            """Update seed parameter"""
+            try:
+                data = await request.json()
+                seed = int(data.get("seed", 2))
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                self.pipeline.stream.update_stream_params(seed=seed)
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Updated seed to {seed}",
+                    "seed": seed
+                })
+                
+            except Exception as e:
+                logging.error(f"update_seed: Failed to update seed: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update seed: {str(e)}")
 
         @self.app.post("/api/blending")
         async def update_blending(request: Request):
@@ -1327,21 +1493,30 @@ class App:
                 controlnet_index = data.get("controlnet_index", 0)
                 preprocessor_params = data.get("preprocessor_params", {})
                 
-                logger.info(f"update_preprocessor_params: Updating ControlNet {controlnet_index} params: {preprocessor_params}")
+
                 
                 if not preprocessor_params:
                     raise HTTPException(status_code=400, detail="Missing preprocessor_params parameter")
                 
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
                 # Update preprocessor parameters using consolidated API
                 current_config = self._get_current_controlnet_config()
+                
+                if not current_config:
+                    raise HTTPException(status_code=400, detail="No ControlNet configuration available")
+                
                 if controlnet_index >= len(current_config):
-                    raise HTTPException(status_code=400, detail=f"ControlNet index {controlnet_index} out of range")
+                    raise HTTPException(status_code=400, detail=f"ControlNet index {controlnet_index} out of range (max: {len(current_config)-1})")
                 
                 # Update preprocessor_params for the specified controlnet
+                if 'preprocessor_params' not in current_config[controlnet_index]:
+                    current_config[controlnet_index]['preprocessor_params'] = {}
                 current_config[controlnet_index]['preprocessor_params'].update(preprocessor_params)
-                self.pipeline.update_stream_params(controlnet_config=current_config)
                 
-                logger.info(f"update_preprocessor_params: Successfully updated ControlNet {controlnet_index} with params: {preprocessor_params}")
+                # Apply the updated configuration
+                self.pipeline.update_stream_params(controlnet_config=current_config)
                 
                 return JSONResponse({
                     "status": "success",
@@ -1353,6 +1528,112 @@ class App:
             except Exception as e:
                 logger.error(f"update_preprocessor_params: Failed to update parameters: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to update preprocessor parameters: {str(e)}")
+
+        @self.app.post("/api/blending/update-prompt-weight")
+        async def update_prompt_weight(request: Request):
+            """Update a specific prompt weight in the current blending configuration"""
+            try:
+                data = await request.json()
+                index = data.get('index')
+                weight = data.get('weight')
+                
+                if index is None or weight is None:
+                    raise HTTPException(status_code=400, detail="Missing index or weight parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Get current prompt blending configuration using the same logic as the blending/current endpoint
+                current_prompts = None
+                try:
+                    current_prompts = self.pipeline.stream.get_current_prompts()
+                except Exception:
+                    pass
+                
+                # If not available from pipeline, get from uploaded config and normalize
+                if not current_prompts:
+                    current_prompts = self._normalize_prompt_config(self.uploaded_controlnet_config)
+                    
+                if current_prompts and index < len(current_prompts):
+                    # Create updated prompt list with new weight
+                    updated_prompts = list(current_prompts)  # Make a copy
+                    updated_prompts[index] = (updated_prompts[index][0], float(weight))
+                    
+                    # Use the same update method as the main blending endpoint
+                    params = {
+                        "prompt_list": updated_prompts,
+                        "prompt_interpolation_method": "slerp"  # Default method
+                    }
+                    
+                    # Apply the update using the working method
+                    result = self.pipeline.update_stream_params(**params)
+                    
+
+                    return JSONResponse({
+                        "status": "success",
+                        "message": f"Successfully updated prompt {index} weight",
+                        "index": index,
+                        "weight": weight
+                    })
+                else:
+                    raise HTTPException(status_code=400, detail=f"Prompt index {index} out of range or no prompts available")
+                    
+            except Exception as e:
+                logger.error(f"update_prompt_weight: Failed to update prompt weight: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update prompt weight: {str(e)}")
+
+        @self.app.post("/api/blending/update-seed-weight") 
+        async def update_seed_weight(request: Request):
+            """Update a specific seed weight in the current blending configuration"""
+            try:
+                data = await request.json()
+                index = data.get('index')
+                weight = data.get('weight')
+                
+                if index is None or weight is None:
+                    raise HTTPException(status_code=400, detail="Missing index or weight parameter")
+                
+                if not self.pipeline:
+                    raise HTTPException(status_code=400, detail="Pipeline is not initialized")
+                
+                # Get current seed blending configuration using the same logic as the blending/current endpoint
+                current_seeds = None
+                try:
+                    current_seeds = self.pipeline.stream.get_current_seeds()
+                except Exception:
+                    pass
+                
+                # If not available from pipeline, get from uploaded config and normalize
+                if not current_seeds:
+                    current_seeds = self._normalize_seed_config(self.uploaded_controlnet_config)
+                    
+                if current_seeds and index < len(current_seeds):
+                    # Create updated seed list with new weight
+                    updated_seeds = list(current_seeds)  # Make a copy
+                    updated_seeds[index] = (updated_seeds[index][0], float(weight))
+                    
+                    # Use the same update method as the main blending endpoint
+                    params = {
+                        "seed_list": updated_seeds,
+                        "seed_interpolation_method": "linear"  # Default method
+                    }
+                    
+                    # Apply the update using the working method
+                    result = self.pipeline.update_stream_params(**params)
+                    
+
+                    return JSONResponse({
+                        "status": "success",
+                        "message": f"Successfully updated seed {index} weight",
+                        "index": index,
+                        "weight": weight
+                    })
+                else:
+                    raise HTTPException(status_code=400, detail=f"Seed index {index} out of range or no seeds available")
+                    
+            except Exception as e:
+                logger.error(f"update_seed_weight: Failed to update seed weight: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to update seed weight: {str(e)}")
 
         @self.app.get("/api/preprocessors/current-params/{controlnet_index}")
         async def get_current_preprocessor_params(controlnet_index: int):
@@ -1410,6 +1691,111 @@ class App:
                     "mode": "api-only",
                     "frontend": "Run separately with 'npm run dev' in ./frontend/"
                 })
+
+        # Input control management endpoints
+        @self.app.post("/api/input-control/add")
+        async def add_input_control(request: Request):
+            """Add a new input control"""
+            try:
+                data = await request.json()
+                
+                input_id = data.get("input_id")
+                input_type = data.get("input_type")
+                parameter_name = data.get("parameter_name")
+                min_value = data.get("min_value", 0.0)
+                max_value = data.get("max_value", 1.0)
+                
+                if not all([input_id, input_type, parameter_name]):
+                    raise HTTPException(status_code=400, detail="Missing required parameters: input_id, input_type, parameter_name")
+                
+                # Handle different input types
+                if input_type == "gamepad":
+                    # Backend gamepad control
+                    gamepad_index = data.get("gamepad_index", 0)
+                    axis_index = data.get("axis_index", 0)
+                    deadzone = data.get("deadzone", 0.1)
+                    
+                    gamepad_control = GamepadInput(
+                        parameter_name=parameter_name,
+                        min_value=min_value,
+                        max_value=max_value,
+                        gamepad_index=gamepad_index,
+                        axis_index=axis_index,
+                        deadzone=deadzone
+                    )
+                    
+                    self.input_manager.add_input(input_id, gamepad_control)
+                    logger.info(f"add_input_control: Added gamepad control for parameter {parameter_name}")
+                    
+                elif input_type == "microphone":
+                    # Frontend-based control
+                    raise HTTPException(status_code=400, detail="Microphone inputs are managed in the frontend")
+                elif input_type == "hand_tracking":
+                    # Frontend-based control
+                    raise HTTPException(status_code=400, detail="Hand tracking inputs are managed in the frontend")
+                else:
+                    raise HTTPException(status_code=400, detail=f"Unsupported input type: {input_type}")
+                
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Added {input_type} input control for {parameter_name}"
+                })
+                
+            except Exception as e:
+                logging.error(f"add_input_control: Failed to add input control: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to add input control: {str(e)}")
+
+        @self.app.post("/api/input-control/start/{input_id}")
+        async def start_input_control(input_id: str):
+            """Start a specific input control"""
+            try:
+                await self.input_manager.start_input(input_id)
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Started input control {input_id}"
+                })
+            except Exception as e:
+                logging.error(f"start_input_control: Failed to start input control {input_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to start input control: {str(e)}")
+
+        @self.app.post("/api/input-control/stop/{input_id}")
+        async def stop_input_control(input_id: str):
+            """Stop a specific input control"""
+            try:
+                await self.input_manager.stop_input(input_id)
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Stopped input control {input_id}"
+                })
+            except Exception as e:
+                logging.error(f"stop_input_control: Failed to stop input control {input_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to stop input control: {str(e)}")
+
+        @self.app.delete("/api/input-control/{input_id}")
+        async def remove_input_control(input_id: str):
+            """Remove an input control"""
+            try:
+                self.input_manager.remove_input(input_id)
+                return JSONResponse({
+                    "status": "success",
+                    "message": f"Removed input control {input_id}"
+                })
+            except Exception as e:
+                logging.error(f"remove_input_control: Failed to remove input control {input_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to remove input control: {str(e)}")
+
+        @self.app.get("/api/input-control/status")
+        async def get_input_control_status():
+            """Get status of all input controls"""
+            try:
+                status = self.input_manager.get_input_status()
+                return JSONResponse({
+                    "status": "success",
+                    "input_controls": status
+                })
+            except Exception as e:
+                logging.error(f"get_input_control_status: Failed to get input control status: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to get input control status: {str(e)}")
 
     def _normalize_prompt_config(self, config_data):
         """

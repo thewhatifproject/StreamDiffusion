@@ -9,10 +9,8 @@ Pillow==10.5.0
 compel==2.0.2
 controlnet-aux==0.0.7
 xformers; sys_platform != 'darwin' or platform_machine != 'arm64'
-markdown2==2.4.12
-PyYAML==6.0.1
-python-multipart==0.0.20
-# torch version should match your CUDA, e.g. torch==2.1.0+cu121 from the PyTorch index
---extra-index-url https://download.pytorch.org/whl/cu121
-torch
+markdown2
+PyYAML
+python-multipart
 stable_fast @ https://github.com/chengzeyi/stable-fast/releases/download/v0.0.15.post1/stable_fast-0.0.15.post1+torch211cu121-cp310-cp310-manylinux2014_x86_64.whl; sys_platform=='linux'
+pygame
