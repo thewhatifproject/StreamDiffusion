@@ -236,7 +236,6 @@ class BaseControlNetPipeline:
             # Get batch size for engine compilation
             detected_batch_size = getattr(self.stream, 'trt_unet_batch_size', 1)
             
-            # Pool now handles all the complexity (model detection, validation, error handling)
             try:
                 return self.stream.controlnet_engine_pool.load_engine(
                     model_id=model_id,
