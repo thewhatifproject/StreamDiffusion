@@ -207,7 +207,7 @@ class Pipeline:
         self.negative_prompt = default_negative_prompt
         
         # Store output type for frame conversion
-        self.output_type = "pt" if not self.use_config else self.config.get('output_type', 'pil')
+        self.output_type = "pt" if not self.use_config else self.config.get('output_type', 'pt')
 
         # Model and acceleration setup
 
