@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from config import config, Args
-from util import pil_to_frame, bytes_to_pil
+from util import pil_to_frame, pt_to_frame, bytes_to_pil, bytes_to_pt
 from connection_manager import ConnectionManager, ServerFullException
 from img2img import Pipeline
 from input_control import InputManager, GamepadInput
@@ -329,7 +329,9 @@ class App:
                                     user_id, {"status": "send_frame"}
                                 )
                                 continue
-                            params.image = bytes_to_pil(image_data)
+                            
+                            # Always use direct bytes-to-tensor conversion for efficiency
+                            params.image = bytes_to_pt(image_data)
                         else:
                             params.image = None
                         
@@ -395,7 +397,12 @@ class App:
                             image = self.pipeline.predict(params)
                             if image is None:
                                 continue
-                            frame = pil_to_frame(image)
+                            
+                            # Use appropriate frame conversion based on output type
+                            if self.pipeline.output_type == "pt":
+                                frame = pt_to_frame(image)
+                            else:
+                                frame = pil_to_frame(image)
                         except Exception as e:
                             continue
                         

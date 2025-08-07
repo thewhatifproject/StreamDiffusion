@@ -176,7 +176,7 @@ class Pipeline:
                 width=params.width,
                 height=params.height,
                 use_lcm_lora=False,
-                output_type="pil",
+                output_type="pt",
                 warmup=10,
                 vae_id=None,
                 acceleration=args.acceleration,
@@ -205,6 +205,9 @@ class Pipeline:
         self.guidance_scale = 1.1
         self.num_inference_steps = 50
         self.negative_prompt = default_negative_prompt
+        
+        # Store output type for frame conversion
+        self.output_type = "pt" if not self.use_config else self.config.get('output_type', 'pt')
 
         # Model and acceleration setup
 
@@ -232,9 +235,14 @@ class Pipeline:
                 # IPAdapter mode: use PIL image for img2img
                 output_image = self.stream(params.image)
             else:
-                # Standard mode: use original logic with preprocessed tensor
-                image_tensor = self.stream.preprocess_image(params.image)
-                output_image = self.stream(image=image_tensor)
+                # Standard mode: handle tensor inputs (always from bytes_to_pt)
+                if isinstance(params.image, torch.Tensor):
+                    # Direct tensor input - already preprocessed
+                    output_image = self.stream(image=params.image)
+                else:
+                    # Fallback for PIL input - needs preprocessing
+                    image_tensor = self.stream.preprocess_image(params.image)
+                    output_image = self.stream(image=image_tensor)
 
         return output_image
 
