@@ -176,7 +176,7 @@ class Pipeline:
                 width=params.width,
                 height=params.height,
                 use_lcm_lora=False,
-                output_type="pil",
+                output_type="pt",
                 warmup=10,
                 vae_id=None,
                 acceleration=args.acceleration,
@@ -205,6 +205,9 @@ class Pipeline:
         self.guidance_scale = 1.1
         self.num_inference_steps = 50
         self.negative_prompt = default_negative_prompt
+        
+        # Store output type for frame conversion
+        self.output_type = "pt" if not self.use_config else self.config.get('output_type', 'pil')
 
         # Model and acceleration setup
 
