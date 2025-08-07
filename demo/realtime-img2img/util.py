@@ -5,7 +5,7 @@ from pydantic import BaseModel as PydanticBaseModel, Field
 from PIL import Image
 import io
 import torch
-from torchvision.io import encode_jpeg
+from torchvision.io import encode_jpeg, decode_jpeg
 
 
 def get_pipeline_class(pipeline_name: str) -> ModuleType:
@@ -25,6 +25,28 @@ def get_pipeline_class(pipeline_name: str) -> ModuleType:
 def bytes_to_pil(image_bytes: bytes) -> Image.Image:
     image = Image.open(io.BytesIO(image_bytes))
     return image
+
+
+def bytes_to_pt(image_bytes: bytes) -> torch.Tensor:
+    """
+    Convert JPEG/PNG bytes directly to PyTorch tensor using torchvision
+    
+    Args:
+        image_bytes: Raw image bytes (JPEG/PNG format)
+        
+    Returns:
+        torch.Tensor: Image tensor with shape (C, H, W), values in [0, 1], dtype float32
+    """
+    # Convert bytes to tensor for torchvision
+    byte_tensor = torch.frombuffer(image_bytes, dtype=torch.uint8)
+    
+    # Decode JPEG/PNG directly to tensor (C, H, W) format, uint8 [0, 255]
+    image_tensor = decode_jpeg(byte_tensor)
+    
+    # Convert to float32 and normalize to [0, 1]
+    image_tensor = image_tensor.float() / 255.0
+    
+    return image_tensor
 
 
 def pil_to_frame(image: Image.Image) -> bytes:

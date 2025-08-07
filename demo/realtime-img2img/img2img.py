@@ -235,9 +235,14 @@ class Pipeline:
                 # IPAdapter mode: use PIL image for img2img
                 output_image = self.stream(params.image)
             else:
-                # Standard mode: use original logic with preprocessed tensor
-                image_tensor = self.stream.preprocess_image(params.image)
-                output_image = self.stream(image=image_tensor)
+                # Standard mode: handle tensor inputs (always from bytes_to_pt)
+                if isinstance(params.image, torch.Tensor):
+                    # Direct tensor input - already preprocessed
+                    output_image = self.stream(image=params.image)
+                else:
+                    # Fallback for PIL input - needs preprocessing
+                    image_tensor = self.stream.preprocess_image(params.image)
+                    output_image = self.stream(image=image_tensor)
 
         return output_image
 
