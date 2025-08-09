@@ -226,21 +226,23 @@
       
       if (response.ok) {
         const result = await response.json();
-        console.log('Resolution updated successfully:', result.message ?? result);
-
+        console.log('handleResolutionUpdate: Resolution updated successfully:', result.message);
+        
         // Show success message - no restart needed for real-time updates
-        warningMessage = result.message || 'Resolution updated';
-        // Clear message after a few seconds
-        setTimeout(() => {
-          warningMessage = '';
-        }, 3000);
+        if (result.message) {
+          warningMessage = result.message;
+          // Clear message after a few seconds
+          setTimeout(() => {
+            warningMessage = '';
+          }, 3000);
+        }
       } else {
         const result = await response.json();
-        console.error('Failed to update resolution:', result.detail || result.message);
-        warningMessage = 'Failed to update resolution: ' + (result.detail || result.message || 'Unknown error');
+        console.error('handleResolutionUpdate: Failed to update resolution:', result.detail);
+        warningMessage = 'Failed to update resolution: ' + result.detail;
       }
     } catch (error: unknown) {
-      console.error('Failed to update resolution:', error);
+      console.error('handleResolutionUpdate: Failed to update resolution:', error);
       warningMessage = 'Failed to update resolution: ' + (error instanceof Error ? error.message : String(error));
     }
   }
