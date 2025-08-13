@@ -536,6 +536,8 @@ class App:
             current_delta = DEFAULT_SETTINGS.get('delta', 0.7)
             current_num_inference_steps = DEFAULT_SETTINGS.get('num_inference_steps', 50)
             current_seed = DEFAULT_SETTINGS.get('seed', 2)
+            # Negative prompt (for UI)
+            current_negative_prompt = DEFAULT_SETTINGS.get('negative_prompt', '')
             
             if self.pipeline and hasattr(self.pipeline.stream, 'get_stream_state'):
                 state = self.pipeline.stream.get_stream_state()
@@ -543,11 +545,17 @@ class App:
                 current_delta = state.get('delta', DEFAULT_SETTINGS.get('delta', 0.7))
                 current_num_inference_steps = state.get('num_inference_steps', DEFAULT_SETTINGS.get('num_inference_steps', 50))
                 current_seed = state.get('current_seed', DEFAULT_SETTINGS.get('seed', 2))
+                # try to get negative prompt from pipeline if available
+                try:
+                    current_negative_prompt = getattr(self.pipeline, 'negative_prompt', current_negative_prompt)
+                except Exception:
+                    pass
             elif self.uploaded_controlnet_config:
                 current_guidance_scale = self.uploaded_controlnet_config.get('guidance_scale', DEFAULT_SETTINGS.get('guidance_scale', 1.1))
                 current_delta = self.uploaded_controlnet_config.get('delta', DEFAULT_SETTINGS.get('delta', 0.7))
                 current_num_inference_steps = self.uploaded_controlnet_config.get('num_inference_steps', DEFAULT_SETTINGS.get('num_inference_steps', 50))
                 current_seed = self.uploaded_controlnet_config.get('seed', DEFAULT_SETTINGS.get('seed', 2))
+                current_negative_prompt = self.uploaded_controlnet_config.get('negative_prompt', current_negative_prompt)
             
             # Get prompt and seed blending configuration from uploaded config or pipeline
             prompt_blending_config = None
@@ -582,12 +590,43 @@ class App:
                 normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
                 normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
             
+            # Determine current model id for UI badge
+            model_id_for_ui = ''
+            if self.pipeline and hasattr(self.pipeline, 'config') and self.pipeline.config:
+                model_id_for_ui = self.pipeline.config.get('model_id', '')
+            elif self.uploaded_controlnet_config and 'model_id' in self.uploaded_controlnet_config:
+                model_id_for_ui = self.uploaded_controlnet_config['model_id']
+            else:
+                model_id_for_ui = DEFAULT_SETTINGS.get('model_id', '')
+
+            # Build config values for UI defaults from uploaded config
+            config_values = {}
+            if self.uploaded_controlnet_config:
+                for key in [
+                    'prompt',
+                    'negative_prompt',
+                    'guidance_scale',
+                    'delta',
+                    'num_inference_steps',
+                    'seed',
+                    'frame_buffer_size',
+                    'use_denoising_batch',
+                    'use_lcm_lora',
+                    'use_tiny_vae',
+                    'use_taesd',
+                    'cfg_type',
+                    'safety_checker',
+                ]:
+                    if key in self.uploaded_controlnet_config:
+                        config_values[key] = self.uploaded_controlnet_config[key]
+
             return JSONResponse(
                 {
                     "info": info_schema,
                     "input_params": input_params,
                     "max_queue_size": self.args.max_queue_size,
                     "page_content": page_content if info.page_content else "",
+                    "pipeline_active": bool(self.pipeline) and hasattr(self.pipeline, 'stream'),
                     "controlnet": controlnet_info,
                     "ipadapter": ipadapter_info,
                     "config_prompt": config_prompt,
@@ -597,11 +636,14 @@ class App:
                     "delta": current_delta,
                     "num_inference_steps": current_num_inference_steps,
                     "seed": current_seed,
+                    "negative_prompt": current_negative_prompt,
                     "current_resolution": current_resolution,
                     "prompt_blending": prompt_blending_config,
                     "seed_blending": seed_blending_config,
                     "normalize_prompt_weights": normalize_prompt_weights,
                     "normalize_seed_weights": normalize_seed_weights,
+                    "model_id": model_id_for_ui,
+                    "config_values": config_values,
                 }
             )
 
@@ -633,6 +675,8 @@ class App:
                 
                 # Get config prompt if available
                 config_prompt = config_data.get('prompt', None)
+                # Get negative prompt if available
+                config_negative_prompt = config_data.get('negative_prompt', None)
                 
                 # Get t_index_list from config if available
                 t_index_list = config_data.get('t_index_list', DEFAULT_SETTINGS.get('t_index_list', [35, 45]))
@@ -691,6 +735,26 @@ class App:
                 response_ipadapter_info = self._get_ipadapter_info()
 
                 
+                # Prepare config_values for UI defaults
+                config_values = {}
+                for key in [
+                    'prompt',
+                    'negative_prompt',
+                    'guidance_scale',
+                    'delta',
+                    'num_inference_steps',
+                    'seed',
+                    'frame_buffer_size',
+                    'use_denoising_batch',
+                    'use_lcm_lora',
+                    'use_tiny_vae',
+                    'use_taesd',
+                    'cfg_type',
+                    'safety_checker',
+                ]:
+                    if key in config_data:
+                        config_values[key] = config_data[key]
+
                 return JSONResponse({
                     "status": "success",
                     "message": "ControlNet configuration uploaded successfully",
@@ -698,6 +762,8 @@ class App:
                     "controlnet": self._get_controlnet_info(),
                     "ipadapter": response_ipadapter_info,  # Include updated IPAdapter info
                     "config_prompt": config_prompt,
+                    "negative_prompt": config_negative_prompt,
+                    "model_id": config_data.get('model_id', ''),
                     "t_index_list": t_index_list,
                     "acceleration": config_acceleration,
                     "guidance_scale": config_guidance_scale,
@@ -709,6 +775,7 @@ class App:
                     "current_resolution": current_resolution,  # Include updated resolution
                     "normalize_prompt_weights": config_normalize_weights,
                     "normalize_seed_weights": config_normalize_weights,
+                    "config_values": config_values,
                 })
                 
             except Exception as e:
@@ -1197,6 +1264,30 @@ class App:
             """Update multiple streaming parameters in a single unified call"""
             try:
                 data = await request.json()
+                
+                # Allow updating resolution even when pipeline is not initialized.
+                # We save the new values so they take effect on the next stream start.
+                if "resolution" in data and not self.pipeline:
+                    resolution = data["resolution"]
+                    if isinstance(resolution, dict) and "width" in resolution and "height" in resolution:
+                        width, height = int(resolution["width"]), int(resolution["height"])
+                        self.new_width = width
+                        self.new_height = height
+                    elif isinstance(resolution, str):
+                        # Handle string format like "512x768 (2:3)" or "512x768"
+                        resolution_part = resolution.split(' ')[0]
+                        try:
+                            width, height = map(int, resolution_part.split('x'))
+                            self.new_width = width
+                            self.new_height = height
+                        except ValueError:
+                            raise HTTPException(status_code=400, detail="Invalid resolution format")
+                    else:
+                        raise HTTPException(status_code=400, detail="Resolution must be {width: int, height: int} or 'widthxheight' string")
+                    return JSONResponse({
+                        "status": "success",
+                        "message": f"Resolution set to {self.new_width}x{self.new_height}. It will be applied when streaming starts."
+                    })
                 
                 if not self.pipeline:
                     raise HTTPException(status_code=400, detail="Pipeline is not initialized")
