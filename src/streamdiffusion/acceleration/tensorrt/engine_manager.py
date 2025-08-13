@@ -107,8 +107,8 @@ class EngineManager:
             # Create prefix (from wrapper.py lines 1005-1013)
             prefix = f"{base_name}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}"
             
-            if ipadapter_scale is not None:
-                prefix += f"--ipa{ipadapter_scale}"
+            # Do not bake IP-Adapter scale into engine name; strength is now a runtime input
+            # (ipadapter_scale remains a parameter for backward-compatibility but is ignored here)
             if ipadapter_tokens is not None:
                 prefix += f"--tokens{ipadapter_tokens}"
             
@@ -238,6 +238,10 @@ class EngineManager:
             
         if kwargs.get('use_ipadapter_trt', False):
             setattr(loaded_engine, 'ipadapter_arch', kwargs.get('unet_arch', {}))
+            # number of IP-attention layers for runtime vector sizing
+            if 'num_ip_layers' in kwargs and kwargs['num_ip_layers'] is not None:
+                setattr(loaded_engine, 'num_ip_layers', kwargs['num_ip_layers'])
+        
     
     def get_or_load_controlnet_engine(self, 
                                     model_id: str,
