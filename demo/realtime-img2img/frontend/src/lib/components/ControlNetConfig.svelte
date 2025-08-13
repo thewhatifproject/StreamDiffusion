@@ -337,7 +337,7 @@
         {#if controlnetInfo?.enabled && controlnetInfo?.controlnets?.length > 0}
           <div class="space-y-3">
             <div class="flex items-center justify-between">
-              <h5 class="text-sm font-medium">ControlNet Configuration</h5>
+              <!--<h5 class="text-sm font-medium">ControlNet Configuration</h5>-->
               <ControlNetSelector on:controlnetAdded={handleControlNetAdded} />
             </div>
             {#each controlnetInfo.controlnets as controlnet}
