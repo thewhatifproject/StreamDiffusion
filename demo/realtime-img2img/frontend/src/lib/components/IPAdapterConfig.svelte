@@ -14,7 +14,7 @@
   let uploadStatus = '';
   let currentStyleImage: string | null = null;
 
-  // Collapsible section state
+  // Collapsible toggle handled internally for consistency
   let showIPAdapter: boolean = true;
 
   // Available weight types
@@ -158,13 +158,13 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
     <button 
       on:click={() => showIPAdapter = !showIPAdapter}
-      class="w-full p-3 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg border-b border-gray-200 dark:border-gray-700"
+      class="w-full p-4 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg"
     >
-      <h4 class="text-sm font-semibold">IPAdapter</h4>
+      <h3 class="text-md font-medium">IPAdapter</h3>
       <span class="text-sm">{showIPAdapter ? '−' : '+'}</span>
     </button>
     {#if showIPAdapter}
-      <div class="p-3">
+    <div class="p-4 pt-1">
         <!-- IPAdapter Status -->
         <div class="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-700 rounded mb-3">
           {#if ipadapterInfo?.enabled}
@@ -301,7 +301,7 @@
             Load a configuration with IPAdapter settings to enable style-guided generation.
           </p>
         {/if}
-      </div>
+    </div>
     {/if}
   </div>
 </div>

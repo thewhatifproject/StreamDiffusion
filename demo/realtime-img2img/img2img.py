@@ -32,7 +32,7 @@ page_content = """<h1 class="text-3xl font-bold">StreamDiffusion</h1>
 <p class="text-sm">
     This demo showcases
     <a
-    href="https://github.com/cumulo-autumn/StreamDiffusion"
+    href="https://github.com/livepeer/StreamDiffusion"
     target="_blank"
     class="text-blue-500 underline hover:no-underline">StreamDiffusion
 </a>
