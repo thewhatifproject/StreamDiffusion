@@ -1087,6 +1087,8 @@ class StreamDiffusionWrapper:
                     cfg0 = ipadapter_config[0] if isinstance(ipadapter_config, list) else ipadapter_config
                     # scale omitted from engine naming; runtime will pass ipadapter_scale vector
                     ipadapter_tokens = cfg0.get('num_image_tokens', 4)
+                    # Determine FaceID type from config for engine naming
+                    is_faceid = (cfg0.get('type') == 'faceid' or bool(cfg0.get('is_faceid', False)))
                 # Generate engine paths using EngineManager
                 unet_path = engine_manager.get_engine_path(
                     EngineType.UNET,
@@ -1097,7 +1099,8 @@ class StreamDiffusionWrapper:
                     use_lcm_lora=use_lcm_lora,
                     use_tiny_vae=use_tiny_vae,
                     ipadapter_scale=ipadapter_scale,
-                    ipadapter_tokens=ipadapter_tokens
+                    ipadapter_tokens=ipadapter_tokens,
+                    is_faceid=is_faceid if use_ipadapter_trt else None
                 )
                 vae_encoder_path = engine_manager.get_engine_path(
                     EngineType.VAE_ENCODER,
@@ -1108,7 +1111,8 @@ class StreamDiffusionWrapper:
                     use_lcm_lora=use_lcm_lora,
                     use_tiny_vae=use_tiny_vae,
                     ipadapter_scale=ipadapter_scale,
-                    ipadapter_tokens=ipadapter_tokens
+                    ipadapter_tokens=ipadapter_tokens,
+                    is_faceid=is_faceid if use_ipadapter_trt else None
                 )
                 vae_decoder_path = engine_manager.get_engine_path(
                     EngineType.VAE_DECODER,
@@ -1119,7 +1123,8 @@ class StreamDiffusionWrapper:
                     use_lcm_lora=use_lcm_lora,
                     use_tiny_vae=use_tiny_vae,
                     ipadapter_scale=ipadapter_scale,
-                    ipadapter_tokens=ipadapter_tokens
+                    ipadapter_tokens=ipadapter_tokens,
+                    is_faceid=is_faceid if use_ipadapter_trt else None
                 )
 
                 # Check if all required engines exist
@@ -1180,6 +1185,8 @@ class StreamDiffusionWrapper:
                             image_encoder_path=cfg['image_encoder_path'],
                             style_image=cfg.get('style_image'),
                             scale=cfg.get('scale', 1.0),
+                            is_faceid=(cfg.get('type') == 'faceid' or bool(cfg.get('is_faceid', False))),
+                            insightface_model_name=cfg.get('insightface_model_name'),
                         )
                         ip_module_for_export = IPAdapterModule(ip_cfg)
                         ip_module_for_export.install(stream)
@@ -1556,6 +1563,8 @@ class StreamDiffusionWrapper:
                     image_encoder_path=cfg['image_encoder_path'],
                     style_image=cfg.get('style_image'),
                     scale=cfg.get('scale', 1.0),
+                    is_faceid=(cfg.get('type') == 'faceid' or bool(cfg.get('is_faceid', False))),
+                    insightface_model_name=cfg.get('insightface_model_name'),
                 )
                 ip_module = IPAdapterModule(ip_cfg)
                 ip_module.install(stream)

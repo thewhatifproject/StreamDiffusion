@@ -22,6 +22,9 @@ class IPAdapterConfig:
     image_encoder_path: Optional[str] = None
     style_image: Optional[Any] = None
     scale: float = 1.0
+    # FaceID support
+    is_faceid: bool = False
+    insightface_model_name: Optional[str] = None
 
 
 class IPAdapterModule(OrchestratorUser):
@@ -122,22 +125,46 @@ class IPAdapterModule(OrchestratorUser):
         resolved_ip_path = self._resolve_model_path(self.config.ipadapter_model_path)
         resolved_encoder_path = self._resolve_model_path(self.config.image_encoder_path)
 
-        # Create IP-Adapter and install processors into UNet
-        ipadapter = IPAdapter(
-            pipe=stream.pipe,
-            ipadapter_ckpt_path=resolved_ip_path,
-            image_encoder_path=resolved_encoder_path,
-            device=stream.device,
-            dtype=stream.dtype,
-        )
+        # Create IP-Adapter and install processors into UNet (FaceID-aware)
+        ip_kwargs = {
+            'pipe': stream.pipe,
+            'ipadapter_ckpt_path': resolved_ip_path,
+            'image_encoder_path': resolved_encoder_path,
+            'device': stream.device,
+            'dtype': stream.dtype,
+        }
+        if bool(self.config.is_faceid) and self.config.insightface_model_name:
+            ip_kwargs['insightface_model_name'] = self.config.insightface_model_name
+            print(
+                f"IPAdapterModule.install: Initializing FaceID IP-Adapter with InsightFace model: {self.config.insightface_model_name}"
+            )
+        ipadapter = IPAdapter(**ip_kwargs)
         self.ipadapter = ipadapter
 
         # Register embedding preprocessor for this style key 
-        embedding_preprocessor = IPAdapterEmbeddingPreprocessor(
-            ipadapter=ipadapter,
-            device=stream.device,
-            dtype=stream.dtype,
-        )
+        # Use FaceID preprocessor if applicable
+        try:
+            use_faceid_preproc = hasattr(ipadapter, 'is_faceid') and bool(getattr(ipadapter, 'is_faceid'))
+        except Exception:
+            use_faceid_preproc = False
+        if use_faceid_preproc:
+            try:
+                from streamdiffusion.preprocessing.processors.faceid_embedding import FaceIDEmbeddingPreprocessor
+                embedding_preprocessor = FaceIDEmbeddingPreprocessor(
+                    ipadapter=ipadapter,
+                    device=stream.device,
+                    dtype=stream.dtype,
+                )
+                print("IPAdapterModule.install: Using FaceIDEmbeddingPreprocessor for FaceID model")
+            except Exception as e:
+                logger.error(f"IPAdapterModule.install: Failed to initialize FaceIDEmbeddingPreprocessor: {e}")
+                raise
+        else:
+            embedding_preprocessor = IPAdapterEmbeddingPreprocessor(
+                ipadapter=ipadapter,
+                device=stream.device,
+                dtype=stream.dtype,
+            )
         stream._param_updater.register_embedding_preprocessor(embedding_preprocessor, style_key)
 
         # Process initial style image if provided

@@ -204,6 +204,9 @@ def _prepare_ipadapter_configs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             'style_image': ip_config.get('style_image'),
             'scale': ip_config.get('scale', 1.0),
             'enabled': ip_config.get('enabled', True),
+            # Preserve FaceID options from config for downstream wrapper/module handling
+            'type': ip_config.get('type', 'regular'),
+            'insightface_model_name': ip_config.get('insightface_model_name'),
         }
         ipadapter_configs.append(ipadapter_config)
     

@@ -78,7 +78,8 @@ class EngineManager:
                        use_tiny_vae: bool,
                        ipadapter_scale: Optional[float] = None,
                        ipadapter_tokens: Optional[int] = None,
-                       controlnet_model_id: Optional[str] = None) -> Path:
+                       controlnet_model_id: Optional[str] = None,
+                       is_faceid: Optional[bool] = None) -> Path:
         """
         Generate engine path using wrapper.py's current logic.
         
@@ -107,8 +108,10 @@ class EngineManager:
             # Create prefix (from wrapper.py lines 1005-1013)
             prefix = f"{base_name}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}"
             
-            # Do not bake IP-Adapter scale into engine name; strength is now a runtime input
-            # (ipadapter_scale remains a parameter for backward-compatibility but is ignored here)
+            # IP-Adapter differentiation: add type and (optionally) tokens
+            # Keep scale out of identity for runtime control, but include a type flag to separate caches
+            if is_faceid is True:
+                prefix += f"--fid"
             if ipadapter_tokens is not None:
                 prefix += f"--tokens{ipadapter_tokens}"
             
