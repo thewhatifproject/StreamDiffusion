@@ -216,16 +216,15 @@ class Pipeline:
         if self.pipeline_mode == "txt2img":
             # Text-to-image mode
             if self.has_controlnet:
-                # txt2img with ControlNets: push control image via consolidated API
+                # txt2img with ControlNets: push control image via direct method
                 try:
                     current_cfg = self.stream.stream._param_updater._get_current_controlnet_config() if hasattr(self.stream, 'stream') else []
                 except Exception:
                     current_cfg = []
                 if current_cfg:
-                    # update just the control image for all configured CNs
+                    # Update control image for all configured ControlNets using direct method
                     for i in range(len(current_cfg)):
-                        current_cfg[i]['control_image'] = params.image
-                    self.stream.update_stream_params(controlnet_config=current_cfg)
+                        self.stream.update_control_image(index=i, image=params.image)
                 output_image = self.stream(params.image)
             elif self.has_ipadapter:
                 # txt2img with IPAdapter: no input image needed (style image handled separately)
@@ -236,15 +235,15 @@ class Pipeline:
         else:
             # Image-to-image mode: use original logic
             if self.has_controlnet:
-                # ControlNet mode: push control image via consolidated API and use PIL image
+                # ControlNet mode: push control image via direct method and use PIL image
                 try:
                     current_cfg = self.stream.stream._param_updater._get_current_controlnet_config() if hasattr(self.stream, 'stream') else []
                 except Exception:
                     current_cfg = []
                 if current_cfg:
+                    # Update control image for all configured ControlNets using direct method
                     for i in range(len(current_cfg)):
-                        current_cfg[i]['control_image'] = params.image
-                    self.stream.update_stream_params(controlnet_config=current_cfg)
+                        self.stream.update_control_image(index=i, image=params.image)
                 output_image = self.stream(params.image)
             elif self.has_ipadapter:
                 # IPAdapter mode: use PIL image for img2img
@@ -263,7 +262,7 @@ class Pipeline:
 
     def update_ipadapter_config(self, scale: float = None, style_image: Image.Image = None) -> bool:
         """
-        Update IPAdapter configuration in real-time using unified approach
+        Update IPAdapter configuration in real-time using direct methods
         
         Args:
             scale: New IPAdapter scale value (optional)
@@ -279,15 +278,14 @@ class Pipeline:
             return False  # Nothing to update
             
         try:
-            # Build config dict with only the parameters that were provided
-            ipadapter_config = {}
+            # Update scale via unified config system (no direct method needed)
             if scale is not None:
-                ipadapter_config['scale'] = scale
+                self.stream.update_stream_params(ipadapter_config={'scale': scale})
+            
+            # Update style image via direct method
             if style_image is not None:
-                ipadapter_config['style_image'] = style_image
+                self.stream.update_style_image(style_image)
                 
-            # Use unified update_stream_params approach
-            self.stream.update_stream_params(ipadapter_config=ipadapter_config)
             return True
         except Exception as e:
             return False
