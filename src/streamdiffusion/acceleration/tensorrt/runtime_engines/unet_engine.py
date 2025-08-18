@@ -3,6 +3,7 @@ from typing import *
 import torch
 import logging
 import os
+import time
 
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionOutput
 from diffusers.models.autoencoders.autoencoder_tiny import AutoencoderTinyOutput
@@ -25,6 +26,10 @@ class UNet2DConditionModelEngine:
         
         # Enable VRAM monitoring only if explicitly requested (defaults to False for performance)
         self.debug_vram = os.getenv('STREAMDIFFUSION_DEBUG_VRAM', '').lower() in ('1', 'true')
+        
+        # TEMPORARY: Simple performance logging for optimization
+        self.profile_inference = True
+        self._inference_times = []
 
         self.engine.load()
         self.engine.activate()
@@ -133,6 +138,11 @@ class UNet2DConditionModelEngine:
             allocated_after = torch.cuda.memory_allocated() / 1024**3
             logger.debug(f"VRAM after allocation: {allocated_after:.2f}GB")
 
+        # Start timing for performance profiling
+        if self.profile_inference:
+            torch.cuda.synchronize()
+            inference_start = time.perf_counter()
+        
         try:
             outputs = self.engine.infer(
                 input_dict,
@@ -142,6 +152,19 @@ class UNet2DConditionModelEngine:
         except Exception as e:
             logger.exception(f"UNet2DConditionModelEngine.__call__: Engine.infer failed: {e}")
             raise
+        
+        # End timing for performance profiling
+        if self.profile_inference:
+            torch.cuda.synchronize()
+            inference_end = time.perf_counter()
+            inference_time_ms = (inference_end - inference_start) * 1000
+            self._inference_times.append(inference_time_ms)
+            
+            # Print every 100th inference for monitoring
+            if len(self._inference_times) % 100 == 0:
+                 recent_avg = sum(self._inference_times[-100:]) / 100
+                 overall_avg = sum(self._inference_times) / len(self._inference_times)
+                 print(f"UNet_TRT_inference: current={inference_time_ms:.2f}ms, recent_avg={recent_avg:.2f}ms, overall_avg={overall_avg:.2f}ms, count={len(self._inference_times)}")
         
         
         if self.debug_vram:
