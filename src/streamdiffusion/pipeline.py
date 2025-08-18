@@ -1,5 +1,4 @@
 import time
-import os
 from typing import List, Optional, Union, Any, Dict, Tuple, Literal
 
 import numpy as np
@@ -117,9 +116,6 @@ class StreamDiffusion:
         self._cached_cfg_type: Optional[str] = None
         self._cached_guidance_scale: Optional[float] = None
         
-        # TEMPORARY: Simple performance logging for SDXL conditioning optimization
-        self.profile_sdxl_conditioning = True
-        self._sdxl_conditioning_times = []
 
     def _check_unet_tensorrt(self) -> bool:
         """Cache TensorRT detection to avoid repeated hasattr calls"""
@@ -537,10 +533,6 @@ class StreamDiffusion:
         # Add SDXL-specific conditioning if this is an SDXL model
         if self.is_sdxl and hasattr(self, 'add_text_embeds') and hasattr(self, 'add_time_ids'):
             if self.add_text_embeds is not None and self.add_time_ids is not None:
-                # Start timing for SDXL conditioning operations
-                if self.profile_sdxl_conditioning:
-                    conditioning_start = time.perf_counter()
-                
                 # Handle batching for CFG - replicate conditioning to match batch size
                 batch_size = x_t_latent_plus_uc.shape[0]
                 
@@ -562,18 +554,6 @@ class StreamDiffusion:
                     'text_embeds': add_text_embeds,
                     'time_ids': add_time_ids
                 }
-                
-                # End timing for SDXL conditioning operations
-                if self.profile_sdxl_conditioning:
-                    conditioning_end = time.perf_counter()
-                    conditioning_time_ms = (conditioning_end - conditioning_start) * 1000
-                    self._sdxl_conditioning_times.append(conditioning_time_ms)
-                    
-                    # Print every 100th conditioning operation for monitoring
-                    if len(self._sdxl_conditioning_times) % 100 == 0:
-                        recent_avg = sum(self._sdxl_conditioning_times[-100:]) / 100
-                        overall_avg = sum(self._sdxl_conditioning_times) / len(self._sdxl_conditioning_times)
-                        print(f"SDXL_conditioning_prep: current={conditioning_time_ms:.3f}ms, recent_avg={recent_avg:.3f}ms, overall_avg={overall_avg:.3f}ms, count={len(self._sdxl_conditioning_times)}, batch_size={batch_size}, cfg_type={self.cfg_type}")
         
         # Allow modules to contribute additional UNet kwargs via hooks
         try:

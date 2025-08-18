@@ -4,8 +4,6 @@ import torch
 import tensorrt as trt
 import traceback
 import logging
-import time
-import os
 from typing import List, Optional, Tuple, Dict, Any
 from polygraphy import cuda
 
@@ -30,10 +28,6 @@ class ControlNetModelEngine:
         
         self._input_names = None
         self._output_names = None
-        
-        # TEMPORARY: Simple performance logging for optimization
-        self.profile_inference = True
-        self._inference_times = []
         
         # Pre-compute model-specific values to eliminate runtime branching
         if self.model_type in ["sdxl", "sdxl_turbo"]:
@@ -118,11 +112,6 @@ class ControlNetModelEngine:
         
         self.engine.allocate_buffers(shape_dict=shape_dict, device=sample.device)
         
-        # Start timing for performance profiling
-        if self.profile_inference:
-            torch.cuda.synchronize()
-            inference_start = time.perf_counter()
-        
         outputs = self.engine.infer(
             input_dict,
             self.stream,
@@ -130,19 +119,6 @@ class ControlNetModelEngine:
         )
         
         self.stream.synchronize()
-        
-        # End timing for performance profiling
-        if self.profile_inference:
-            torch.cuda.synchronize()
-            inference_end = time.perf_counter()
-            inference_time_ms = (inference_end - inference_start) * 1000
-            self._inference_times.append(inference_time_ms)
-            
-            # Print every 100th inference for monitoring
-            if len(self._inference_times) % 100 == 0:
-                recent_avg = sum(self._inference_times[-100:]) / 100
-                overall_avg = sum(self._inference_times) / len(self._inference_times)
-                print(f"ControlNet_TRT_inference: current={inference_time_ms:.2f}ms, recent_avg={recent_avg:.2f}ms, overall_avg={overall_avg:.2f}ms, count={len(self._inference_times)}, model={self.model_type}")
         
         down_blocks, mid_block = self._extract_controlnet_outputs(outputs)
         
