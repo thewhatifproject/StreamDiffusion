@@ -1045,21 +1045,6 @@ class StreamParameterUpdater(OrchestratorUser):
                         if hasattr(preprocessor, param_name):
                             setattr(preprocessor, param_name, param_value)
 
-                # Efficient control image update when provided
-                if 'control_image' in desired_cfg and desired_cfg['control_image'] is not None:
-                    try:
-                        # Route through module helper if available
-                        if hasattr(controlnet_pipeline, 'update_control_image_efficient'):
-                            controlnet_pipeline.update_control_image_efficient(desired_cfg['control_image'], index=existing_index)
-                        else:
-                            # Fallback to orchestrator-based processing if present on module
-                            if hasattr(controlnet_pipeline, '_prepare_control_image') and hasattr(controlnet_pipeline, 'preprocessors') and hasattr(controlnet_pipeline, 'controlnet_images'):
-                                preproc = controlnet_pipeline.preprocessors[existing_index] if existing_index < len(controlnet_pipeline.preprocessors) else None
-                                processed = controlnet_pipeline._prepare_control_image(desired_cfg['control_image'], preproc)
-                                if existing_index < len(controlnet_pipeline.controlnet_images):
-                                    controlnet_pipeline.controlnet_images[existing_index] = processed
-                    except Exception:
-                        raise
 
     def _get_controlnet_pipeline(self):
         """
@@ -1160,12 +1145,6 @@ class StreamParameterUpdater(OrchestratorUser):
                     # Do not introduce fallback mechanisms
                     raise
         
-        # Update style image if provided
-        if 'style_image' in desired_config:
-            style_image = desired_config['style_image']
-            if style_image is not None:
-                logger.info(f"_update_ipadapter_config: Updating style image")
-                ipadapter_pipeline.update_style_image(style_image)
 
         # Update weight type if provided (affects per-layer distribution and/or per-step factor)
         if 'weight_type' in desired_config:

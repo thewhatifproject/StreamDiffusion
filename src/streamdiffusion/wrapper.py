@@ -1593,6 +1593,21 @@ class StreamDiffusionWrapper:
         if hasattr(self, 'stream') and self.stream and hasattr(self.stream, 'cleanup'):
             self.stream.cleanup_controlnets()
 
+    def update_control_image(self, index: int, image: Union[str, Image.Image, torch.Tensor]) -> None:
+        """Update control image for specific ControlNet index"""
+        if not self.use_controlnet:
+            raise RuntimeError("update_control_image: ControlNet support not enabled. Set use_controlnet=True in constructor.")
+
+        self.stream._controlnet_module.update_control_image_efficient(image, index=index)
+
+
+    def update_style_image(self, image: Union[str, Image.Image, torch.Tensor]) -> None:
+        """Update IPAdapter style image"""
+        if not self.use_ipadapter:
+            raise RuntimeError("update_style_image: IPAdapter support not enabled. Set use_ipadapter=True in constructor.")
+        self.stream.update_style_image(image)
+        
+
     def clear_caches(self) -> None:
         """Clear all cached prompt embeddings and seed noise tensors."""
         self.stream._param_updater.clear_caches()
