@@ -15,8 +15,7 @@ logger = logging.getLogger(__name__)
 from .pipeline import StreamDiffusion
 from .image_utils import postprocess_image
 from .model_detection import detect_model
-from .modules.controlnet_module import ControlNetConfig
-from .modules.ipadapter_module import IPAdapterConfig
+from .config_types import ControlNetConfig, IPAdapterConfig
 
 torch.set_grad_enabled(False)
 torch.backends.cuda.matmul.allow_tf32 = True

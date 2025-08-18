@@ -13,17 +13,9 @@ from streamdiffusion.preprocessing.preprocessing_orchestrator import (
     PreprocessingOrchestrator,
 )
 from streamdiffusion.preprocessing.orchestrator_user import OrchestratorUser
+from streamdiffusion.config_types import ControlNetConfig
 
 
-class ControlNetConfig(BaseModel):
-    model_id: str = Field(..., description="HuggingFace model ID or local path to ControlNet model")
-    preprocessor: Optional[str] = Field(None, description="Preprocessor name (e.g., 'canny', 'depth', 'pose')")
-    conditioning_scale: float = Field(1.0, ge=0.0, le=2.0, description="Conditioning strength (0.0 = disabled, 1.0 = normal, 2.0 = strong)")
-    enabled: bool = Field(True, description="Whether this ControlNet is active")
-    preprocessor_params: Optional[Dict[str, Any]] = Field(None, description="Parameters passed to the preprocessor")
-    
-    class Config:
-        extra = "forbid"  # Prevent unknown fields
 
 
 class ControlNetModule(OrchestratorUser):
