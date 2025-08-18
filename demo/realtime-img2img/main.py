@@ -159,8 +159,8 @@ class App:
             elif parameter_name == 'seed':
                 self.pipeline.update_stream_params(seed=int(value))
             elif parameter_name == 'ipadapter_scale':
-                from streamdiffusion.modules.ipadapter_module import IPAdapterConfig
-                config = IPAdapterConfig(scale=value)
+                from streamdiffusion.config_types import IPAdapterConfig
+                config = IPAdapterConfig(style_image_key='ipadapter_main', scale=value)
                 self.pipeline.update_stream_params(ipadapter_config=config)
             elif parameter_name == 'ipadapter_weight_type':
                 # For weight type, we need to convert the numeric value to a string

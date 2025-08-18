@@ -24,6 +24,7 @@ class IPAdapterConfig(BaseModel):
     style_image: Optional[Any] = Field(None, description="Style image (PIL Image, path, or tensor)")
     scale: float = Field(1.0, ge=0.0, le=2.0, description="IPAdapter strength (0.0 = disabled, 1.0 = normal, 2.0 = strong)")
     weight_type: Optional[str] = Field(None, description="Weight distribution type for per-layer scaling")
+    enabled: bool = Field(True, description="Whether this IPAdapter is active")
     # FaceID support
     is_faceid: bool = Field(False, description="Whether this is a FaceID-style IPAdapter")
     insightface_model_name: Optional[str] = Field(None, description="InsightFace model name for FaceID")

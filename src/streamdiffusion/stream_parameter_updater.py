@@ -7,8 +7,7 @@ import gc
 import logging
 logger = logging.getLogger(__name__)
 from .preprocessing.orchestrator_user import OrchestratorUser
-from .modules.controlnet_module import ControlNetConfig
-from .modules.ipadapter_module import IPAdapterConfig
+from .config_types import ControlNetConfig, IPAdapterConfig
 
 class CacheStats:
     """Helper class to track cache statistics"""

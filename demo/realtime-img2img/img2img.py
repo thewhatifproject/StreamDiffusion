@@ -280,8 +280,8 @@ class Pipeline:
         try:
             # Update scale via unified config system (no direct method needed)
             if scale is not None:
-                from streamdiffusion.modules.ipadapter_module import IPAdapterConfig
-                config = IPAdapterConfig(scale=scale)
+                from streamdiffusion.config_types import IPAdapterConfig
+                config = IPAdapterConfig(style_image_key='ipadapter_main', scale=scale)
                 self.stream.update_stream_params(ipadapter_config=config)
             
             # Update style image via direct method
@@ -308,8 +308,8 @@ class Pipeline:
         try:
             # Use unified updater on wrapper
             if hasattr(self.stream, 'update_stream_params'):
-                from streamdiffusion.modules.ipadapter_module import IPAdapterConfig
-                config = IPAdapterConfig(weight_type=weight_type)
+                from streamdiffusion.config_types import IPAdapterConfig
+                config = IPAdapterConfig(style_image_key='ipadapter_main', weight_type=weight_type)
                 self.stream.update_stream_params(ipadapter_config=config)
                 return True
             # Direct attribute set as last resort

@@ -179,7 +179,7 @@ def _extract_prepare_params(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _prepare_controlnet_configs(config: Dict[str, Any]) -> List['ControlNetConfig']:
     """Prepare ControlNet configurations for wrapper"""
-    from .modules.controlnet_module import ControlNetConfig
+    from .config_types import ControlNetConfig
     
     controlnet_configs = []
     for cn_config in config['controlnets']:
@@ -198,7 +198,7 @@ def _prepare_controlnet_configs(config: Dict[str, Any]) -> List['ControlNetConfi
 
 def _prepare_ipadapter_configs(config: Dict[str, Any]) -> 'IPAdapterConfig':
     """Prepare IPAdapter configurations for wrapper (returns single config, not list)"""
-    from .modules.ipadapter_module import IPAdapterConfig
+    from .config_types import IPAdapterConfig
     
     # Take the first IPAdapter config (wrapper expects single config)
     if not config['ipadapters']:
@@ -208,11 +208,13 @@ def _prepare_ipadapter_configs(config: Dict[str, Any]) -> 'IPAdapterConfig':
     
     # Convert dict to pydantic model with validation
     ipadapter_config = IPAdapterConfig(
+        style_image_key=ip_config.get('style_image_key', 'ipadapter_main'),
         ipadapter_model_path=ip_config['ipadapter_model_path'],
         image_encoder_path=ip_config['image_encoder_path'],
         style_image=ip_config.get('style_image'),
         scale=ip_config.get('scale', 1.0),
         weight_type=ip_config.get('weight_type'),
+        enabled=ip_config.get('enabled', True),
         is_faceid=(ip_config.get('type') == 'faceid'),
         insightface_model_name=ip_config.get('insightface_model_name'),
     )

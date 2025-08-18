@@ -1178,18 +1178,11 @@ class StreamDiffusionWrapper:
                 # If using TensorRT with IP-Adapter, ensure processors and weights are installed BEFORE export
                 if use_ipadapter_trt and has_ipadapter and ipadapter_config and not hasattr(stream, '_ipadapter_module'):
                     try:
-                        from streamdiffusion.modules.ipadapter_module import IPAdapterModule, IPAdapterConfig
+                        from streamdiffusion.modules.ipadapter_module import IPAdapterModule
+                        from streamdiffusion.config_types import IPAdapterConfig
                         cfg = ipadapter_config[0] if isinstance(ipadapter_config, list) else ipadapter_config
-                        ip_cfg = IPAdapterConfig(
-                            style_image_key=cfg.get('style_image_key') or 'ipadapter_main',
-                            num_image_tokens=cfg.get('num_image_tokens', 4),
-                            ipadapter_model_path=cfg['ipadapter_model_path'],
-                            image_encoder_path=cfg['image_encoder_path'],
-                            style_image=cfg.get('style_image'),
-                            scale=cfg.get('scale', 1.0),
-                            is_faceid=(cfg.get('type') == 'faceid' or bool(cfg.get('is_faceid', False))),
-                            insightface_model_name=cfg.get('insightface_model_name'),
-                        )
+                        # cfg is already a Pydantic IPAdapterConfig, so just use it directly
+                        ip_cfg = cfg
                         ip_module_for_export = IPAdapterModule(ip_cfg)
                         ip_module_for_export.install(stream)
                         setattr(stream, '_ipadapter_module', ip_module_for_export)
