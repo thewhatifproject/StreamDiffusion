@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from diffusers.models import ControlNetModel
 import logging
+from pydantic import BaseModel, Field
 
 from streamdiffusion.hooks import StepCtx, UnetKwargsDelta, UnetHook
 from streamdiffusion.preprocessing.preprocessing_orchestrator import (
@@ -15,13 +15,15 @@ from streamdiffusion.preprocessing.preprocessing_orchestrator import (
 from streamdiffusion.preprocessing.orchestrator_user import OrchestratorUser
 
 
-@dataclass
-class ControlNetConfig:
-    model_id: str
-    preprocessor: Optional[str] = None
-    conditioning_scale: float = 1.0
-    enabled: bool = True
-    preprocessor_params: Optional[Dict[str, Any]] = None
+class ControlNetConfig(BaseModel):
+    model_id: str = Field(..., description="HuggingFace model ID or local path to ControlNet model")
+    preprocessor: Optional[str] = Field(None, description="Preprocessor name (e.g., 'canny', 'depth', 'pose')")
+    conditioning_scale: float = Field(1.0, ge=0.0, le=2.0, description="Conditioning strength (0.0 = disabled, 1.0 = normal, 2.0 = strong)")
+    enabled: bool = Field(True, description="Whether this ControlNet is active")
+    preprocessor_params: Optional[Dict[str, Any]] = Field(None, description="Parameters passed to the preprocessor")
+    
+    class Config:
+        extra = "forbid"  # Prevent unknown fields
 
 
 class ControlNetModule(OrchestratorUser):
