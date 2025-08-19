@@ -1016,7 +1016,7 @@ class StreamParameterUpdater(OrchestratorUser):
                     logger.error(f"_update_controlnet_config: add_controlnet failed for {model_id}: {e}")
             else:
                 # Update existing controlnet
-                current_scale = current_config[existing_index].get('conditioning_scale', 1.0)
+                current_scale = current_config[existing_index].conditioning_scale
                 desired_scale = desired_cfg.conditioning_scale
                 
                 if current_scale != desired_scale:
@@ -1058,12 +1058,12 @@ class StreamParameterUpdater(OrchestratorUser):
                 return self.wrapper.stream.stream
         return None
 
-    def _get_current_controlnet_config(self) -> List[Dict[str, Any]]:
+    def _get_current_controlnet_config(self) -> List[ControlNetConfig]:
         """
         Get current ControlNet configuration state.
         
         Returns:
-            List of current ControlNet configurations
+            List of current ControlNet configurations as pydantic models
         """
         controlnet_pipeline = self._get_controlnet_pipeline()
         if not controlnet_pipeline or not hasattr(controlnet_pipeline, 'controlnets') or not controlnet_pipeline.controlnets:
@@ -1079,12 +1079,23 @@ class StreamParameterUpdater(OrchestratorUser):
                     enabled_val = bool(controlnet_pipeline.enabled_list[i])
             except Exception:
                 enabled_val = True
-            config = {
-                'model_id': model_id,
-                'conditioning_scale': scale,
-                'preprocessor_params': getattr(controlnet_pipeline.preprocessors[i], 'params', {}) if hasattr(controlnet_pipeline, 'preprocessors') and controlnet_pipeline.preprocessors[i] else {},
-                'enabled': enabled_val,
-            }
+            
+            # Get preprocessor info
+            preprocessor_name = None
+            preprocessor_params = {}
+            if hasattr(controlnet_pipeline, 'preprocessors') and controlnet_pipeline.preprocessors[i]:
+                preprocessor = controlnet_pipeline.preprocessors[i]
+                preprocessor_name = getattr(preprocessor, 'name', None)
+                preprocessor_params = getattr(preprocessor, 'params', {})
+            
+            # Create pydantic model
+            config = ControlNetConfig(
+                model_id=model_id,
+                preprocessor=preprocessor_name,
+                conditioning_scale=scale,
+                enabled=enabled_val,
+                preprocessor_params=preprocessor_params if preprocessor_params else None,
+            )
             current_config.append(config)
         
         return current_config

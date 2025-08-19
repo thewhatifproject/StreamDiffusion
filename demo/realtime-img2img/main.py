@@ -18,6 +18,7 @@ import torch
 import tempfile
 from pathlib import Path
 import yaml
+from streamdiffusion.config_types import ControlNetConfig, IPAdapterConfig
 
 from config import config, Args
 from util import pil_to_frame, pt_to_frame, bytes_to_pil, bytes_to_pt
@@ -127,20 +128,7 @@ class App:
             self.pipeline = None
         logger.info("App cleanup: Completed application cleanup")
 
-    def _convert_controlnet_configs_to_pydantic(self, dict_configs):
-        """Helper to convert dict-based ControlNet configs to pydantic models"""
-        from streamdiffusion.modules.controlnet_module import ControlNetConfig
-        pydantic_configs = []
-        for cfg in dict_configs:
-            pydantic_cfg = ControlNetConfig(
-                model_id=cfg.get('model_id', ''),
-                preprocessor=cfg.get('preprocessor'),
-                conditioning_scale=cfg.get('conditioning_scale', 1.0),
-                enabled=cfg.get('enabled', True),
-                preprocessor_params=cfg.get('preprocessor_params')
-            )
-            pydantic_configs.append(pydantic_cfg)
-        return pydantic_configs
+
 
     def _handle_input_parameter_update(self, parameter_name: str, value: float) -> None:
         """Handle parameter updates from input controls"""
@@ -159,7 +147,6 @@ class App:
             elif parameter_name == 'seed':
                 self.pipeline.update_stream_params(seed=int(value))
             elif parameter_name == 'ipadapter_scale':
-                from streamdiffusion.config_types import IPAdapterConfig
                 config = IPAdapterConfig(style_image_key='ipadapter_main', scale=value)
                 self.pipeline.update_stream_params(ipadapter_config=config)
             elif parameter_name == 'ipadapter_weight_type':
@@ -181,7 +168,7 @@ class App:
                     if current_config and index < len(current_config):
                         current_config[index]['conditioning_scale'] = float(value)
                         # Convert to pydantic models and apply via unified API
-                        pydantic_configs = self._convert_controlnet_configs_to_pydantic(current_config)
+                        pydantic_configs = [ControlNetConfig(**cfg) for cfg in current_config]
                         self.pipeline.update_stream_params(controlnet_config=pydantic_configs)
             elif parameter_name.startswith('controlnet_') and '_preprocessor_' in parameter_name:
                 # Handle ControlNet preprocessor parameters
@@ -197,7 +184,7 @@ class App:
                             current_config[controlnet_index]['preprocessor_params'] = {}
                         current_config[controlnet_index]['preprocessor_params'][param_name] = value
                         # Convert to pydantic models and apply via unified API
-                        pydantic_configs = self._convert_controlnet_configs_to_pydantic(current_config)
+                        pydantic_configs = [ControlNetConfig(**cfg) for cfg in current_config]
                         self.pipeline.update_stream_params(controlnet_config=pydantic_configs)
             elif parameter_name.startswith('prompt_weight_'):
                 # Handle prompt blending weights
@@ -875,7 +862,7 @@ class App:
                 logger.info(f"update_controlnet_strength: Updating ControlNet {controlnet_index} strength from {old_strength} to {strength}")
                 logger.info(f"update_controlnet_strength: Sending config: {current_config}")
                 
-                pydantic_configs = self._convert_controlnet_configs_to_pydantic(current_config)
+                pydantic_configs = [ControlNetConfig(**cfg) for cfg in current_config]
                 self.pipeline.update_stream_params(controlnet_config=pydantic_configs)
                 logger.info(f"update_controlnet_strength: update_stream_params call completed")
                     
@@ -984,7 +971,7 @@ class App:
                 try:
                     current_config = self._get_current_controlnet_config()
                     current_config.append(new_controlnet)
-                    pydantic_configs = self._convert_controlnet_configs_to_pydantic(current_config)
+                    pydantic_configs = [ControlNetConfig(**cfg) for cfg in current_config]
                     self.pipeline.update_stream_params(controlnet_config=pydantic_configs)
                     logger.info(f"add_controlnet: Successfully added ControlNet using consolidated API")
                 except Exception as e:
@@ -1071,7 +1058,7 @@ class App:
                     
                     # Remove the controlnet at the specified index
                     current_config.pop(index)
-                    pydantic_configs = self._convert_controlnet_configs_to_pydantic(current_config)
+                    pydantic_configs = [ControlNetConfig(**cfg) for cfg in current_config]
                     self.pipeline.update_stream_params(controlnet_config=pydantic_configs)
                     logger.info(f"remove_controlnet: Successfully removed ControlNet using consolidated API")
                 except Exception as e:

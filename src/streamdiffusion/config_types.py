@@ -17,7 +17,7 @@ class IPAdapterConfig(BaseModel):
     This module focuses only on embedding composition (step 2 of migration).
     Runtime installation and wrapper wiring will come in later steps.
     """
-    style_image_key: Optional[str] = Field(None, description="Key for style image in embedding cache")
+    style_image_key: Optional[str] = Field("ipadapter_main", description="Key for style image in embedding cache")
     num_image_tokens: int = Field(4, ge=1, le=64, description="Number of image tokens (4 for standard, 16 for plus)")
     ipadapter_model_path: Optional[str] = Field(None, description="Path to IPAdapter model file")
     image_encoder_path: Optional[str] = Field(None, description="Path to image encoder model")
