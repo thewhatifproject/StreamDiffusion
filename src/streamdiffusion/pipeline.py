@@ -192,7 +192,7 @@ class StreamDiffusion:
         if self.is_sdxl:
             return
             
-        self.pipe.load_lora_weights(
+        self._load_lora_with_offline_fallback(
             pretrained_model_name_or_path_or_dict, adapter_name, **kwargs
         )
 
@@ -202,9 +202,51 @@ class StreamDiffusion:
         adapter_name: Optional[Any] = None,
         **kwargs,
     ) -> None:
-        self.pipe.load_lora_weights(
+        self._load_lora_with_offline_fallback(
             pretrained_lora_model_name_or_path_or_dict, adapter_name, **kwargs
         )
+
+    def _load_lora_with_offline_fallback(
+        self,
+        pretrained: Union[str, Dict[str, torch.Tensor]],
+        adapter_name: Optional[Any],
+        **kwargs,
+    ) -> None:
+        """
+        Load LoRA weights, auto-guessing common weight filenames when HF offline mode is enabled.
+        """
+        try:
+            self.pipe.load_lora_weights(pretrained, adapter_name, **kwargs)
+            return
+        except Exception as e:
+            message = str(e)
+            is_offline_weight_error = isinstance(e, ValueError) and "must specify a `weight_name`" in message
+            if not is_offline_weight_error:
+                raise
+
+        candidate_weight_names = (
+            "pytorch_lora_weights.safetensors",
+            "pytorch_lora_weights.bin",
+            "diffusion_pytorch_model.safetensors",
+            "adapter_model.safetensors",
+            "lora.safetensors",
+        )
+
+        last_err: Optional[Exception] = None
+        for weight_name in candidate_weight_names:
+            try:
+                self.pipe.load_lora_weights(
+                    pretrained,
+                    adapter_name,
+                    **{**kwargs, "weight_name": weight_name},
+                )
+                return
+            except Exception as e:
+                last_err = e
+                continue
+
+        if last_err is not None:
+            raise last_err
 
     def fuse_lora(
         self,
