@@ -76,6 +76,8 @@ class StreamDiffusionWrapper:
         self,
         model_id_or_path: str,
         t_index_list: List[int],
+        min_batch_size: int = 1,
+        max_batch_size: int = 4,
         lora_dict: Optional[Dict[str, float]] = None,
         mode: Literal["img2img", "txt2img"] = "img2img",
         output_type: Literal["pil", "pt", "np", "latent"] = "pil",
@@ -228,6 +230,8 @@ class StreamDiffusionWrapper:
             if use_denoising_batch
             else frame_buffer_size
         )
+        self.min_batch_size = min_batch_size
+        self.max_batch_size = max_batch_size
 
         self.use_denoising_batch = use_denoising_batch
         self.use_safety_checker = use_safety_checker
@@ -1093,8 +1097,8 @@ class StreamDiffusionWrapper:
                 unet_path = engine_manager.get_engine_path(
                     EngineType.UNET,
                     model_id_or_path=model_id_or_path,
-                    max_batch=stream.trt_unet_batch_size,
-                    min_batch_size=stream.trt_unet_batch_size,
+                    max_batch_size=self.max_batch_size,
+                    min_batch_size=self.min_batch_size,
                     mode=self.mode,
                     use_lcm_lora=use_lcm_lora,
                     use_tiny_vae=use_tiny_vae,
@@ -1105,7 +1109,7 @@ class StreamDiffusionWrapper:
                 vae_encoder_path = engine_manager.get_engine_path(
                     EngineType.VAE_ENCODER,
                     model_id_or_path=model_id_or_path,
-                    max_batch=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     mode=self.mode,
                     use_lcm_lora=use_lcm_lora,
@@ -1117,7 +1121,7 @@ class StreamDiffusionWrapper:
                 vae_decoder_path = engine_manager.get_engine_path(
                     EngineType.VAE_DECODER,
                     model_id_or_path=model_id_or_path,
-                    max_batch=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     mode=self.mode,
                     use_lcm_lora=use_lcm_lora,
@@ -1229,8 +1233,8 @@ class StreamDiffusionWrapper:
                 unet_model = UNet(
                     fp16=True,
                     device=stream.device,
-                    max_batch=stream.trt_unet_batch_size,
-                    min_batch_size=stream.trt_unet_batch_size,
+                    max_batch_size=self.max_batch_size,
+                    min_batch_size=self.min_batch_size,
                     embedding_dim=embedding_dim,
                     unet_dim=stream.unet.config.in_channels,
                     use_control=use_controlnet_trt,
@@ -1261,7 +1265,7 @@ class StreamDiffusionWrapper:
                 # Compile VAE decoder engine using EngineManager
                 vae_decoder_model = VAE(
                     device=stream.device,
-                    max_batch=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                 )
 
@@ -1286,7 +1290,7 @@ class StreamDiffusionWrapper:
                 vae_encoder = TorchVAEEncoder(stream.vae).to(torch.device("cuda"))
                 vae_encoder_model = VAEEncoder(
                     device=stream.device,
-                    max_batch=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                 )
 
@@ -1523,6 +1527,8 @@ class StreamDiffusionWrapper:
                                     pytorch_model=cn_model,
                                     model_type=model_type,
                                     batch_size=stream.trt_unet_batch_size,
+                                    max_batch_size=self.max_batch_size,
+                                    min_batch_size=self.min_batch_size,
                                     cuda_stream=cuda_stream,
                                     use_cuda_graph=False,
                                     unet=None,
@@ -1659,6 +1665,8 @@ class StreamDiffusionWrapper:
             'cfg_type': getattr(stream, 'cfg_type', None),
             'use_denoising_batch': getattr(stream, 'use_denoising_batch', None),
             'batch_size': getattr(stream, 'batch_size', None),
+            'min_batch_size': getattr(stream, 'min_batch_size', None),
+            'max_batch_size': getattr(stream, 'max_batch_size', None),
         }
 
         # Blending state
