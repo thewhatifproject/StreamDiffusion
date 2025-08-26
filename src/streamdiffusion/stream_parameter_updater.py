@@ -688,10 +688,7 @@ class StreamParameterUpdater(OrchestratorUser):
         ).to(device=self.stream.device, dtype=self.stream.dtype)
 
         self.stream.stock_noise = torch.zeros_like(self.stream.init_noise)
-        print("self.stream.prompt_embeds.shape", self.stream.prompt_embeds.shape)
-        print("self.stream.prompt_embeds", self.stream.prompt_embeds)
         self.stream.prompt_embeds = self.stream.prompt_embeds[0].repeat(self.stream.batch_size, 1, 1)
-        print("self.stream.prompt_embeds", self.stream.prompt_embeds)
 
         self.stream.sub_timesteps = []
         for t in self.stream.t_list:

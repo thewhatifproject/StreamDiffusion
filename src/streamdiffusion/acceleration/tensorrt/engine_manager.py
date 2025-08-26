@@ -45,7 +45,7 @@ class EngineManager:
                 'filename': 'unet.engine',
                 'compile_fn': compile_unet,
                 'loader': lambda path, cuda_stream, **kwargs: UNet2DConditionModelEngine(
-                    str(path), cuda_stream, use_cuda_graph=True
+                    str(path), cuda_stream, use_cuda_graph=False # TODO: add function to get use_cuda_graph from kwargs, should be switched off for dynamic t_index_list update
                 )
             },
             EngineType.VAE_ENCODER: {
