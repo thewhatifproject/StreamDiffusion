@@ -250,7 +250,7 @@ class UNet(BaseModel):
         self,
         fp16=False,
         device="cuda",
-        max_batch_size=16,
+        max_batch_size=4,
         min_batch_size=1,
         embedding_dim=768,
         text_maxlen=77,
