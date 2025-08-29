@@ -39,13 +39,14 @@ class EngineManager:
             ControlNetModelEngine
         )
         
+        # TODO: add function to get use_cuda_graph from kwargs
         # Engine configurations - maps each type to its compile function and loader
         self._configs = {
             EngineType.UNET: {
                 'filename': 'unet.engine',
                 'compile_fn': compile_unet,
                 'loader': lambda path, cuda_stream, **kwargs: UNet2DConditionModelEngine(
-                    str(path), cuda_stream, use_cuda_graph=False # TODO: add function to get use_cuda_graph from kwargs, should be switched off for dynamic t_index_list update
+                    str(path), cuda_stream, use_cuda_graph=True
                 )
             },
             EngineType.VAE_ENCODER: {
