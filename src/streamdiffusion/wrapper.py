@@ -568,10 +568,10 @@ class StreamDiffusionWrapper:
         if self.use_safety_checker:
             safety_checker_input = self.feature_extractor(
                 image, return_tensors="pt"
-            ).to(self.device)
+            )
             _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.dtype),
-                clip_input=safety_checker_input.pixel_values.to(self.dtype),
+                images=image_tensor.to(self.device),
+                clip_input=safety_checker_input.pixel_values.to(self.device),
             )
             image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
 
@@ -603,19 +603,17 @@ class StreamDiffusionWrapper:
             image = self.preprocess_image(image)
 
         image_tensor = self.stream(image)
+        image = self.postprocess_image(image_tensor, output_type=self.output_type)
 
         if self.use_safety_checker:
-            image_tensor = image_tensor.to(self.device)
             safety_checker_input = self.feature_extractor(
-                image_tensor, return_tensors="pt"
-            ).to(self.device)
+                image, return_tensors="pt"
+            )
             _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.dtype),
-                clip_input=safety_checker_input.pixel_values.to(self.dtype),
+                images=image_tensor.to(self.device),
+                clip_input=safety_checker_input.pixel_values.to(self.device),
             )
             image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
-        
-        image = self.postprocess_image(image_tensor, output_type=self.output_type)
 
         return image
 
