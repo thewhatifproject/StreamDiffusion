@@ -39,6 +39,7 @@ class EngineManager:
             ControlNetModelEngine
         )
         
+        # TODO: add function to get use_cuda_graph from kwargs
         # Engine configurations - maps each type to its compile function and loader
         self._configs = {
             EngineType.UNET: {
@@ -71,7 +72,7 @@ class EngineManager:
     def get_engine_path(self, 
                        engine_type: EngineType,
                        model_id_or_path: str,
-                       max_batch: int,
+                       max_batch_size: int,
                        min_batch_size: int,
                        mode: str,
                        use_lcm_lora: bool,
@@ -97,7 +98,7 @@ class EngineManager:
             model_dir_name = controlnet_model_id.replace("/", "_")
             
             # Use ControlNetEnginePool naming convention: dynamic engines with 384-1024 range
-            prefix = f"controlnet_{model_dir_name}--batch-{max_batch}--dyn-384-1024"
+            prefix = f"controlnet_{model_dir_name}--min_batch-{min_batch_size}--max_batch-{max_batch_size}--dyn-384-1024"
             return self.engine_dir / prefix / filename
         else:
             # Standard engines use the unified prefix format
@@ -106,7 +107,7 @@ class EngineManager:
             base_name = maybe_path.stem if maybe_path.exists() else model_id_or_path
             
             # Create prefix (from wrapper.py lines 1005-1013)
-            prefix = f"{base_name}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--max_batch-{max_batch}--min_batch-{min_batch_size}"
+            prefix = f"{base_name}--lcm_lora-{use_lcm_lora}--tiny_vae-{use_tiny_vae}--min_batch-{min_batch_size}--max_batch-{max_batch_size}"
             
             # IP-Adapter differentiation: add type and (optionally) tokens
             # Keep scale out of identity for runtime control, but include a type flag to separate caches
@@ -146,7 +147,8 @@ class EngineManager:
         import torch
         
         model_type = kwargs.get('model_type', 'sd15')
-        batch_size = kwargs['batch_size']
+        max_batch_size = kwargs['max_batch_size']
+        min_batch_size = kwargs['min_batch_size']
         embedding_dim = self._get_embedding_dim_for_model_type(model_type)
         
         # Create ControlNet model configuration
@@ -154,8 +156,8 @@ class EngineManager:
             model_type=model_type,
             unet=kwargs.get('unet'),
             model_path=kwargs.get('model_path', ""),
-            max_batch=batch_size,
-            min_batch_size=1,
+            max_batch_size=max_batch_size,
+            min_batch_size=min_batch_size,
             embedding_dim=embedding_dim
         )
         
@@ -251,6 +253,8 @@ class EngineManager:
                                     pytorch_model: Any,
                                     model_type: str = "sd15",
                                     batch_size: int = 1,
+                                    min_batch_size: int = 1,
+                                    max_batch_size: int = 4,
                                     cuda_stream = None,
                                     use_cuda_graph: bool = False,
                                     unet = None,
@@ -264,8 +268,8 @@ class EngineManager:
         engine_path = self.get_engine_path(
             EngineType.CONTROLNET,
             model_id_or_path="",  # Not used for ControlNet
-            max_batch=batch_size,
-            min_batch_size=1,
+            max_batch_size=max_batch_size,
+            min_batch_size=min_batch_size,
             mode="",  # Not used for ControlNet
             use_lcm_lora=False,  # Not used for ControlNet
             use_tiny_vae=False,  # Not used for ControlNet
@@ -279,6 +283,8 @@ class EngineManager:
             model=pytorch_model,
             model_type=model_type,
             batch_size=batch_size,
+            min_batch_size=min_batch_size,
+            max_batch_size=max_batch_size,
             cuda_stream=cuda_stream,
             use_cuda_graph=use_cuda_graph,
             unet=unet,
