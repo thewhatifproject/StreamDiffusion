@@ -578,13 +578,12 @@ class StreamDiffusionWrapper:
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
 
         if self.use_safety_checker:
-            safety_checker_input = self.feature_extractor(
-                image, return_tensors="pt"
-            )
-            _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.device),
-                clip_input=safety_checker_input.pixel_values.to(self.device),
-            )
+            if self.output_type != "pt":
+                normalized_image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+            else:
+                normalized_image_tensor = image
+            clip_input = self.clip_input_transformations(normalized_image_tensor)
+            has_nsfw_concept = self.safety_checker(clip_input=clip_input.to(self.device))
             image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
 
         return image
@@ -985,7 +984,7 @@ class StreamDiffusionWrapper:
                 self.nsfw_fallback_img = torch.from_numpy(np.array(self.nsfw_fallback_img))
             elif self.output_type == "np":
                 self.nsfw_fallback_img = np.array(self.nsfw_fallback_img)
-                
+
         try:
             if acceleration == "xformers":
                 stream.pipe.enable_xformers_memory_efficient_attention()
