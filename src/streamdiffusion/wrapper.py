@@ -19,6 +19,7 @@ from .model_detection import detect_model
 
 from .pipeline import StreamDiffusion
 from .image_utils import postprocess_image
+import torchvision.transforms as T
 
 torch.set_grad_enabled(False)
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -112,6 +113,7 @@ class StreamDiffusionWrapper:
         # IPAdapter options
         use_ipadapter: bool = False,
         ipadapter_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
+        safety_checker_model_id: Optional[str] = "CompVis/stable-diffusion-safety-checker",
     ):
         """
         Initializes the StreamDiffusionWrapper.
@@ -260,6 +262,7 @@ class StreamDiffusionWrapper:
             enable_pytorch_fallback=enable_pytorch_fallback,
             use_ipadapter=use_ipadapter,
             ipadapter_config=ipadapter_config,
+            safety_checker_model_id=safety_checker_model_id,
         )
 
         # Set wrapper reference on parameter updater so it can access pipeline structure
@@ -278,6 +281,15 @@ class StreamDiffusionWrapper:
             self.stream.enable_similar_image_filter(
                 similar_image_filter_threshold, similar_image_filter_max_skip_frame
             )
+
+        self.clip_input_transformations = T.Compose([
+            T.Resize(224, interpolation=T.InterpolationMode.BICUBIC, antialias=True),
+            T.CenterCrop(224),
+            T.Normalize(
+                mean=(0.48145466, 0.4578275, 0.40821073),
+                std=(0.26862954, 0.26130258, 0.27577711)
+            ),
+        ])
 
     def prepare(
         self,
@@ -604,15 +616,13 @@ class StreamDiffusionWrapper:
 
         image_tensor = self.stream(image)
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
-
         if self.use_safety_checker:
-            safety_checker_input = self.feature_extractor(
-                image, return_tensors="pt"
-            )
-            _, has_nsfw_concept = self.safety_checker(
-                images=image_tensor.to(self.device),
-                clip_input=safety_checker_input.pixel_values.to(self.device),
-            )
+            if self.output_type != "pt":
+                normalized_image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+            else:
+                normalized_image_tensor = image
+            clip_input = self.clip_input_transformations(normalized_image_tensor)
+            has_nsfw_concept = self.safety_checker(clip_input=clip_input.to(self.device))
             image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
 
         return image
@@ -772,6 +782,7 @@ class StreamDiffusionWrapper:
         enable_pytorch_fallback: bool = False,
         use_ipadapter: bool = False,
         ipadapter_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
+        safety_checker_model_id: Optional[str] = "CompVis/stable-diffusion-safety-checker",
     ) -> StreamDiffusion:
         """
         Loads the model.
@@ -964,17 +975,29 @@ class StreamDiffusionWrapper:
                     device=pipe.device, dtype=pipe.dtype
                 )
 
+        if self.use_safety_checker:
+            from .acceleration.tensorrt import StableDiffusionSafetyCheckerWrapper
+            self.safety_checker = StableDiffusionSafetyCheckerWrapper.from_pretrained(safety_checker_model_id).to(device=pipe.device)
+            # Use stream's current resolution for fallback image
+            self.nsfw_fallback_img = Image.new("RGB", (stream.height, stream.width), (0, 0, 0))
+            if self.output_type == "pt":
+                # convert PIL to tensor
+                self.nsfw_fallback_img = torch.from_numpy(np.array(self.nsfw_fallback_img))
+            elif self.output_type == "np":
+                self.nsfw_fallback_img = np.array(self.nsfw_fallback_img)
+                
         try:
             if acceleration == "xformers":
                 stream.pipe.enable_xformers_memory_efficient_attention()
             if acceleration == "tensorrt":
                 from polygraphy import cuda
                 from streamdiffusion.acceleration.tensorrt import TorchVAEEncoder
-                from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import AutoencoderKLEngine
+                from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import AutoencoderKLEngine, SafetyCheckerEngine
                 from streamdiffusion.acceleration.tensorrt.models.models import (
                     VAE,
                     UNet,
                     VAEEncoder,
+                    SafetyChecker,
                 )
                 from streamdiffusion.acceleration.tensorrt.engine_manager import EngineManager, EngineType
                 # Add ControlNet detection and support
@@ -1432,6 +1455,37 @@ class StreamDiffusionWrapper:
                         # Non-OOM error, re-raise
                         logger.error(f"TensorRT VAE engine loading failed (non-OOM): {e}")
                         raise e
+
+            if self.use_safety_checker:
+                safety_checker_path = engine_manager.get_engine_path(
+                    EngineType.SAFETY_CHECKER,
+                    model_id_or_path=safety_checker_model_id,
+                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    mode=self.mode,
+                    use_lcm_lora=use_lcm_lora,
+                    use_tiny_vae=use_tiny_vae,
+                )
+
+                safety_checker_model = SafetyChecker(
+                    device=stream.device,
+                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                )
+
+                engine_manager.compile_and_load_engine(
+                    EngineType.SAFETY_CHECKER,
+                    safety_checker_path,
+                    model=self.safety_checker,
+                    model_config=safety_checker_model,
+                    batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    cuda_stream=None,
+                )
+                self.safety_checker = SafetyCheckerEngine(
+                    safety_checker_path,
+                    cuda_stream,
+                    use_cuda_graph=True,
+                )
                     
             if acceleration == "sfast":
                 from streamdiffusion.acceleration.sfast import (
@@ -1461,21 +1515,6 @@ class StreamDiffusionWrapper:
             generator=torch.manual_seed(seed),
             seed=seed,
         )
-
-        if self.use_safety_checker:
-            from diffusers.pipelines.stable_diffusion.safety_checker import (
-                StableDiffusionSafetyChecker,
-            )
-            from transformers.models.clip import CLIPFeatureExtractor
-
-            self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
-                "CompVis/stable-diffusion-safety-checker"
-            ).to(device=pipe.device)
-            self.feature_extractor = CLIPFeatureExtractor.from_pretrained(
-                "openai/clip-vit-base-patch32"
-            )
-            # Use stream's current resolution for fallback image
-            self.nsfw_fallback_img = Image.new("RGB", (stream.height, stream.width), (0, 0, 0))
 
         # Install modules via hooks instead of patching (wrapper keeps forwarding updates only)
         if use_controlnet and controlnet_config:

@@ -10,6 +10,7 @@ class EngineType(Enum):
     VAE_ENCODER = "vae_encoder" 
     VAE_DECODER = "vae_decoder"
     CONTROLNET = "controlnet"
+    SAFETY_CHECKER = "safety_checker"
 
 
 class EngineManager:
@@ -29,7 +30,7 @@ class EngineManager:
         
         # Import the existing compile functions from tensorrt/__init__.py
         from streamdiffusion.acceleration.tensorrt import (
-            compile_unet, compile_vae_encoder, compile_vae_decoder
+            compile_unet, compile_vae_encoder, compile_vae_decoder, compile_safety_checker
         )
         from streamdiffusion.acceleration.tensorrt.builder import compile_controlnet
         from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import (
@@ -66,6 +67,11 @@ class EngineManager:
                     str(path), cuda_stream, use_cuda_graph=kwargs.get('use_cuda_graph', False),
                     model_type=kwargs.get('model_type', 'sd15')
                 )
+            },
+            EngineType.SAFETY_CHECKER: {
+                'filename': 'safety_checker.engine',
+                'compile_fn': compile_safety_checker,
+                'loader': lambda path, cuda_stream, **kwargs: str(path)
             }
         }
     
