@@ -357,3 +357,62 @@ class AutoencoderKLEngine:
 
     def forward(self, *args, **kwargs):
         pass
+
+
+class SafetyCheckerEngine:
+    def __init__(self, filepath: str, stream: 'cuda.Stream', use_cuda_graph: bool = False):
+        self.engine = Engine(filepath)
+        self.stream = stream
+        self.use_cuda_graph = use_cuda_graph
+
+        self.engine.load()
+        self.engine.activate()
+
+    def __call__(self, clip_input: torch.Tensor):
+        self.engine.allocate_buffers(
+            shape_dict={
+                "clip_input": clip_input.shape,
+                "has_nsfw_concepts": (clip_input.shape[0],),
+            },
+            device=clip_input.device,
+        )
+        return self.engine.infer(
+            {"clip_input": clip_input},
+            self.stream,
+            use_cuda_graph=self.use_cuda_graph,
+        )["has_nsfw_concepts"]
+
+    def to(self, *args, **kwargs):
+        pass
+
+    def forward(self, *args, **kwargs):
+        pass
+
+class NSFWDetectorEngine:
+    def __init__(self, filepath: str, stream: 'cuda.Stream', use_cuda_graph: bool = False):
+        self.engine = Engine(filepath)
+        self.stream = stream
+        self.use_cuda_graph = use_cuda_graph
+
+        self.engine.load()
+        self.engine.activate()
+        
+    def __call__(self, pixel_values: torch.Tensor):
+        self.engine.allocate_buffers(
+            shape_dict={
+                "pixel_values": pixel_values.shape,
+                "logits": (pixel_values.shape[0], 2),
+            },
+            device=pixel_values.device,
+        )
+        return self.engine.infer(
+            {"pixel_values": pixel_values},
+            self.stream,    
+            use_cuda_graph=self.use_cuda_graph,
+        )["logits"]
+
+    def to(self, *args, **kwargs):  
+        pass
+
+    def forward(self, *args, **kwargs):
+        pass
