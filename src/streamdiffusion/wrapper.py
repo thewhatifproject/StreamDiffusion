@@ -1,4 +1,5 @@
 import gc
+import os
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union, Any, Tuple
 
@@ -281,6 +282,7 @@ class StreamDiffusionWrapper:
             T.Resize(size=(224, 224), interpolation=InterpolationMode.BICUBIC, antialias=True),
             T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ])
+        self.set_nsfw_fallback_img(height, width)
 
     def prepare(
         self,
@@ -457,6 +459,7 @@ class StreamDiffusionWrapper:
         controlnet_config: Optional[List[Dict[str, Any]]] = None,
         # IPAdapter configuration
         ipadapter_config: Optional[Dict[str, Any]] = None,
+        use_safety_checker: Optional[bool] = None,
     ) -> None:
         """
         Update streaming parameters efficiently in a single call.
@@ -498,6 +501,8 @@ class StreamDiffusionWrapper:
             perform minimal add/remove/update operations.
         ipadapter_config : Optional[Dict[str, Any]]
             IPAdapter configuration dict containing scale, style_image, etc.
+        use_safety_checker : Optional[bool]
+            Whether to use the safety checker.
         """
         # Handle all parameters via parameter updater (including ControlNet)
         self.stream._param_updater.update_stream_params(
@@ -516,6 +521,8 @@ class StreamDiffusionWrapper:
             controlnet_config=controlnet_config,
             ipadapter_config=ipadapter_config,
         )
+        if use_safety_checker is not None:
+            self.use_safety_checker = use_safety_checker
 
     def __call__(
         self,
@@ -747,6 +754,13 @@ class StreamDiffusionWrapper:
 
         return pil_images
 
+    def set_nsfw_fallback_img(self, height: int, width: int) -> None:
+        self.nsfw_fallback_img = Image.new("RGB", (height, width), (0, 0, 0))
+        if self.output_type == "pt":
+            self.nsfw_fallback_img = torch.from_numpy(np.array(self.nsfw_fallback_img))
+        elif self.output_type == "np":
+            self.nsfw_fallback_img = np.array(self.nsfw_fallback_img)
+
     def _load_model(
         self,
         model_id_or_path: str,
@@ -964,16 +978,7 @@ class StreamDiffusionWrapper:
                 stream.vae = AutoencoderTiny.from_pretrained(taesd_model).to(
                     device=pipe.device, dtype=pipe.dtype
                 )
-
-        if self.use_safety_checker:
-            from transformers import AutoModelForImageClassification
-            self.safety_checker = AutoModelForImageClassification.from_pretrained(safety_checker_model_id).to("cuda")
-            # Use stream's current resolution for fallback image
-            self.nsfw_fallback_img = Image.new("RGB", (stream.height, stream.width), (0, 0, 0))
-            if self.output_type == "pt":
-                self.nsfw_fallback_img = torch.from_numpy(np.array(self.nsfw_fallback_img))
-            elif self.output_type == "np":
-                self.nsfw_fallback_img = np.array(self.nsfw_fallback_img)
+    
 
         try:
             if acceleration == "xformers":
@@ -1456,20 +1461,24 @@ class StreamDiffusionWrapper:
                     use_tiny_vae=use_tiny_vae,
                 )
 
-                safety_checker_model = NSFWDetector(
-                    device=stream.device,
-                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                )
+                if not os.path.exists(safety_checker_path):
+                    from transformers import AutoModelForImageClassification
+                    self.safety_checker = AutoModelForImageClassification.from_pretrained(safety_checker_model_id).to("cuda")
 
-                engine_manager.compile_and_load_engine(
-                    EngineType.SAFETY_CHECKER,
-                    safety_checker_path,
-                    model=self.safety_checker,
-                    model_config=safety_checker_model,
-                    batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    cuda_stream=None,
-                )
+                    safety_checker_model = NSFWDetector(
+                        device=stream.device,
+                        max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                        min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    )
+
+                    engine_manager.compile_and_load_engine(
+                        EngineType.SAFETY_CHECKER,
+                        safety_checker_path,
+                        model=self.safety_checker,
+                        model_config=safety_checker_model,
+                        batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                        cuda_stream=None,
+                    )
                 self.safety_checker = NSFWDetectorEngine(
                     safety_checker_path,
                     cuda_stream,
