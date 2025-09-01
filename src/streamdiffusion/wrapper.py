@@ -1,25 +1,20 @@
 import gc
-import os
-import traceback
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union, Any, Tuple
 
-import numpy as np
 import torch
-from diffusers import AutoencoderTiny, StableDiffusionPipeline, StableDiffusionXLPipeline, AutoPipelineForText2Image
+import numpy as np
 from PIL import Image
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
+from diffusers import AutoencoderTiny, StableDiffusionPipeline, StableDiffusionXLPipeline, AutoPipelineForText2Image
+
+from .pipeline import StreamDiffusion
+from .model_detection import detect_model
+from .image_utils import postprocess_image
 
 import logging
 logger = logging.getLogger(__name__)
-
-from .pipeline import StreamDiffusion
-from .image_utils import postprocess_image
-
-from .model_detection import detect_model
-
-from .pipeline import StreamDiffusion
-from .image_utils import postprocess_image
-import torchvision.transforms as T
 
 torch.set_grad_enabled(False)
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -113,7 +108,7 @@ class StreamDiffusionWrapper:
         # IPAdapter options
         use_ipadapter: bool = False,
         ipadapter_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
-        safety_checker_model_id: Optional[str] = "CompVis/stable-diffusion-safety-checker",
+        safety_checker_model_id: Optional[str] = "Falconsai/nsfw_image_detection",
     ):
         """
         Initializes the StreamDiffusionWrapper.
@@ -282,13 +277,9 @@ class StreamDiffusionWrapper:
                 similar_image_filter_threshold, similar_image_filter_max_skip_frame
             )
 
-        self.clip_input_transformations = T.Compose([
-            T.Resize(224, interpolation=T.InterpolationMode.BICUBIC, antialias=True),
-            T.CenterCrop(224),
-            T.Normalize(
-                mean=(0.48145466, 0.4578275, 0.40821073),
-                std=(0.26862954, 0.26130258, 0.27577711)
-            ),
+        self.safety_image_transforms = T.Compose([
+            T.Resize(size=(224, 224), interpolation=InterpolationMode.BICUBIC, antialias=True),
+            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ])
 
     def prepare(
@@ -579,12 +570,12 @@ class StreamDiffusionWrapper:
 
         if self.use_safety_checker:
             if self.output_type != "pt":
-                normalized_image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+                denormalized_image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1).to(self.device)
             else:
-                normalized_image_tensor = image
-            clip_input = self.clip_input_transformations(normalized_image_tensor)
-            has_nsfw_concept = self.safety_checker(clip_input=clip_input.to(self.device))
-            image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
+                denormalized_image_tensor = image
+            pixel_values = self.safety_image_transforms(denormalized_image_tensor)
+            predicted_label = self.safety_checker(pixel_values).argmax(-1).item()
+            image = self.nsfw_fallback_img if predicted_label==1 else image
 
         return image
 
@@ -617,12 +608,12 @@ class StreamDiffusionWrapper:
         image = self.postprocess_image(image_tensor, output_type=self.output_type)
         if self.use_safety_checker:
             if self.output_type != "pt":
-                normalized_image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1)
+                denormalized_image_tensor = (image_tensor / 2 + 0.5).clamp(0, 1).to(self.device)
             else:
-                normalized_image_tensor = image
-            clip_input = self.clip_input_transformations(normalized_image_tensor)
-            has_nsfw_concept = self.safety_checker(clip_input=clip_input.to(self.device))
-            image = self.nsfw_fallback_img if has_nsfw_concept[0] else image
+                denormalized_image_tensor = image
+            pixel_values = self.safety_image_transforms(denormalized_image_tensor)
+            predicted_label = self.safety_checker(pixel_values).argmax(-1).item()
+            image = self.nsfw_fallback_img if predicted_label==1 else image
 
         return image
 
@@ -781,7 +772,7 @@ class StreamDiffusionWrapper:
         enable_pytorch_fallback: bool = False,
         use_ipadapter: bool = False,
         ipadapter_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
-        safety_checker_model_id: Optional[str] = "CompVis/stable-diffusion-safety-checker",
+        safety_checker_model_id: Optional[str] = "Falconsai/nsfw_image_detection",
     ) -> StreamDiffusion:
         """
         Loads the model.
@@ -975,12 +966,11 @@ class StreamDiffusionWrapper:
                 )
 
         if self.use_safety_checker:
-            from .acceleration.tensorrt import StableDiffusionSafetyCheckerWrapper
-            self.safety_checker = StableDiffusionSafetyCheckerWrapper.from_pretrained(safety_checker_model_id).to(device=pipe.device)
+            from transformers import AutoModelForImageClassification
+            self.safety_checker = AutoModelForImageClassification.from_pretrained(safety_checker_model_id).to("cuda")
             # Use stream's current resolution for fallback image
             self.nsfw_fallback_img = Image.new("RGB", (stream.height, stream.width), (0, 0, 0))
             if self.output_type == "pt":
-                # convert PIL to tensor
                 self.nsfw_fallback_img = torch.from_numpy(np.array(self.nsfw_fallback_img))
             elif self.output_type == "np":
                 self.nsfw_fallback_img = np.array(self.nsfw_fallback_img)
@@ -991,12 +981,12 @@ class StreamDiffusionWrapper:
             if acceleration == "tensorrt":
                 from polygraphy import cuda
                 from streamdiffusion.acceleration.tensorrt import TorchVAEEncoder
-                from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import AutoencoderKLEngine, SafetyCheckerEngine
+                from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import AutoencoderKLEngine, NSFWDetectorEngine
                 from streamdiffusion.acceleration.tensorrt.models.models import (
                     VAE,
                     UNet,
                     VAEEncoder,
-                    SafetyChecker,
+                    NSFWDetector,
                 )
                 from streamdiffusion.acceleration.tensorrt.engine_manager import EngineManager, EngineType
                 # Add ControlNet detection and support
@@ -1466,7 +1456,7 @@ class StreamDiffusionWrapper:
                     use_tiny_vae=use_tiny_vae,
                 )
 
-                safety_checker_model = SafetyChecker(
+                safety_checker_model = NSFWDetector(
                     device=stream.device,
                     max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
@@ -1480,7 +1470,7 @@ class StreamDiffusionWrapper:
                     batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
                     cuda_stream=None,
                 )
-                self.safety_checker = SafetyCheckerEngine(
+                self.safety_checker = NSFWDetectorEngine(
                     safety_checker_path,
                     cuda_stream,
                     use_cuda_graph=True,

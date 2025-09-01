@@ -283,6 +283,44 @@ class SafetyChecker(BaseModel):
             torch.randn(batch_size, 3, 224, 224, dtype=torch.float16, device=self.device),
         )
 
+class NSFWDetector(BaseModel):
+    def __init__(self, device, max_batch_size = 1, min_batch_size = 1):
+        super(NSFWDetector, self).__init__(
+            device=device,
+            max_batch_size=max_batch_size,
+            min_batch_size=min_batch_size,
+        )
+        self.name = "nsfw_detector"
+    
+    def get_input_names(self):
+        return ["pixel_values"]
+    
+    def get_output_names(self):
+        return ["logits"]
+    
+    def get_dynamic_axes(self):
+        return {"pixel_values": {0: "B"}}
+    
+    def get_input_profile(self, batch_size, *args, **kwargs):
+        return {
+            "pixel_values": [
+                (self.min_batch, 3, 224, 224),
+                (batch_size, 3, 224, 224),
+                (self.max_batch, 3, 224, 224),
+            ],
+        }
+    
+    def get_shape_dict(self, batch_size, *args, **kwargs):
+        return {
+            "pixel_values": (batch_size, 3, 224, 224),
+            "logits": (batch_size, 2),
+        }
+    
+    def get_sample_input(self, batch_size, *args, **kwargs):
+        return (
+            torch.randn(batch_size, 3, 224, 224, dtype=torch.float16, device=self.device),
+        )
+
 class UNet(BaseModel):
     def __init__(
         self,
