@@ -757,9 +757,9 @@ class StreamDiffusionWrapper:
     def set_nsfw_fallback_img(self, height: int, width: int) -> None:
         self.nsfw_fallback_img = Image.new("RGB", (height, width), (0, 0, 0))
         if self.output_type == "pt":
-            self.nsfw_fallback_img = torch.from_numpy(np.array(self.nsfw_fallback_img))
+            self.nsfw_fallback_img = torch.from_numpy(np.array(self.nsfw_fallback_img)).unsqueeze(0)
         elif self.output_type == "np":
-            self.nsfw_fallback_img = np.array(self.nsfw_fallback_img)
+            self.nsfw_fallback_img = np.expand_dims(np.array(self.nsfw_fallback_img), axis=0)
 
     def _load_model(
         self,
