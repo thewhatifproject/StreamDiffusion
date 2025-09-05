@@ -481,6 +481,7 @@ class StreamDiffusionWrapper:
         # IPAdapter configuration
         ipadapter_config: Optional[Dict[str, Any]] = None,
         use_safety_checker: Optional[bool] = None,
+        safety_checker_threshold: Optional[float] = None,
     ) -> None:
         """
         Update streaming parameters efficiently in a single call.
@@ -524,6 +525,9 @@ class StreamDiffusionWrapper:
             IPAdapter configuration dict containing scale, style_image, etc.
         use_safety_checker : Optional[bool]
             Whether to use the safety checker.
+        safety_checker_threshold : Optional[float]
+            Probability threshold for the safety checker (0.0–1.0). Frames with
+            NSFW probability above this value will trigger the configured fallback.
         """
         # Handle all parameters via parameter updater (including ControlNet)
         self.stream._param_updater.update_stream_params(
@@ -544,6 +548,8 @@ class StreamDiffusionWrapper:
         )
         if use_safety_checker is not None:
             self.use_safety_checker = use_safety_checker
+        if safety_checker_threshold is not None:
+            self.safety_checker_threshold = safety_checker_threshold
 
     def __call__(
         self,
@@ -1468,18 +1474,20 @@ class StreamDiffusionWrapper:
                             logger.error(f"TensorRT VAE engine loading failed (non-OOM): {e}")
                             raise e
 
-            if self.use_safety_checker:
-                safety_checker_path = engine_manager.get_engine_path(
-                    EngineType.SAFETY_CHECKER,
-                    model_id_or_path=safety_checker_model_id,
-                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    mode=self.mode,
-                    use_lcm_lora=use_lcm_lora,
-                    use_tiny_vae=use_tiny_vae,
-                )
+            safety_checker_path = engine_manager.get_engine_path(
+                EngineType.SAFETY_CHECKER,
+                model_id_or_path=safety_checker_model_id,
+                max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                mode=self.mode,
+                use_lcm_lora=use_lcm_lora,
+                use_tiny_vae=use_tiny_vae,
+            )
+            safety_checker_engine_exists = os.path.exists(safety_checker_path)
 
-                if not os.path.exists(safety_checker_path):
+            # Always load the safety checker if the engine exists. The model is really small and may be toggled later.
+            if self.use_safety_checker or safety_checker_engine_exists:
+                if not safety_checker_engine_exists:
                     from transformers import AutoModelForImageClassification
                     self.safety_checker = AutoModelForImageClassification.from_pretrained(safety_checker_model_id).to("cuda")
 
@@ -1518,13 +1526,19 @@ class StreamDiffusionWrapper:
             raise Exception("Acceleration has failed.")
 
         # Install modules via hooks instead of patching (wrapper keeps forwarding updates only)
-        if use_controlnet and controlnet_config:
+        if use_controlnet:
             try:
                 from streamdiffusion.modules.controlnet_module import ControlNetModule, ControlNetConfig
                 cn_module = ControlNetModule(device=self.device, dtype=self.dtype)
                 cn_module.install(stream)
                 # Normalize to list of configs
-                configs = controlnet_config if isinstance(controlnet_config, list) else [controlnet_config]
+                configs = (
+                    controlnet_config
+                    if isinstance(controlnet_config, list)
+                    else [controlnet_config]
+                    if isinstance(controlnet_config, dict)
+                    else []
+                )
                 for cfg in configs:
                     if not cfg.get('model_id'):
                         continue
