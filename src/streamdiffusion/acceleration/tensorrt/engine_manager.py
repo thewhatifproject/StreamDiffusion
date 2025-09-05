@@ -1,7 +1,9 @@
-import os
+import logging
 from enum import Enum
-from typing import Any, Optional, Dict
 from pathlib import Path
+from typing import Any, Optional, Dict
+
+logger = logging.getLogger(__name__)
 
 
 class EngineType(Enum):
@@ -30,9 +32,8 @@ class EngineManager:
         
         # Import the existing compile functions from tensorrt/__init__.py
         from streamdiffusion.acceleration.tensorrt import (
-            compile_unet, compile_vae_encoder, compile_vae_decoder, compile_safety_checker
+            compile_unet, compile_vae_encoder, compile_vae_decoder, compile_safety_checker, compile_controlnet
         )
-        from streamdiffusion.acceleration.tensorrt.builder import compile_controlnet
         from streamdiffusion.acceleration.tensorrt.runtime_engines.unet_engine import (
             UNet2DConditionModelEngine
         )
@@ -168,7 +169,7 @@ class EngineManager:
         )
         
         # Prepare ControlNet model for compilation
-        pytorch_model = kwargs['model'].to(torch.device("cuda"), dtype=torch.float16)
+        pytorch_model = kwargs['model'].to(dtype=torch.float16)
         
         return pytorch_model, controlnet_model
     
@@ -186,6 +187,7 @@ class EngineManager:
     def compile_and_load_engine(self, 
                                engine_type: EngineType, 
                                engine_path: Path,
+                               load_engine: bool = True,
                                **kwargs) -> Any:
         """
         Universal compile and load logic for all engine types.
@@ -217,9 +219,14 @@ class EngineManager:
             else:
                 # Standard compilation for UNet and VAE encoder
                 self._execute_compilation(compile_fn, engine_path, kwargs['model'], kwargs['model_config'], kwargs['batch_size'], kwargs)
-        
-        # Load and return using the appropriate loader
-        return self.load_engine(engine_type, engine_path, **kwargs)
+        else:
+            logger.info(f"EngineManager: engine_path already exists, skipping compile")
+            
+        if load_engine:
+            return self.load_engine(engine_type, engine_path, **kwargs)
+        else:
+            logger.info(f"EngineManager: load_engine is False, skipping load engine")
+            return None
     
     def load_engine(self, engine_type: EngineType, engine_path: Path, **kwargs: Dict) -> Any:
         """Load engine with type-specific handling."""
@@ -257,6 +264,7 @@ class EngineManager:
     def get_or_load_controlnet_engine(self, 
                                     model_id: str,
                                     pytorch_model: Any,
+                                    load_engine=True,
                                     model_type: str = "sd15",
                                     batch_size: int = 1,
                                     min_batch_size: int = 1,
@@ -286,6 +294,7 @@ class EngineManager:
         return self.compile_and_load_engine(
             EngineType.CONTROLNET,
             engine_path,
+            load_engine=load_engine,
             model=pytorch_model,
             model_type=model_type,
             batch_size=batch_size,
