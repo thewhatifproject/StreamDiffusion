@@ -6,6 +6,7 @@
 
   export let hookType: string = 'image_preprocessing'; // image_preprocessing, image_postprocessing, latent_preprocessing, latent_postprocessing
   export let hookInfo: any = null;
+  export let skipDiffusion: boolean = false; // Passed from parent
 
   const dispatch = createEventDispatcher();
 
@@ -118,6 +119,11 @@
     }
   }
 
+  function toggleSkipDiffusion(enabled: boolean) {
+    console.log(`PipelineHooksConfig: Skip diffusion toggle requested:`, enabled);
+    dispatch('skipDiffusionChanged', enabled);
+  }
+
   function handleProcessorChanged(event: CustomEvent) {
     const { processor_index, processor, processor_info, current_params } = event.detail;
     console.log(`PipelineHooksConfig: handleProcessorChanged called with:`, event.detail);
@@ -170,6 +176,7 @@
   // Clear processor state when hook info changes (e.g., new YAML uploaded)
   let lastHookSignature = '';
   
+
   // Initialize processor states when hook info is available
   $: if (hookInfo && hookInfo.processors) {
     // Create a signature based on processor names and indices to detect changes
@@ -228,6 +235,29 @@
     
     {#if showHookConfig}
       <div class="mt-4 space-y-4">
+        <!-- Skip Diffusion Toggle - only show for image preprocessing -->
+        {#if hookType === 'image_preprocessing'}
+          <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg p-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h4 class="text-sm font-semibold text-yellow-800 dark:text-yellow-200">Skip Diffusion Mode</h4>
+                <p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
+                  Bypass diffusion process and only run pre/post processing pipelines
+                </p>
+              </div>
+              <label class="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={skipDiffusion}
+                  on:change={(e) => toggleSkipDiffusion((e.target as HTMLInputElement).checked)}
+                  class="rounded border-gray-300 text-yellow-600 focus:ring-yellow-500"
+                />
+                <span class="text-yellow-800 dark:text-yellow-200 font-medium">Enable</span>
+              </label>
+            </div>
+          </div>
+        {/if}
+        
         {#if hookInfo && hookInfo.processors && hookInfo.processors.length > 0}
           {#each hookInfo.processors as processor, index}
             <div class="border border-gray-200 dark:border-gray-600 rounded-lg p-4 bg-gray-50 dark:bg-gray-700">

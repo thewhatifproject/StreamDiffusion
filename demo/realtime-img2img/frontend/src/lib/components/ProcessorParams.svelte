@@ -69,6 +69,7 @@
 
   function getInputType(paramInfo: any): string {
     if (paramInfo.type === 'bool') return 'checkbox';
+    if (paramInfo.options && Array.isArray(paramInfo.options)) return 'select';
     if (paramInfo.type === 'int' || paramInfo.type === 'float') return 'range';
     return 'text';
   }
@@ -211,6 +212,26 @@
               <label for="param-{processorIndex}-{paramName}" class="text-sm font-medium">
                 {formatParameterName(paramName)}
               </label>
+            </div>
+            
+          {:else if getInputType(paramInfo as any) === 'select'}
+            <!-- Select parameter with options -->
+            <div class="space-y-1">
+              <label for="param-{processorIndex}-{paramName}" class="text-sm font-medium block">
+                {formatParameterName(paramName)}
+              </label>
+              <select
+                id="param-{processorIndex}-{paramName}"
+                bind:value={parameterValues[paramName]}
+                on:change={(e) => handleParameterChange(paramName, (e.target as HTMLSelectElement).value)}
+                class="w-full rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white cursor-pointer"
+              >
+                {#each (paramInfo as any).options as option}
+                  <option value={option} class="bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    {option}
+                  </option>
+                {/each}
+              </select>
             </div>
             
           {:else if getInputType(paramInfo as any) === 'range'}
