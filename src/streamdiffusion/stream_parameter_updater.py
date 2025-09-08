@@ -647,8 +647,93 @@ class StreamParameterUpdater(OrchestratorUser):
         # Reset stock_noise to match the new init_noise
         self.stream.stock_noise = torch.zeros_like(self.stream.init_noise)
 
+    def _update_timestep_calculations(self) -> None:
+        """Update timestep-dependent calculations based on current t_list."""
+        self.stream.sub_timesteps = []
+        for t in self.stream.t_list:
+            self.stream.sub_timesteps.append(self.stream.timesteps[t])
+
+        sub_timesteps_tensor = torch.tensor(
+            self.stream.sub_timesteps, dtype=torch.long, device=self.stream.device
+        )
+        self.stream.sub_timesteps_tensor = torch.repeat_interleave(
+            sub_timesteps_tensor,
+            repeats=self.stream.frame_bff_size if self.stream.use_denoising_batch else 1,
+            dim=0,
+        )
+
+        c_skip_list = []
+        c_out_list = []
+        for timestep in self.stream.sub_timesteps:
+            c_skip, c_out = self.stream.scheduler.get_scalings_for_boundary_condition_discrete(timestep)
+            c_skip_list.append(c_skip)
+            c_out_list.append(c_out)
+
+        self.stream.c_skip = (
+            torch.stack(c_skip_list)
+            .view(len(self.stream.t_list), 1, 1, 1)
+            .to(dtype=self.stream.dtype, device=self.stream.device)
+        )
+        self.stream.c_out = (
+            torch.stack(c_out_list)
+            .view(len(self.stream.t_list), 1, 1, 1)
+            .to(dtype=self.stream.dtype, device=self.stream.device)
+        )
+
+        if self.stream.use_denoising_batch:
+            self.stream.c_skip = torch.repeat_interleave(
+                self.stream.c_skip, repeats=self.stream.frame_bff_size, dim=0
+            )
+            self.stream.c_out = torch.repeat_interleave(
+                self.stream.c_out, repeats=self.stream.frame_bff_size, dim=0
+            )
+
+        # Update alpha_prod_t_sqrt and beta_prod_t_sqrt
+        alpha_prod_t_sqrt_list = []
+        beta_prod_t_sqrt_list = []
+        for timestep in self.stream.sub_timesteps:
+            alpha_prod_t_sqrt = self.stream.scheduler.alphas_cumprod[timestep].sqrt()
+            beta_prod_t_sqrt = (1 - self.stream.scheduler.alphas_cumprod[timestep]).sqrt()
+            alpha_prod_t_sqrt_list.append(alpha_prod_t_sqrt)
+            beta_prod_t_sqrt_list.append(beta_prod_t_sqrt)
+
+        alpha_prod_t_sqrt = (
+            torch.stack(alpha_prod_t_sqrt_list)
+            .view(len(self.stream.t_list), 1, 1, 1)
+            .to(dtype=self.stream.dtype, device=self.stream.device)
+        )
+        beta_prod_t_sqrt = (
+            torch.stack(beta_prod_t_sqrt_list)
+            .view(len(self.stream.t_list), 1, 1, 1)
+            .to(dtype=self.stream.dtype, device=self.stream.device)
+        )
+        self.stream.alpha_prod_t_sqrt = torch.repeat_interleave(
+            alpha_prod_t_sqrt,
+            repeats=self.stream.frame_bff_size if self.stream.use_denoising_batch else 1,
+            dim=0,
+        )
+        self.stream.beta_prod_t_sqrt = torch.repeat_interleave(
+            beta_prod_t_sqrt,
+            repeats=self.stream.frame_bff_size if self.stream.use_denoising_batch else 1,
+            dim=0,
+        )
+
+    def _update_timestep_values_only(self, t_index_list: List[int]) -> None:
+        """Update only timestep-dependent values when t_index_list values change but length stays same.
+        This preserves the working branch behavior for value-only changes."""
+        self.stream.t_list = t_index_list
+        self._update_timestep_calculations()
+
     def _recalculate_timestep_dependent_params(self, t_index_list: List[int]) -> None:
         """Recalculate all parameters that depend on t_index_list."""
+        
+        # Check if this is a structural change (length) or just value change
+        if len(t_index_list) == len(self.stream.t_list):
+            # Same length - only values changed, use lightweight update (working branch behavior)
+            self._update_timestep_values_only(t_index_list)
+            return
+        
+        # Length changed - do full recalculation including batch-dependent parameters (broken branch logic - but it works for this case!)
         self.stream.t_list = t_index_list
         self.stream.denoising_steps_num = len(self.stream.t_list)
 
@@ -690,65 +775,8 @@ class StreamParameterUpdater(OrchestratorUser):
         self.stream.stock_noise = torch.zeros_like(self.stream.init_noise)
         self.stream.prompt_embeds = self.stream.prompt_embeds[0].repeat(self.stream.batch_size, 1, 1)
 
-        self.stream.sub_timesteps = []
-        for t in self.stream.t_list:
-            self.stream.sub_timesteps.append(self.stream.timesteps[t])
-
-        sub_timesteps_tensor = torch.tensor(
-            self.stream.sub_timesteps, dtype=torch.long, device=self.stream.device
-        )
-        self.stream.sub_timesteps_tensor = torch.repeat_interleave(
-            sub_timesteps_tensor,
-            repeats=self.stream.frame_bff_size if self.stream.use_denoising_batch else 1,
-            dim=0,
-        )
-
-        c_skip_list = []
-        c_out_list = []
-        for timestep in self.stream.sub_timesteps:
-            c_skip, c_out = self.stream.scheduler.get_scalings_for_boundary_condition_discrete(timestep)
-            c_skip_list.append(c_skip)
-            c_out_list.append(c_out)
-
-        self.stream.c_skip = (
-            torch.stack(c_skip_list)
-            .view(len(self.stream.t_list), 1, 1, 1)
-            .to(dtype=self.stream.dtype, device=self.stream.device)
-        )
-        self.stream.c_out = (
-            torch.stack(c_out_list)
-            .view(len(self.stream.t_list), 1, 1, 1)
-            .to(dtype=self.stream.dtype, device=self.stream.device)
-        )
-
-        alpha_prod_t_sqrt_list = []
-        beta_prod_t_sqrt_list = []
-        for timestep in self.stream.sub_timesteps:
-            alpha_prod_t_sqrt = self.stream.scheduler.alphas_cumprod[timestep].sqrt()
-            beta_prod_t_sqrt = (1 - self.stream.scheduler.alphas_cumprod[timestep]).sqrt()
-            alpha_prod_t_sqrt_list.append(alpha_prod_t_sqrt)
-            beta_prod_t_sqrt_list.append(beta_prod_t_sqrt)
-
-        alpha_prod_t_sqrt = (
-            torch.stack(alpha_prod_t_sqrt_list)
-            .view(len(self.stream.t_list), 1, 1, 1)
-            .to(dtype=self.stream.dtype, device=self.stream.device)
-        )
-        beta_prod_t_sqrt = (
-            torch.stack(beta_prod_t_sqrt_list)
-            .view(len(self.stream.t_list), 1, 1, 1)
-            .to(dtype=self.stream.dtype, device=self.stream.device)
-        )
-        self.stream.alpha_prod_t_sqrt = torch.repeat_interleave(
-            alpha_prod_t_sqrt,
-            repeats=self.stream.frame_bff_size if self.stream.use_denoising_batch else 1,
-            dim=0,
-        )
-        self.stream.beta_prod_t_sqrt = torch.repeat_interleave(
-            beta_prod_t_sqrt,
-            repeats=self.stream.frame_bff_size if self.stream.use_denoising_batch else 1,
-            dim=0,
-        )
+        # Update timestep-dependent calculations (shared with value-only path)
+        self._update_timestep_calculations()
 
     def _regenerate_resolution_tensors(self) -> None:
         """This method is no longer used - resolution updates now restart the pipeline"""
