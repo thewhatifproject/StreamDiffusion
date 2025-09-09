@@ -40,6 +40,7 @@
   let seedBlendingConfig: any = null;
   let normalizePromptWeights: boolean = true;
   let normalizeSeedWeights: boolean = true;
+  let skipDiffusion: boolean = false;
   let pageContent: string;
   let isImageMode: boolean = false;
   let maxQueueSize: number = 0;
@@ -182,6 +183,7 @@
       seedBlendingConfig = settings.seed_blending || null;
       normalizePromptWeights = settings.normalize_prompt_weights ?? true;
       normalizeSeedWeights = settings.normalize_seed_weights ?? true;
+      skipDiffusion = settings.skip_diffusion || false;
       isImageMode = pipelineInfo.input_mode.default === PipelineMode.IMAGE;
       maxQueueSize = settings.max_queue_size;
       pageContent = settings.page_content;
@@ -276,6 +278,38 @@
       }
     } catch (error) {
       console.error('handleTIndexListUpdate: Failed to update t_index_list:', error);
+    }
+  }
+
+  async function handleSkipDiffusionUpdate(enabled: boolean) {
+    try {
+      const response = await fetch('/api/params', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          skip_diffusion: enabled
+        }),
+      });
+
+      if (response.ok) {
+        skipDiffusion = enabled; // Update local state
+        console.log('handleSkipDiffusionUpdate: Skip diffusion updated:', skipDiffusion);
+        
+        // Show success message
+        successMessage = `Skip diffusion ${enabled ? 'enabled' : 'disabled'}. ${enabled ? 'Only pre/post processing will run.' : 'Full diffusion pipeline restored.'}`;
+        setTimeout(() => {
+          successMessage = '';
+        }, 3000);
+      } else {
+        const result = await response.json();
+        console.error('handleSkipDiffusionUpdate: Failed to update skip_diffusion:', result.detail);
+        warningMessage = 'Failed to update skip diffusion: ' + result.detail;
+      }
+    } catch (error) {
+      console.error('handleSkipDiffusionUpdate: Failed to update skip_diffusion:', error);
+      warningMessage = 'Failed to update skip diffusion: ' + (error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -568,6 +602,9 @@
         }
         if (result.normalize_seed_weights !== undefined) {
           normalizeSeedWeights = result.normalize_seed_weights;
+        }
+        if (result.skip_diffusion !== undefined) {
+          skipDiffusion = result.skip_diffusion;
         }
         
         // Update blending configurations
@@ -991,7 +1028,9 @@
           <PipelineHooksConfig 
             hookType="image_preprocessing"
             hookInfo={imagePreprocessingInfo}
+            {skipDiffusion}
             on:refresh={handleImagePreprocessingRefresh}
+            on:skipDiffusionChanged={(e) => handleSkipDiffusionUpdate(e.detail)}
           ></PipelineHooksConfig>
 
           <PipelineHooksConfig 

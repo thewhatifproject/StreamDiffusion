@@ -28,16 +28,23 @@ taesd_model = "madebyollin/taesd"
 default_prompt = "Portrait of The Joker halloween costume, face painting, with , glare pose, detailed, intricate, full of colour, cinematic lighting, trending on artstation, 8k, hyperrealistic, focused, extreme details, unreal engine 5 cinematic, masterpiece"
 default_negative_prompt = "black and white, blurry, low resolution, pixelated,  pixel art, low quality, low fidelity"
 
-page_content = """<h1 class="text-3xl font-bold">StreamDiffusion</h1>
-<p class="text-sm">
-    This demo showcases
-    <a
-    href="https://github.com/livepeer/StreamDiffusion"
-    target="_blank"
-    class="text-blue-500 underline hover:no-underline">StreamDiffusion
-</a>
-pipeline using configuration system.
-</p>
+page_content = """<h1 class="text-3xl font-bold"><a href="https://github.com/livepeer/StreamDiffusion" target="_blank" class="text-blue-500 underline hover:no-underline">StreamDiffusion</a></h1>
+<div class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
+    <div class="flex">
+        <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+        </div>
+        <div class="ml-3">
+            <div class="text-sm text-yellow-700">
+                <p><strong>Development Tool Notice:</strong> This is an internal development tool. It may change frequently and contain bugs. It is not supported.</p>
+                <p>For production-level real-time research tools, use <a href="https://github.com/livepeer/stream-model-lab" target="_blank" class="text-blue-600 underline hover:no-underline">Livepeer Stream Model Lab</a></p>
+            </div>
+        </div>
+    </div>
+</div>
+
 """
 
 

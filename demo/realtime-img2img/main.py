@@ -590,6 +590,13 @@ class App:
                 normalize_prompt_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
                 normalize_seed_weights = self.uploaded_controlnet_config.get('normalize_weights', True)
             
+            # Get current skip_diffusion setting
+            current_skip_diffusion = False  # default
+            if self.pipeline and hasattr(self.pipeline, 'stream') and hasattr(self.pipeline.stream, 'skip_diffusion'):
+                current_skip_diffusion = self.pipeline.stream.skip_diffusion
+            elif self.uploaded_controlnet_config:
+                current_skip_diffusion = self.uploaded_controlnet_config.get('skip_diffusion', False)
+            
             # Determine current model id for UI badge
             model_id_for_ui = ''
             if self.pipeline and hasattr(self.pipeline, 'config') and self.pipeline.config:
@@ -642,6 +649,7 @@ class App:
                     "seed_blending": seed_blending_config,
                     "normalize_prompt_weights": normalize_prompt_weights,
                     "normalize_seed_weights": normalize_seed_weights,
+                    "skip_diffusion": current_skip_diffusion,
                     "model_id": model_id_for_ui,
                     "config_values": config_values,
                 }
@@ -1357,7 +1365,13 @@ class App:
                     params["normalize_seed_weights"] = bool(data["normalize_seed_weights"])
                     updated_params.append("normalize_seed_weights")
                 
-                if not params and "resolution" not in data:
+                # Handle skip_diffusion directly on wrapper
+                if "skip_diffusion" in data:
+                    new_skip_diffusion = bool(data["skip_diffusion"])
+                    self.pipeline.stream.skip_diffusion = new_skip_diffusion
+                    updated_params.append("skip_diffusion")
+                
+                if not params and "resolution" not in data and "skip_diffusion" not in data:
                     raise HTTPException(status_code=400, detail="No valid parameters provided")
                 
                 # Update parameters using unified API (excluding resolution which was handled above)
