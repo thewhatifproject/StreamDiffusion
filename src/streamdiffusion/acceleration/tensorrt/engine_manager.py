@@ -165,7 +165,8 @@ class EngineManager:
             model_path=kwargs.get('model_path', ""),
             max_batch_size=max_batch_size,
             min_batch_size=min_batch_size,
-            embedding_dim=embedding_dim
+            embedding_dim=embedding_dim,
+            conditioning_channels=kwargs.get('conditioning_channels', 3)
         )
         
         # Prepare ControlNet model for compilation
@@ -272,7 +273,8 @@ class EngineManager:
                                     cuda_stream = None,
                                     use_cuda_graph: bool = False,
                                     unet = None,
-                                    model_path: str = "") -> Any:
+                                    model_path: str = "",
+                                    conditioning_channels: int = 3) -> Any:
         """
         Get or load ControlNet engine, providing unified interface for ControlNet management.
         
@@ -304,5 +306,6 @@ class EngineManager:
             use_cuda_graph=use_cuda_graph,
             unet=unet,
             model_path=model_path,
+            conditioning_channels=conditioning_channels,
             engine_build_options=self._get_default_controlnet_build_options()
         )

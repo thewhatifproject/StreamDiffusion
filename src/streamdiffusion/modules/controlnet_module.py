@@ -21,6 +21,7 @@ class ControlNetConfig:
     preprocessor: Optional[str] = None
     conditioning_scale: float = 1.0
     enabled: bool = True
+    conditioning_channels: Optional[int] = None
     preprocessor_params: Optional[Dict[str, Any]] = None
 
 
@@ -92,13 +93,13 @@ class ControlNetModule(OrchestratorUser):
         self._engine_type_cache.clear()
 
     def add_controlnet(self, cfg: ControlNetConfig, control_image: Optional[Union[str, Any, torch.Tensor]] = None) -> None:
-        model = self._load_pytorch_controlnet_model(cfg.model_id)
+        model = self._load_pytorch_controlnet_model(cfg.model_id, cfg.conditioning_channels)
         model = model.to(dtype=self.dtype)
 
         preproc = None
         if cfg.preprocessor:
             from streamdiffusion.preprocessing.processors import get_preprocessor
-            preproc = get_preprocessor(cfg.preprocessor)
+            preproc = get_preprocessor(cfg.preprocessor, pipeline_ref=self._stream)
             # Apply provided parameters to the preprocessor instance
             if cfg.preprocessor_params:
                 params = cfg.preprocessor_params or {}
@@ -113,12 +114,6 @@ class ControlNetModule(OrchestratorUser):
                     except Exception:
                         pass
 
-            # Provide pipeline reference for preprocessors that need it (e.g., FeedbackPreprocessor)
-            try:
-                if hasattr(preproc, 'set_pipeline_ref'):
-                    preproc.set_pipeline_ref(self._stream)
-            except Exception:
-                pass
 
             # Align preprocessor target size with stream resolution once (avoid double-resize later)
             try:
@@ -166,13 +161,13 @@ class ControlNetModule(OrchestratorUser):
 
         # Single-index fast path
         if index is not None:
-            results = self._preprocessing_orchestrator.process_control_images_sync(
-                control_image=control_image,
-                preprocessors=preprocessors,
-                scales=scales,
-                stream_width=self._stream.width,
-                stream_height=self._stream.height,
-                index=index,
+            results = self._preprocessing_orchestrator.process_sync(
+                control_image,
+                preprocessors,
+                scales,
+                self._stream.width,
+                self._stream.height,
+                index
             )
             processed = results[index] if results and len(results) > index else None
             with self._collections_lock:
@@ -187,12 +182,12 @@ class ControlNetModule(OrchestratorUser):
             return
 
         # Use intelligent pipelining (automatically detects feedback preprocessors and switches to sync)
-        processed_images = self._preprocessing_orchestrator.process_control_images_pipelined(
-            control_image=control_image,
-            preprocessors=preprocessors,
-            scales=scales,
-            stream_width=self._stream.width,
-            stream_height=self._stream.height,
+        processed_images = self._preprocessing_orchestrator.process_pipelined(
+            control_image,
+            preprocessors,
+            scales,
+            self._stream.width,
+            self._stream.height
         )
 
         # If orchestrator returns empty list, it indicates no update needed for this frame
@@ -565,36 +560,57 @@ class ControlNetModule(OrchestratorUser):
         if self._preprocessing_orchestrator is None:
             raise RuntimeError("ControlNetModule: preprocessing orchestrator is not initialized")
         # Reuse orchestrator API used by BaseControlNetPipeline
-        images = self._preprocessing_orchestrator.process_control_images_sync(
-            control_image=control_image,
-            preprocessors=[preprocessor],
-            scales=[1.0],
-            stream_width=self._stream.width,
-            stream_height=self._stream.height,
-            index=0,
+        images = self._preprocessing_orchestrator.process_sync(
+            control_image,
+            [preprocessor],
+            [1.0],
+            self._stream.width,
+            self._stream.height,
+            0
         )
         # API returns a list; pick first if present
         return images[0] if images else None
 
-    def _load_pytorch_controlnet_model(self, model_id: str) -> ControlNetModel:
+    #FIXME: more robust model management is needed in general.
+    def _load_pytorch_controlnet_model(self, model_id: str, conditioning_channels: Optional[int] = None) -> ControlNetModel:
         from pathlib import Path
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
+            # Prepare loading kwargs
+            load_kwargs = {"torch_dtype": self.dtype}
+            if conditioning_channels is not None:
+                load_kwargs["conditioning_channels"] = conditioning_channels
+            
             if Path(model_id).exists():
-                controlnet = ControlNetModel.from_pretrained(
-                    model_id, torch_dtype=self.dtype, local_files_only=True
-                )
+                model_path = Path(model_id)
+                
+                # Check if it's a direct file path to a safetensors/ckpt file
+                if model_path.is_file() and model_path.suffix in ['.safetensors', '.ckpt', '.bin']:
+                    logger.info(f"ControlNetModule._load_pytorch_controlnet_model: Loading ControlNet from single file: {model_path} (channels={conditioning_channels})")
+                    # Try loading from single file (works for most ControlNet models)
+                    try:
+                        controlnet = ControlNetModel.from_single_file(str(model_path), **load_kwargs)
+                    except Exception as e:
+                        logger.warning(f"ControlNetModule._load_pytorch_controlnet_model: Single file loading failed: {e}")
+                        # Fallback: try pretrained loading in case it's in a proper directory structure
+                        load_kwargs["local_files_only"] = True
+                        controlnet = ControlNetModel.from_pretrained(str(model_path.parent), **load_kwargs)
+                else:
+                    # It's a directory path
+                    load_kwargs["local_files_only"] = True
+                    controlnet = ControlNetModel.from_pretrained(model_id, **load_kwargs)
             else:
                 if "/" in model_id and model_id.count("/") > 1:
                     parts = model_id.split("/")
                     repo_id = "/".join(parts[:2])
                     subfolder = "/".join(parts[2:])
                     controlnet = ControlNetModel.from_pretrained(
-                        repo_id, subfolder=subfolder, torch_dtype=self.dtype
+                        repo_id, subfolder=subfolder, **load_kwargs
                     )
                 else:
-                    controlnet = ControlNetModel.from_pretrained(
-                        model_id, torch_dtype=self.dtype
-                    )
+                    controlnet = ControlNetModel.from_pretrained(model_id, **load_kwargs)
             controlnet = controlnet.to(dtype=self.dtype)
             # Track model_id for updater diffing
             try:
