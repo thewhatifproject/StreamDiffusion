@@ -1,13 +1,15 @@
-from typing import *
-
+import os
 import torch
 import logging
-import os
+from typing import *
 
+from polygraphy import cuda
+import torch.nn.functional as F
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
+from diffusers.models.autoencoders.autoencoder_kl import DecoderOutput
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionOutput
 from diffusers.models.autoencoders.autoencoder_tiny import AutoencoderTinyOutput
-from diffusers.models.autoencoders.autoencoder_kl import DecoderOutput
-from polygraphy import cuda
 
 from ..utilities import Engine
 
@@ -394,22 +396,36 @@ class NSFWDetectorEngine:
         self.stream = stream
         self.use_cuda_graph = use_cuda_graph
 
+        # The resize shape, mean and std are fetched from the model/processor config
+        self.image_transforms = T.Compose([
+            T.Resize(size=(448, 448), interpolation=InterpolationMode.BICUBIC, max_size=None, antialias=True),
+            T.CenterCrop(size=(448, 448)),
+            T.Lambda(lambda x: x.clamp(0, 1)),
+            T.Normalize(mean=[0.4815, 0.4578, 0.4082], std=[0.2686, 0.2613, 0.2758])
+        ])
+
         self.engine.load()
         self.engine.activate()
         
-    def __call__(self, pixel_values: torch.Tensor):
+    def __call__(self, image_tensor: torch.Tensor, threshold: float):
+        pixel_values = self.image_transforms(image_tensor)
         self.engine.allocate_buffers(
             shape_dict={
                 "pixel_values": pixel_values.shape,
-                "logits": (pixel_values.shape[0], 2),
+                "logits": (pixel_values.shape[0], 4),
             },
             device=pixel_values.device,
         )
-        return self.engine.infer(
+        logits = self.engine.infer(
             {"pixel_values": pixel_values},
             self.stream,    
             use_cuda_graph=self.use_cuda_graph,
         )["logits"]
+
+        probs = F.softmax(logits, dim=-1)
+        nsfw_prob = 1 - probs[0, 0].item()
+        return nsfw_prob >= threshold
+        
 
     def to(self, *args, **kwargs):  
         pass
