@@ -2,6 +2,13 @@
 
 [English](./README.md) | [日本語](./README-ja.md)
 
+> **⚠️ 開発ツール注意事項**
+> 
+> - これは内部開発ツールです
+> - 頻繁に変更され、バグが含まれる可能性があります
+> - 公式サポートされていません
+> - 本格的なリアルタイム研究ツールには [Livepeer Stream Model Lab](https://github.com/livepeer/stream-model-lab) をご利用ください
+
 <p align="center">
   <img src="../../assets/img2img1.gif" width=80%>
 </p>
