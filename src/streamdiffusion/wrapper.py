@@ -173,7 +173,7 @@ class StreamDiffusionWrapper:
         seed : int, optional
             The seed, by default 2.
         use_safety_checker : bool, optional
-            Whether to use safety checker or not, by default False.
+            Whether to use safety checker or not, by default False. Only supported for TensorRT acceleration.
         normalize_prompt_weights : bool, optional
             Whether to normalize prompt weights in blending to sum to 1,
             by default True. When False, weights > 1 will amplify embeddings.
@@ -234,7 +234,11 @@ class StreamDiffusionWrapper:
         self.max_batch_size = max_batch_size
 
         self.use_denoising_batch = use_denoising_batch
-        self.use_safety_checker = use_safety_checker
+        # safety checker is only supported for TensorRT acceleration
+        self.use_safety_checker = use_safety_checker and (acceleration == "tensorrt")
+        self.set_nsfw_fallback_img(height, width)
+        self.safety_checker_fallback_type = safety_checker_fallback_type
+        self.safety_checker_threshold = safety_checker_threshold
 
         self.stream: StreamDiffusion = self._load_model(
             model_id_or_path=model_id_or_path,
@@ -290,10 +294,6 @@ class StreamDiffusionWrapper:
             self.stream.enable_similar_image_filter(
                 similar_image_filter_threshold, similar_image_filter_max_skip_frame
             )
-
-        self.set_nsfw_fallback_img(height, width)
-        self.safety_checker_fallback_type = safety_checker_fallback_type
-        self.safety_checker_threshold = safety_checker_threshold
 
     def prepare(
         self,
@@ -514,7 +514,9 @@ class StreamDiffusionWrapper:
         ipadapter_config : Optional[Dict[str, Any]]
             IPAdapter configuration dict containing scale, style_image, etc.
         use_safety_checker : Optional[bool]
-            Whether to use the safety checker.
+            Whether to use the safety checker. Only supported for TensorRT acceleration.
+        safety_checker_threshold : Optional[float]
+            The threshold for the safety checker.
         """
         # Handle all parameters via parameter updater (including ControlNet)
         self.stream._param_updater.update_stream_params(
@@ -534,7 +536,7 @@ class StreamDiffusionWrapper:
             ipadapter_config=ipadapter_config,
         )
         if use_safety_checker is not None:
-            self.use_safety_checker = use_safety_checker
+            self.use_safety_checker = use_safety_checker and (self._acceleration == "tensorrt")
         if safety_checker_threshold is not None:
             self.safety_checker_threshold = safety_checker_threshold
 
@@ -1447,45 +1449,45 @@ class StreamDiffusionWrapper:
                             logger.error(f"TensorRT VAE engine loading failed (non-OOM): {e}")
                             raise e
 
-            safety_checker_path = engine_manager.get_engine_path(
-                EngineType.SAFETY_CHECKER,
-                model_id_or_path=safety_checker_model_id,
-                max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                mode=self.mode,
-                use_lcm_lora=use_lcm_lora,
-                use_tiny_vae=use_tiny_vae,
-            )
-            safety_checker_engine_exists = os.path.exists(safety_checker_path)
+                safety_checker_path = engine_manager.get_engine_path(
+                    EngineType.SAFETY_CHECKER,
+                    model_id_or_path=safety_checker_model_id,
+                    max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                    mode=self.mode,
+                    use_lcm_lora=use_lcm_lora,
+                    use_tiny_vae=use_tiny_vae,
+                )
+                safety_checker_engine_exists = os.path.exists(safety_checker_path)
 
-            # Always load the safety checker if the engine exists. The model is really small and may be toggled later.
-            if self.use_safety_checker or safety_checker_engine_exists:
-                if not safety_checker_engine_exists:
-                    from transformers import AutoModelForImageClassification
-                    self.safety_checker = AutoModelForImageClassification.from_pretrained(safety_checker_model_id).to("cuda")
+                # Always load the safety checker if the engine exists. The model is really small and may be toggled later.
+                if self.use_safety_checker or safety_checker_engine_exists:
+                    if not safety_checker_engine_exists:
+                        from transformers import AutoModelForImageClassification
+                        self.safety_checker = AutoModelForImageClassification.from_pretrained(safety_checker_model_id).to("cuda")
 
-                    safety_checker_model = NSFWDetector(
-                        device=self.device,
-                        max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                    )
+                        safety_checker_model = NSFWDetector(
+                            device=self.device,
+                            max_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                            min_batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                        )
 
-                    engine_manager.compile_and_load_engine(
-                        EngineType.SAFETY_CHECKER,
-                        safety_checker_path,
-                        model=self.safety_checker,
-                        model_config=safety_checker_model,
-                        batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
-                        cuda_stream=None,
-                        load_engine=load_engine,
-                    )
-                
-                if load_engine:
-                    self.safety_checker = NSFWDetectorEngine(
-                        safety_checker_path,
-                        cuda_stream,
-                        use_cuda_graph=True,
-                    )
+                        engine_manager.compile_and_load_engine(
+                            EngineType.SAFETY_CHECKER,
+                            safety_checker_path,
+                            model=self.safety_checker,
+                            model_config=safety_checker_model,
+                            batch_size=self.batch_size if self.mode == "txt2img" else stream.frame_bff_size,
+                            cuda_stream=None,
+                            load_engine=load_engine,
+                        )
+                    
+                    if load_engine:
+                        self.safety_checker = NSFWDetectorEngine(
+                            safety_checker_path,
+                            cuda_stream,
+                            use_cuda_graph=True,
+                        )
                     
             if acceleration == "sfast":
                 from streamdiffusion.acceleration.sfast import (
