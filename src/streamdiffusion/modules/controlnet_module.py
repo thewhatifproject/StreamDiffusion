@@ -94,7 +94,6 @@ class ControlNetModule(OrchestratorUser):
 
     def add_controlnet(self, cfg: ControlNetConfig, control_image: Optional[Union[str, Any, torch.Tensor]] = None) -> None:
         model = self._load_pytorch_controlnet_model(cfg.model_id, cfg.conditioning_channels)
-        model = model.to(dtype=self.dtype)
 
         preproc = None
         if cfg.preprocessor:
@@ -611,7 +610,7 @@ class ControlNetModule(OrchestratorUser):
                     )
                 else:
                     controlnet = ControlNetModel.from_pretrained(model_id, **load_kwargs)
-            controlnet = controlnet.to(dtype=self.dtype)
+            controlnet = controlnet.to(device=self.device, dtype=self.dtype)
             # Track model_id for updater diffing
             try:
                 setattr(controlnet, 'model_id', model_id)
