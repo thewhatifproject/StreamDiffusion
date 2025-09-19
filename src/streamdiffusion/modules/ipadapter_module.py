@@ -8,6 +8,10 @@ import torch
 from streamdiffusion.hooks import EmbedsCtx, EmbeddingHook, StepCtx, UnetKwargsDelta, UnetHook
 import os
 from streamdiffusion.preprocessing.orchestrator_user import OrchestratorUser
+import logging
+from streamdiffusion.utils.reporting import report_error
+
+logger = logging.getLogger(__name__)
 
 
 class IPAdapterType(Enum):
@@ -108,7 +112,6 @@ class IPAdapterModule(OrchestratorUser):
         - Registers the embedding hook onto stream.embedding_hooks
         - Sets the initial scale on the IPAdapter instance
         """
-        logger = __import__('logging').getLogger(__name__)
         style_key = self.config.style_image_key or "ipadapter_main"
 
         # Attach shared orchestrator to ensure consistent reuse across modules
@@ -150,7 +153,7 @@ class IPAdapterModule(OrchestratorUser):
         ipadapter = IPAdapter(**ip_kwargs)
         self.ipadapter = ipadapter
 
-        # Register embedding preprocessor for this style key 
+        # Register embedding preprocessor for this style key
         # Use FaceID preprocessor if applicable
         if self.config.type == IPAdapterType.FACEID:
             try:
@@ -162,7 +165,7 @@ class IPAdapterModule(OrchestratorUser):
                 )
                 print("IPAdapterModule.install: Using FaceIDEmbeddingPreprocessor for FaceID model")
             except Exception as e:
-                logger.error(f"IPAdapterModule.install: Failed to initialize FaceIDEmbeddingPreprocessor: {e}")
+                report_error(f"IPAdapterModule.install: Failed to initialize FaceIDEmbeddingPreprocessor: {e}")
                 raise
         else:
             embedding_preprocessor = IPAdapterEmbeddingPreprocessor(
@@ -237,7 +240,7 @@ class IPAdapterModule(OrchestratorUser):
             return local_path
         else:
             # Directory download
-            repo_root = snapshot_download(repo_id=repo_id, allow_patterns=[f"{subpath}/*"]) 
+            repo_root = snapshot_download(repo_id=repo_id, allow_patterns=[f"{subpath}/*"])
             full_path = os.path.join(repo_root, subpath)
             if not os.path.exists(full_path):
                 raise FileNotFoundError(f"IPAdapterModule._resolve_model_path: Downloaded path not found: {full_path}")

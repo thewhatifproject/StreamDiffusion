@@ -2,6 +2,7 @@ from typing import Tuple, Any
 import torch
 from PIL import Image
 from .ipadapter_embedding import IPAdapterEmbeddingPreprocessor
+from streamdiffusion.utils.reporting import report_error
 
 
 class FaceIDEmbeddingPreprocessor(IPAdapterEmbeddingPreprocessor):
@@ -71,12 +72,9 @@ class FaceIDEmbeddingPreprocessor(IPAdapterEmbeddingPreprocessor):
             return image_embeds, negative_embeds
 
         except Exception as e:
-            print(
-                f"FaceIDEmbeddingPreprocessor._process_core: Error processing face image: {e}"
-            )
-            raise RuntimeError(
-                f"FaceIDEmbeddingPreprocessor: Failed to extract face embeddings: {e}"
-            )
+            msg = f"FaceIDEmbeddingPreprocessor: Failed to extract face embeddings: {e}"
+            report_error(msg)
+            raise RuntimeError(msg)
 
     def update_faceid_v2_weight(self, weight: float) -> None:
         self.faceid_v2_weight = float(weight)
