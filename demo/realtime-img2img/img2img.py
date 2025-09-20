@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 
 sys.path.append(
     os.path.join(
@@ -123,10 +124,11 @@ class Pipeline:
                 self.use_config = False
 
         # Update input_mode based on pipeline mode
+        self.info = self.Info()
         if self.pipeline_mode == "txt2img":
-            self.Info.input_mode = "text"
+            self.info.input_mode = "text"
         else:
-            self.Info.input_mode = "image"
+            self.info.input_mode = "image"
 
         params = self.InputParams()
 
@@ -213,8 +215,8 @@ class Pipeline:
         self.num_inference_steps = 50
         self.negative_prompt = default_negative_prompt
         
-        # Store output type for frame conversion
-        self.output_type = "pt" if not self.use_config else self.config.get('output_type', 'pt')
+        # Store output type for frame conversion - always force "pt" for optimal performance
+        self.output_type = "pt"
 
         # Model and acceleration setup
 
@@ -225,7 +227,8 @@ class Pipeline:
             if self.has_controlnet:
                 # txt2img with ControlNets: push control image via direct method
                 try:
-                    current_cfg = self.stream.stream._param_updater._get_current_controlnet_config() if hasattr(self.stream, 'stream') else []
+                    stream_state = self.stream.get_stream_state()
+                    current_cfg = stream_state.get('controlnet_config', [])
                 except Exception:
                     current_cfg = []
                 if current_cfg:
@@ -244,7 +247,8 @@ class Pipeline:
             if self.has_controlnet:
                 # ControlNet mode: push control image via direct method and use PIL image
                 try:
-                    current_cfg = self.stream.stream._param_updater._get_current_controlnet_config() if hasattr(self.stream, 'stream') else []
+                    stream_state = self.stream.get_stream_state()
+                    current_cfg = stream_state.get('controlnet_config', [])
                 except Exception:
                     current_cfg = []
                 if current_cfg:

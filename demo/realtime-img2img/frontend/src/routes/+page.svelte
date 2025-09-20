@@ -50,6 +50,7 @@
   let successMessage: string = '';
   let selectedModelId: string = '';
   let pipelineActive: boolean = false;
+  let configRefreshKey: number = 0; // Used to force component refresh when config is uploaded
 
   let currentResolution: ResolutionInfo;
   let apiError: string = '';
@@ -553,12 +554,23 @@
       const result = await response.json();
 
       if (response.ok) {
-        successMessage = 'Configuration uploaded successfully! Pipeline will load when you start streaming.';
+        console.log('uploadConfig: Full response received:', result);
+        console.log('uploadConfig: controls_updated flag:', result.controls_updated);
+        
+        // If pipeline is running, stop it first
+        if (isLCMRunning) {
+          console.log('uploadConfig: Stopping active pipeline before applying config...');
+          await toggleLcmLive(); // Stop the current pipeline
+          successMessage = 'Configuration uploaded successfully! Pipeline stopped and reset to config.';
+        } else {
+          successMessage = 'Configuration uploaded successfully! Pipeline will load when you start streaming.';
+        }
         fileInput.value = '';
         
         // Update ControlNet info
         if (result.controlnet) {
           controlnetInfo = result.controlnet;
+          console.log('uploadConfig: Updated controlnetInfo to:', controlnetInfo);
         }
         
         // Update IPAdapter info
@@ -574,18 +586,23 @@
         // Update streaming parameters
         if (result.t_index_list) {
           tIndexList = [...result.t_index_list];
+          console.log('uploadConfig: Updated tIndexList to:', tIndexList);
         }
         if (result.guidance_scale !== undefined) {
           guidanceScale = result.guidance_scale;
+          console.log('uploadConfig: Updated guidanceScale to:', guidanceScale);
         }
         if (result.delta !== undefined) {
           delta = result.delta;
+          console.log('uploadConfig: Updated delta to:', delta);
         }
         if (result.num_inference_steps !== undefined) {
           numInferenceSteps = result.num_inference_steps;
+          console.log('uploadConfig: Updated numInferenceSteps to:', numInferenceSteps);
         }
         if (result.seed !== undefined) {
           seed = result.seed;
+          console.log('uploadConfig: Updated seed to:', seed);
         }
         
         // Apply config_values (from YAML upload) into the pipelineValues store
@@ -647,7 +664,10 @@
           console.log('uploadConfig: Updated resolution to:', result.current_resolution);
         }
         
-        // Update pipeline hooks info
+        // Force complete refresh of all pipeline hook components by generating new keys
+        const configUploadTimestamp = Date.now();
+        
+        // Update pipeline hooks info with forced refresh
         if (result.image_preprocessing) {
           imagePreprocessingInfo = result.image_preprocessing;
           console.log('uploadConfig: Updated image preprocessing info:', imagePreprocessingInfo);
@@ -664,6 +684,9 @@
           latentPostprocessingInfo = result.latent_postprocessing;
           console.log('uploadConfig: Updated latent postprocessing info:', latentPostprocessingInfo);
         }
+        
+        // Trigger complete re-initialization of all components by updating the config refresh key
+        configRefreshKey = configUploadTimestamp;
         
         // Success toast will auto-dismiss
       } else {
@@ -963,7 +986,7 @@
                 <div class="flex items-center gap-2 px-3 py-1 bg-green-100 dark:bg-green-900 rounded-lg">
                   <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                   <span class="text-sm font-medium text-green-800 dark:text-green-200">
-                    {fps.toFixed(1)} FPS
+                    {(fps || 0).toFixed(1)} FPS
                   </span>
                 </div>
               {/if}
@@ -1026,31 +1049,33 @@
             currentEnabled={ipadapterInfo?.enabled ?? true}
           ></IPAdapterConfig>
 
-          <PipelineHooksConfig 
-            hookType="image_preprocessing"
-            hookInfo={imagePreprocessingInfo}
-            {skipDiffusion}
-            on:refresh={handleImagePreprocessingRefresh}
-            on:skipDiffusionChanged={(e) => handleSkipDiffusionUpdate(e.detail)}
-          ></PipelineHooksConfig>
+          {#key configRefreshKey}
+            <PipelineHooksConfig 
+              hookType="image_preprocessing"
+              hookInfo={imagePreprocessingInfo}
+              {skipDiffusion}
+              on:refresh={handleImagePreprocessingRefresh}
+              on:skipDiffusionChanged={(e) => handleSkipDiffusionUpdate(e.detail)}
+            ></PipelineHooksConfig>
 
-          <PipelineHooksConfig 
-            hookType="image_postprocessing"
-            hookInfo={imagePostprocessingInfo}
-            on:refresh={handleImagePostprocessingRefresh}
-          ></PipelineHooksConfig>
+            <PipelineHooksConfig 
+              hookType="image_postprocessing"
+              hookInfo={imagePostprocessingInfo}
+              on:refresh={handleImagePostprocessingRefresh}
+            ></PipelineHooksConfig>
 
-          <PipelineHooksConfig 
-            hookType="latent_preprocessing"
-            hookInfo={latentPreprocessingInfo}
-            on:refresh={handleLatentPreprocessingRefresh}
-          ></PipelineHooksConfig>
+            <PipelineHooksConfig 
+              hookType="latent_preprocessing"
+              hookInfo={latentPreprocessingInfo}
+              on:refresh={handleLatentPreprocessingRefresh}
+            ></PipelineHooksConfig>
 
-          <PipelineHooksConfig 
-            hookType="latent_postprocessing"
-            hookInfo={latentPostprocessingInfo}
-            on:refresh={handleLatentPostprocessingRefresh}
-          ></PipelineHooksConfig>
+            <PipelineHooksConfig 
+              hookType="latent_postprocessing"
+              hookInfo={latentPostprocessingInfo}
+              on:refresh={handleLatentPostprocessingRefresh}
+            ></PipelineHooksConfig>
+          {/key}
         </div>
       {:else}
         <!-- Collapsed Right Panel Toggle -->
