@@ -75,10 +75,11 @@ class App:
         # Store current resolution for pipeline recreation
         self.new_width = 512
         self.new_height = 512
-        # Store uploaded style image persistently
-        self.uploaded_style_image = None
         # Initialize input manager for controller support
         self.input_manager = InputManager()
+        # Initialize input source manager for modular input routing
+        from input_sources import InputSourceManager
+        self.input_source_manager = InputSourceManager()
         self.init_app()
 
     def cleanup(self):
@@ -87,6 +88,8 @@ class App:
         if self.pipeline:
             self._cleanup_pipeline(self.pipeline)
             self.pipeline = None
+        if hasattr(self, 'input_source_manager'):
+            self.input_source_manager.cleanup()
         self._cleanup_temp_files()
         logger.info("App cleanup: Completed application cleanup")
 
@@ -249,7 +252,7 @@ class App:
     
     def _register_routes(self):
         """Register all route modules with dependency injection"""
-        from routes import parameters, controlnet, ipadapter, inference, pipeline_hooks, websocket
+        from routes import parameters, controlnet, ipadapter, inference, pipeline_hooks, websocket, input_sources
         from routes.common.dependencies import get_app_instance as shared_get_app_instance, get_pipeline_class as shared_get_pipeline_class, get_default_settings as shared_get_default_settings, get_available_controlnets as shared_get_available_controlnets
         
         # Create dependency overrides to inject app instance and other dependencies
@@ -266,7 +269,7 @@ class App:
             return AVAILABLE_CONTROLNETS
         
         # Include routers and set up dependency overrides on the main app
-        for router_module in [parameters, controlnet, ipadapter, inference, pipeline_hooks, websocket]:
+        for router_module in [parameters, controlnet, ipadapter, inference, pipeline_hooks, websocket, input_sources]:
             # Include the router
             self.app.include_router(router_module.router)
         
@@ -410,6 +413,9 @@ class App:
                 args_dict['controlnet_config'] = temp_path
                 modified_args = Args(**args_dict)
                 
+                # Load config style images into InputSourceManager before creating pipeline
+                self._load_config_style_images()
+                
                 # Create pipeline
                 pipeline = Pipeline(modified_args, device, torch_dtype, width=self.new_width, height=self.new_height)
                 
@@ -433,6 +439,24 @@ class App:
                 raise e
         
         return Pipeline(self.args, device, torch_dtype, width=self.new_width, height=self.new_height)
+
+    def _load_config_style_images(self):
+        """Load style images from config into InputSourceManager"""
+        if not self.uploaded_controlnet_config:
+            return
+            
+        try:
+            # Load IPAdapter style images from config
+            ipadapters = self.uploaded_controlnet_config.get('ipadapters', [])
+            if ipadapters:
+                first_ipadapter = ipadapters[0]
+                style_image_path = first_ipadapter.get('style_image')
+                if style_image_path:
+                    # Use the config file path as base for relative paths
+                    base_config_path = getattr(self.args, 'controlnet_config', None)
+                    self.input_source_manager.load_config_style_image(style_image_path, base_config_path)
+        except Exception as e:
+            logging.exception(f"_load_config_style_images: Error loading config style images: {e}")
 
     def _cleanup_temp_files(self):
         """Clean up any temporary config files"""
@@ -498,8 +522,11 @@ class App:
         if self.pipeline and hasattr(self.pipeline, 'has_ipadapter'):
             ipadapter_info["enabled"] = self.pipeline.has_ipadapter
         
-        if self.uploaded_style_image:
-            ipadapter_info["has_style_image"] = True
+        # Check if IPAdapter has a style image from InputSourceManager
+        if hasattr(self, 'input_source_manager'):
+            ipadapter_source_info = self.input_source_manager.get_source_info('ipadapter')
+            if ipadapter_source_info.get('has_data', False):
+                ipadapter_info["has_style_image"] = True
             
         return ipadapter_info
 

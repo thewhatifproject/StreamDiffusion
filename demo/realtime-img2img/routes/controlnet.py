@@ -60,6 +60,14 @@ async def upload_controlnet_config(file: UploadFile = File(...), app_instance=De
         app_instance.runtime_controlnet_config = None  # Clear any runtime additions
         app_instance.config_needs_reload = True  # Mark that pipeline needs recreation
         
+        # RESET ALL INPUT SOURCES TO DEFAULTS WHEN NEW CONFIG IS UPLOADED
+        if hasattr(app_instance, 'input_source_manager'):
+            try:
+                app_instance.input_source_manager.reset_to_defaults()
+                logging.info("upload_controlnet_config: Reset all input sources to defaults")
+            except Exception as e:
+                logging.exception(f"upload_controlnet_config: Failed to reset input sources: {e}")
+        
         # FORCE DESTROY ACTIVE PIPELINE TO MAKE CONFIG THE SOURCE OF TRUTH
         if app_instance.pipeline:
             logging.info("upload_controlnet_config: Destroying active pipeline to force config as source of truth")
@@ -471,11 +479,12 @@ async def switch_preprocessor(request: Request, app_instance=Depends(get_app_ins
     """Switch preprocessor for a specific ControlNet"""
     try:
         data = await request.json()
-        controlnet_index = data.get("controlnet_index")
-        preprocessor_name = data.get("preprocessor")
+        # Support both parameter naming conventions for compatibility
+        controlnet_index = data.get("controlnet_index") or data.get("processor_index")
+        preprocessor_name = data.get("preprocessor") or data.get("processor")
         
         if controlnet_index is None or not preprocessor_name:
-            raise HTTPException(status_code=400, detail="Missing controlnet_index or preprocessor parameter")
+            raise HTTPException(status_code=400, detail="Missing controlnet_index/processor_index or preprocessor/processor parameter")
         
         validate_pipeline(app_instance.pipeline, "switch_preprocessor")
         validate_config_mode(app_instance.pipeline, "controlnets")

@@ -6,6 +6,7 @@
   import PreprocessorSelector from './PreprocessorSelector.svelte';
   import PreprocessorParams from './PreprocessorParams.svelte';
   import ControlNetSelector from './ControlNetSelector.svelte';
+  import InputSourceSelector from './InputSourceSelector.svelte';
 
   export let controlnetInfo: any = null;
   export let tIndexList: number[] = [35, 45];
@@ -260,6 +261,30 @@
     preprocessorParams[controlnet_index] = { ...preprocessorParams[controlnet_index], ...parameters };
     console.log('ControlNetConfig: Parameters updated:', { controlnet_index, parameters });
   }
+
+  function handleInputSourceChanged(event: CustomEvent) {
+    const { componentType, componentIndex, sourceType, sourceData } = event.detail;
+    console.log('ControlNetConfig: Input source changed:', event.detail);
+    
+    // Input source changes are UI-only and don't affect pipeline configuration
+    // Don't dispatch controlnetConfigChanged to avoid triggering getSettings()
+    // which would reset UI state like t_index_list sliders and preprocessor selections
+  }
+
+  // Store references to InputSourceSelector components
+  let inputSourceSelectors: { [key: number]: any } = {};
+
+  // Expose reset function for parent components
+  export function resetInputSources() {
+    console.log('ControlNetConfig: resetInputSources called');
+    
+    // Reset all ControlNet input source selectors
+    Object.values(inputSourceSelectors).forEach(selector => {
+      if (selector && selector.resetToDefaults) {
+        selector.resetToDefaults();
+      }
+    });
+  }
   
   // Clear preprocessor state when controlnet info changes (e.g., new YAML uploaded)
   let lastControlNetSignature = '';
@@ -390,6 +415,17 @@
                     controlnetIndex={controlnet.index}
                     currentPreprocessor={currentPreprocessors[controlnet.index] || controlnet.preprocessor || 'passthrough'}
                     on:preprocessorChanged={handlePreprocessorChanged}
+                  />
+                </div>
+                
+                <!-- Input Source Selector -->
+                <div class="border-t border-gray-200 dark:border-gray-600 pt-3">
+                  <h6 class="text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Input Source</h6>
+                  <InputSourceSelector
+                    bind:this={inputSourceSelectors[controlnet.index]}
+                    componentType="controlnet"
+                    componentIndex={controlnet.index}
+                    on:sourceChanged={handleInputSourceChanged}
                   />
                 </div>
                 
