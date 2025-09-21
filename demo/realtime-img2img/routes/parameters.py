@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 import logging
 
-from .common.api_utils import handle_api_request, create_success_response, handle_api_error, validate_pipeline
+from .common.api_utils import handle_api_request, create_success_response, handle_api_error
 from .common.dependencies import get_app_instance
 
 router = APIRouter(prefix="/api", tags=["parameters"])
@@ -15,34 +15,55 @@ async def update_params(request: Request, app_instance=Depends(get_app_instance)
     """Update multiple streaming parameters in a single unified call"""
     try:
         data = await request.json()
+        logging.info(f"update_params: Received data: {data}")
+        logging.info(f"update_params: Pipeline exists: {app_instance.pipeline is not None}")
         
         # Allow updating resolution even when pipeline is not initialized.
         # We save the new values so they take effect on the next stream start.
-        if "resolution" in data and not app_instance.pipeline:
+        if "resolution" in data:
+            if not app_instance.pipeline:
+                logging.info("update_params: No pipeline exists, updating resolution directly")
+            else:
+                logging.info("update_params: Pipeline exists, resolution update may be handled differently")
+        
+        if "resolution" in data:
             resolution = data["resolution"]
             if isinstance(resolution, dict) and "width" in resolution and "height" in resolution:
                 width, height = int(resolution["width"]), int(resolution["height"])
-                app_instance.new_width = width
-                app_instance.new_height = height
+                
+                # Call the proper pipeline recreation method
+                app_instance._update_resolution(width, height)
+                
+                message = f"Resolution updated to {width}x{height} and pipeline recreated successfully"
+                logging.info(f"update_params: {message}")
+                return JSONResponse({
+                    "status": "success", 
+                    "message": message
+                })
             elif isinstance(resolution, str):
                 # Handle string format like "512x768 (2:3)" or "512x768"
                 resolution_part = resolution.split(' ')[0]
+                logging.info(f"update_params: Parsing resolution string: {resolution} -> {resolution_part}")
                 try:
                     width, height = map(int, resolution_part.split('x'))
-                    app_instance.new_width = width
-                    app_instance.new_height = height
+                    logging.info(f"update_params: Parsed width={width}, height={height}")
+                    
+                    # Call the proper pipeline recreation method
+                    app_instance._update_resolution(width, height)
+                    
+                    message = f"Resolution updated to {width}x{height} and pipeline recreated successfully"
+                    logging.info(f"update_params: {message}")
+                    return JSONResponse({
+                        "status": "success", 
+                        "message": message
+                    })
                 except ValueError:
                     raise HTTPException(status_code=400, detail="Invalid resolution format")
             else:
                 raise HTTPException(status_code=400, detail="Resolution must be {width: int, height: int} or 'widthxheight' string")
-            return JSONResponse({
-                "status": "success",
-                "message": f"Updated resolution to {app_instance.new_width}x{app_instance.new_height} (will apply on next stream start)"
-            })
 
-        if not app_instance.pipeline:
-            raise HTTPException(status_code=400, detail="Pipeline is not initialized")
-
+        # No pipeline validation needed - AppState updates work before pipeline creation
+        
         # Update parameters that exist in the data
         params = {}
         
@@ -62,7 +83,14 @@ async def update_params(request: Request, app_instance=Depends(get_app_instance)
                 raise HTTPException(status_code=400, detail="t_index_list must be a list of integers")
 
         if params:
-            app_instance.pipeline.update_stream_params(**params)
+            # Update AppState as single source of truth (works before pipeline creation)
+            for param_name, param_value in params.items():
+                app_instance.app_state.update_parameter(param_name, param_value)
+            
+            # Sync to pipeline if active (for real-time updates)
+            if app_instance.pipeline and hasattr(app_instance.pipeline, 'stream'):
+                app_instance._sync_appstate_to_pipeline()
+            
             return JSONResponse({
                 "status": "success",
                 "message": f"Updated parameters: {list(params.keys())}",
@@ -88,10 +116,16 @@ async def _update_single_parameter(
     """Generic function to update a single parameter"""
     try:
         data = await handle_api_request(request, operation_name, [parameter_name])
-        validate_pipeline(app_instance.pipeline, operation_name)
+        # No pipeline validation needed - AppState updates work before pipeline creation
         
         value = value_converter(data[parameter_name])
-        app_instance.pipeline.update_stream_params(**{parameter_name: value})
+        
+        # Update AppState as single source of truth (works before pipeline creation)
+        app_instance.app_state.update_parameter(parameter_name, value)
+        
+        # Sync to pipeline if active (for real-time updates)
+        if app_instance.pipeline and hasattr(app_instance.pipeline, 'stream'):
+            app_instance._sync_appstate_to_pipeline()
         
         return create_success_response(f"Updated {parameter_name} to {value}", **{parameter_name: value})
         
@@ -132,7 +166,7 @@ async def update_blending(request: Request, app_instance=Depends(get_app_instanc
     try:
         data = await request.json()
         
-        validate_pipeline(app_instance.pipeline, "update_blending")
+        # No pipeline validation needed - AppState updates work before pipeline creation
         
         params = {}
         updated_types = []
@@ -184,8 +218,15 @@ async def update_blending(request: Request, app_instance=Depends(get_app_instanc
         if not params:
             raise HTTPException(status_code=400, detail="No valid blending parameters provided")
 
-        # Apply the update
-        result = app_instance.pipeline.update_stream_params(**params)
+        # Update AppState as single source of truth
+        if "prompt_list" in params:
+            app_instance.app_state.prompt_blending = params["prompt_list"]
+        if "seed_list" in params:
+            app_instance.app_state.seed_blending = params["seed_list"]
+        
+        # Sync to pipeline if active
+        if app_instance.pipeline and hasattr(app_instance.pipeline, 'stream'):
+            app_instance._sync_appstate_to_pipeline()
         
         return create_success_response(f"Updated {' and '.join(updated_types)} blending", updated_types=updated_types)
         
@@ -203,29 +244,16 @@ async def update_prompt_weight(request: Request, app_instance=Depends(get_app_in
         if index is None or weight is None:
             raise HTTPException(status_code=400, detail="Missing index or weight parameter")
         
-        validate_pipeline(app_instance.pipeline, "update_prompt_weight")
+        # No pipeline validation needed - AppState updates work before pipeline creation
         
-        # Get current prompt blending configuration via unified getter, fallback to uploaded config
-        state = app_instance.pipeline.stream.get_stream_state()
-        current_prompts = state.get('prompt_list') or app_instance._normalize_prompt_config(app_instance.uploaded_controlnet_config)
-            
-        if current_prompts and index < len(current_prompts):
-            # Create updated prompt list with new weight
-            updated_prompts = list(current_prompts)  # Make a copy
-            updated_prompts[index] = (updated_prompts[index][0], float(weight))
-            
-            # Use the same update method as the main blending endpoint
-            params = {
-                "prompt_list": updated_prompts,
-                "prompt_interpolation_method": "slerp"  # Default method
-            }
-            
-            # Apply the update using the working method
-            result = app_instance.pipeline.update_stream_params(**params)
-            
-            return create_success_response(f"Updated prompt weight {index} to {weight}")
-        else:
-            raise HTTPException(status_code=400, detail=f"Invalid prompt index {index}")
+        # Update AppState as single source of truth
+        app_instance.app_state.update_parameter(f"prompt_weight_{index}", float(weight))
+        
+        # Sync to pipeline if active
+        if app_instance.pipeline and hasattr(app_instance.pipeline, 'stream'):
+            app_instance._sync_appstate_to_pipeline()
+        
+        return create_success_response(f"Updated prompt weight {index} to {weight}")
         
     except Exception as e:
         raise handle_api_error(e, "update_prompt_weight")
@@ -241,29 +269,16 @@ async def update_seed_weight(request: Request, app_instance=Depends(get_app_inst
         if index is None or weight is None:
             raise HTTPException(status_code=400, detail="Missing index or weight parameter")
         
-        validate_pipeline(app_instance.pipeline, "update_seed_weight")
+        # No pipeline validation needed - AppState updates work before pipeline creation
         
-        # Get current seed blending configuration via unified getter, fallback to uploaded config
-        state = app_instance.pipeline.stream.get_stream_state()
-        current_seeds = state.get('seed_list') or app_instance._normalize_seed_config(app_instance.uploaded_controlnet_config)
-            
-        if current_seeds and index < len(current_seeds):
-            # Create updated seed list with new weight
-            updated_seeds = list(current_seeds)  # Make a copy
-            updated_seeds[index] = (updated_seeds[index][0], float(weight))
-            
-            # Use the same update method as the main blending endpoint
-            params = {
-                "seed_list": updated_seeds,
-                "seed_interpolation_method": "linear"  # Default method
-            }
-            
-            # Apply the update using the working method
-            result = app_instance.pipeline.update_stream_params(**params)
-            
-            return create_success_response(f"Updated seed weight {index} to {weight}")
-        else:
-            raise HTTPException(status_code=400, detail=f"Invalid seed index {index}")
+        # Update AppState as single source of truth
+        app_instance.app_state.update_parameter(f"seed_weight_{index}", float(weight))
+        
+        # Sync to pipeline if active
+        if app_instance.pipeline and hasattr(app_instance.pipeline, 'stream'):
+            app_instance._sync_appstate_to_pipeline()
+        
+        return create_success_response(f"Updated seed weight {index} to {weight}")
         
     except Exception as e:
         raise handle_api_error(e, "update_seed_weight")
