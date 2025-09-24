@@ -1,0 +1,31 @@
+# --- TensorRT runtime (CUDA 12) ---
+tensorrt-cu12==10.13.3.9
+tensorrt-lean-cu12==10.13.3.9
+tensorrt-dispatch-cu12==10.13.3.9
+
+# --- ONNX toolchain ---
+onnx==1.18.0
+onnxruntime-gpu==1.22.0
+cuda-python>=12.8,<12.9
+protobuf>=3.20.2,<5
+
+# --- Diffusion/ML stack ---
+diffusers>=0.31.0
+transformers>=4.44.0
+accelerate>=0.33.0
+peft==0.17.1
+huggingface_hub==0.35.0
+colored
+fire
+omegaconf
+
+# --- App/serving & utils ---
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+Pillow==10.5.0
+compel==2.0.2
+controlnet-aux==0.0.7
+markdown2
+PyYAML
+python-multipart
+pygame
