@@ -99,16 +99,30 @@ echo "Attivo '$ENV_NAME' e aggiorno pip..."
 source "$MINICONDA_DIR/bin/activate" "$ENV_NAME"
 python -m pip install --upgrade pip
 
-# --- UNINSTALL PREVENTIVO: rimuovi eventuale onnxruntime (CPU) ---
-pip uninstall -y onnxruntime onnxruntime-silicon || true
+# ============================
+#  HARD CLEAN & INSTALL STACK
+# ============================
+
+# 0) Rimuovi eventuali pacchetti conda ORT (CPU/GPU) nell'env per evitare lib vecchie
+conda remove -n "$ENV_NAME" -y onnxruntime onnxruntime-gpu onnxruntime-directml || true
+
+# 1) Uninstall preventivo pip (CPU/GPU)
+pip uninstall -y onnxruntime onnxruntime-gpu onnxruntime-directml onnxruntime-silicon || true
+
+# 2) Ripulisci variabili che potrebbero puntare a lib ORT di sistema
+unset LD_PRELOAD || true
+if [[ "${LD_LIBRARY_PATH-}" == *"onnxruntime"* ]]; then
+  export LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v onnxruntime | paste -sd: -)
+fi
+export PYTHONNOUSERSITE=1
 
 echo "Installo pacchetti pip base (Torch CUDA 12.8, ONNX tools)..."
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 python -m pip install --extra-index-url https://pypi.ngc.nvidia.com \
   onnx-graphsurgeon==0.5.8 polygraphy==0.49.14
 
-# --- Installa toolchain ONNX/ORT corretta (GPU, IR>=11) ---
-python -m pip install --upgrade --force-reinstall \
+# 3) Installa toolchain ONNX/ORT corretta (GPU, IR>=11)
+python -m pip install --no-cache-dir --upgrade --force-reinstall \
   onnx==1.18.0 onnxruntime-gpu==1.22.0 "protobuf>=3.20.2,<5" "cuda-python>=12.8,<12.9"
 
 echo "Installazione requirements dal repository clonato..."
@@ -118,25 +132,33 @@ echo "Installazione del pacchetto StreamDiffusion dal sorgente (editable, extras
 cd "$REPO_DIR"
 python -m pip install -e .[all]
 
-# --- UNINSTALL PREVENTIVO (bis): se il setup avesse rimesso ORT CPU, rimuovilo e ripristina GPU ---
+# 4) Safety net: se il setup avesse reintrodotto ORT CPU, rimuovi e ripristina GPU
 pip uninstall -y onnxruntime || true
-python -m pip install --upgrade --force-reinstall onnxruntime-gpu==1.22.0
+python -m pip install --no-cache-dir --upgrade --force-reinstall onnxruntime-gpu==1.22.0
 
-# --- Sanity check: ORT deve supportare IR>=11 ---
+# 5) Sanity check avanzato: versioni, providers e modulo pybind
 python - <<'PY'
-import onnx, onnxruntime as ort, sys
+import sys, onnx, onnxruntime as ort
 print("onnx:", onnx.__version__)
 print("onnxruntime:", ort.__version__)
+print("available providers:", ort.get_available_providers())
+try:
+    import onnxruntime.capi._pybind_state as C
+    print("pybind module path:", C.__file__)
+except Exception as e:
+    print("pybind path err:", e)
+
 from onnx import helper
 m = helper.make_model(helper.make_graph([], "g", [], []))
 m.ir_version = 11
 try:
-    ort.InferenceSession(m.SerializeToString())
-    print("OK: onnxruntime supporta IR>=11")
+    sess = ort.InferenceSession(m.SerializeToString(), providers=["CUDAExecutionProvider","CPUExecutionProvider"])
+    print("OK: onnxruntime supporta IR>=11 (session created)")
 except Exception as e:
-    print("ERRORE ORT:", e)
-    sys.exit(1)
+    print("ERRORE ORT:", e); sys.exit(1)
 PY
+
+# ============================
 
 echo "Imposto permessi ed eseguo lo start.sh in altra shell..."
 chmod +x "$REPO_DIR/mirror/start.sh" || true
