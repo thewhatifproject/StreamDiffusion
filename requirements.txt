@@ -29,4 +29,3 @@ markdown2
 PyYAML
 python-multipart
 pygame
-#"diffusers-ipadapter @ git+https://github.com/livepeer/Diffusers_IPAdapter.git@405f87da42932e30bd55ee8dca3ce502d7834a99"

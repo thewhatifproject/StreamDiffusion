@@ -3,6 +3,12 @@
 
 set -euo pipefail
 
+ENV_NAME="streamdiffusion"        # <-- ambiente conda dedicato
+REPO_URL="https://github.com/thewhatifproject/StreamDiffusion.git"
+REPO_DIR="/StreamDiffusion"
+MINICONDA_DIR="/root/miniconda3"
+LOG_FILE="/var/log/streamdiffusion_start.log"
+
 # lsof -ti :1234 | xargs -r kill -9
 
 # Verifica che lo script sia eseguito come root
@@ -31,31 +37,29 @@ curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.s
 apt-get install -y git-lfs
 git lfs install
 
-echo "Clono il repository in /StreamDiffusion..."
+echo "Clono il repository in $REPO_DIR ..."
 cd /
-if [ -d "/StreamDiffusion/.git" ]; then
-    echo "/StreamDiffusion esiste già, eseguo pull..."
-    cd /StreamDiffusion
+if [ -d "$REPO_DIR/.git" ]; then
+    echo "$REPO_DIR esiste già, eseguo pull..."
+    cd "$REPO_DIR"
     git pull --rebase
 else
-    git clone https://github.com/thewhatifproject/StreamDiffusion.git /StreamDiffusion
-    cd /StreamDiffusion
+    git clone "$REPO_URL" "$REPO_DIR"
+    cd "$REPO_DIR"
 fi
-
-# Recupero eventuali asset LFS
 git lfs pull || true
 
-echo "Installazione di Miniconda in /root/miniconda3..."
-mkdir -p /root/miniconda3
-wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /root/miniconda3/miniconda.sh
-bash /root/miniconda3/miniconda.sh -b -u -p /root/miniconda3
-rm /root/miniconda3/miniconda.sh
+echo "Installazione di Miniconda in $MINICONDA_DIR ..."
+mkdir -p "$MINICONDA_DIR"
+wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O "$MINICONDA_DIR/miniconda.sh"
+bash "$MINICONDA_DIR/miniconda.sh" -b -u -p "$MINICONDA_DIR"
+rm "$MINICONDA_DIR/miniconda.sh"
 
-# Aggiorna il PATH per rendere disponibili i comandi conda
-export PATH="/root/miniconda3/bin:$PATH"
+# Rende disponibili i comandi conda
+export PATH="$MINICONDA_DIR/bin:$PATH"
 
-echo "Inizializzazione di conda (shells)..."
-source /root/miniconda3/bin/activate
+echo "Inizializzazione di conda per le shell..."
+source "$MINICONDA_DIR/bin/activate"
 conda init --all || true
 
 echo "Config base conda (show_channel_urls, priority strict)..."
@@ -63,68 +67,62 @@ conda config --system --set show_channel_urls true
 conda config --system --set channel_priority strict
 conda config --system --set auto_update_conda false
 
-# --- Gestione ToS / Canali ---
-echo "Accettazione ToS se supportata, altrimenti switch a conda-forge..."
+echo "Aggiorno 'conda' nel base usando SOLO conda-forge (niente ToS defaults)..."
+conda install -n base -y conda -c conda-forge --override-channels || true
+
+echo "Provo ad accettare i Terms of Service dei canali Anaconda..."
 tos_supported=0
 if conda help tos >/dev/null 2>&1; then
   tos_supported=1
-  # Prova ad accettare i ToS per i canali Anaconda
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r    || true
 else
-  echo "[AVVISO] La versione di conda non supporta 'conda tos'. Userò solo conda-forge."
+  echo "[AVVISO] La versione di conda in uso non fornisce 'conda tos'."
 fi
 
-# Se non supporta tos (o vuoi evitare repo.anaconda.com), forza canali = solo conda-forge
+# Se non posso accettare i ToS, uso SOLO conda-forge per evitare repo.anaconda.com
 if [ "$tos_supported" -eq 0 ]; then
-  # rimuovi TUTTI i canali e aggiungi solo conda-forge
+  echo "Switch ai canali conda-forge (evito repo.anaconda.com)..."
   conda config --system --remove-key channels || true
   conda config --system --add channels conda-forge
   conda config --system --set channel_priority strict
 fi
 
-echo "Creazione dell'ambiente 'whatifmirror' con Python 3.10..."
+echo "Creazione dell'ambiente '$ENV_NAME' con Python 3.10..."
 if [ "$tos_supported" -eq 1 ]; then
-  # usa i canali configurati (defaults/forge a seconda di come sei messo)
-  conda create -n whatifmirror python=3.10 -y
+  conda create -n "$ENV_NAME" python=3.10 -y
 else
-  # forza SOLO conda-forge per evitare repo.anaconda.com
-  conda create -n whatifmirror python=3.10 -y -c conda-forge --override-channels
+  conda create -n "$ENV_NAME" python=3.10 -y -c conda-forge --override-channels
 fi
 
-echo "Attivazione dell'ambiente 'whatifmirror' e aggiornamento di pip..."
-source /root/miniconda3/bin/activate whatifmirror
+echo "Attivo '$ENV_NAME' e aggiorno pip..."
+source "$MINICONDA_DIR/bin/activate" "$ENV_NAME"
 python -m pip install --upgrade pip
 
-echo "Installazione dei pacchetti pip di base (Torch CUDA 12.8, ONNX tools)..."
+echo "Installo pacchetti pip base (Torch CUDA 12.8, ONNX tools)..."
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-
 python -m pip install --extra-index-url https://pypi.ngc.nvidia.com \
   onnx-graphsurgeon==0.5.8 polygraphy==0.49.14
 
 echo "Installazione requirements dal repository clonato..."
-python -m pip install -r /StreamDiffusion/requirements.txt
+python -m pip install -r "$REPO_DIR/requirements.txt"
 
 echo "Installazione del pacchetto StreamDiffusion dal sorgente..."
-cd /StreamDiffusion
-# Se setup.py non serve, puoi sostituire con: python -m pip install -e .[all]
-python setup.py develop easy_install streamdiffusion[all] || true
+cd "$REPO_DIR"
+python -m pip install -e .[all]
 
-echo "Imposto permessi di esecuzione sugli script del progetto..."
-chmod +x /StreamDiffusion/mirror/start.sh || true
+echo "Imposto permessi ed eseguo lo start.sh in altra shell..."
+chmod +x "$REPO_DIR/mirror/start.sh" || true
+nohup bash -lc "source $MINICONDA_DIR/bin/activate $ENV_NAME && $REPO_DIR/mirror/start.sh" \
+  >"$LOG_FILE" 2>&1 & disown || true
+echo "Log: $LOG_FILE"
 
-echo "Pulizia della cache pip e apt..."
+echo "Pulizia cache pip e apt..."
 pip cache purge || true
 apt-get clean
 
-echo "Abilito l'attivazione automatica dell'ambiente conda nelle nuove sessioni..."
-grep -qxF 'conda activate whatifmirror' /root/.bashrc || echo "conda activate whatifmirror" >> /root/.bashrc
+echo "Abilito l'attivazione automatica dell'ambiente conda '$ENV_NAME' nelle nuove sessioni..."
+grep -qxF "conda activate $ENV_NAME" /root/.bashrc || echo "conda activate $ENV_NAME" >> /root/.bashrc
 
-echo "Avvio dello start.sh in un'altra shell (sessione separata)...
-- log: /var/log/streamdiffusion_start.log"
-# Avvia start.sh in una nuova shell di login con l'ambiente conda attivo, in background
-nohup bash -lc 'source /root/miniconda3/bin/activate whatifmirror && /StreamDiffusion/mirror/start.sh' \
-  >/var/log/streamdiffusion_start.log 2>&1 & disown || true
-
-echo "Setup completato. Avvio di una shell interattiva nell'ambiente 'whatifmirror'..."
+echo "Setup completato. Avvio di una shell interattiva nell'ambiente '$ENV_NAME'..."
 exec bash --login
