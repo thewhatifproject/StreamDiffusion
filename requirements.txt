@@ -22,7 +22,7 @@ omegaconf
 # --- App/serving & utils ---
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
-Pillow==10.5.0
+Pillow==11.3.0
 compel==2.0.2
 controlnet-aux==0.0.7
 markdown2
