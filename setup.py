@@ -6,7 +6,7 @@ from setuptools import find_packages, setup
 _deps = [
     "torch",
     "xformers",
-    "diffusers>=0.31.0",
+    "diffusers",
     "transformers",
     "accelerate",
     "fire",
@@ -29,7 +29,7 @@ extras = {}
 extras["torch"] = deps_list("torch", "accelerate")
 extras["tensorrt"] = deps_list("protobuf", "cuda-python", "onnx", "onnxruntime", "colored")
 
-extras["dev"] = extras["xformers"] + extras["torch"] + extras["tensorrt"]
+extras["all"] = extras["torch"] + extras["tensorrt"]
 
 install_requires = [
     deps["fire"],
