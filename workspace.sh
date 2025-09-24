@@ -99,17 +99,44 @@ echo "Attivo '$ENV_NAME' e aggiorno pip..."
 source "$MINICONDA_DIR/bin/activate" "$ENV_NAME"
 python -m pip install --upgrade pip
 
+# --- UNINSTALL PREVENTIVO: rimuovi eventuale onnxruntime (CPU) ---
+pip uninstall -y onnxruntime onnxruntime-silicon || true
+
 echo "Installo pacchetti pip base (Torch CUDA 12.8, ONNX tools)..."
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 python -m pip install --extra-index-url https://pypi.ngc.nvidia.com \
   onnx-graphsurgeon==0.5.8 polygraphy==0.49.14
 
+# --- Installa toolchain ONNX/ORT corretta (GPU, IR>=11) ---
+python -m pip install --upgrade --force-reinstall \
+  onnx==1.18.0 onnxruntime-gpu==1.22.0 "protobuf>=3.20.2,<5" "cuda-python>=12.8,<12.9"
+
 echo "Installazione requirements dal repository clonato..."
 python -m pip install -r "$REPO_DIR/requirements.txt"
 
-echo "Installazione del pacchetto StreamDiffusion dal sorgente..."
+echo "Installazione del pacchetto StreamDiffusion dal sorgente (editable, extras all)..."
 cd "$REPO_DIR"
 python -m pip install -e .[all]
+
+# --- UNINSTALL PREVENTIVO (bis): se il setup avesse rimesso ORT CPU, rimuovilo e ripristina GPU ---
+pip uninstall -y onnxruntime || true
+python -m pip install --upgrade --force-reinstall onnxruntime-gpu==1.22.0
+
+# --- Sanity check: ORT deve supportare IR>=11 ---
+python - <<'PY'
+import onnx, onnxruntime as ort, sys
+print("onnx:", onnx.__version__)
+print("onnxruntime:", ort.__version__)
+from onnx import helper
+m = helper.make_model(helper.make_graph([], "g", [], []))
+m.ir_version = 11
+try:
+    ort.InferenceSession(m.SerializeToString())
+    print("OK: onnxruntime supporta IR>=11")
+except Exception as e:
+    print("ERRORE ORT:", e)
+    sys.exit(1)
+PY
 
 echo "Imposto permessi ed eseguo lo start.sh in altra shell..."
 chmod +x "$REPO_DIR/mirror/start.sh" || true
